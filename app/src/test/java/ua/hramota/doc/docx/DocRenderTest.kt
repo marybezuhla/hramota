@@ -46,8 +46,11 @@ class DocRenderTest {
         for (name in listOf("02-paragraphs", "03-lists", "04-tables", "05-flow")) {
             val doc = File(dir("docs-doc"), "$name.doc").inputStream().use { WordBinaryReader.read(it) }
             val docx = File(dir("docs"), "$name.docx").inputStream().use { DocxReader.read(it) }
-            fun words(d: DocxDocument) = runBlocking { val p = DocxPages(d, fonts); (0 until p.pageCount).joinToString(" ") { p.pageText(it) } }
-                .split(Regex("\\s+")).filter { it.isNotBlank() }
+            fun words(d: DocxDocument): List<String> {
+                val p = DocxPages(d, fonts)
+                val text = runBlocking { (0 until p.pageCount).map { p.pageText(it) } }.joinToString(" ")
+                return text.split(Regex("\\s+")).filter { it.isNotBlank() }
+            }
             assertEquals(name, words(docx), words(doc))
         }
     }
