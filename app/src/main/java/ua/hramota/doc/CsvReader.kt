@@ -104,7 +104,8 @@ object CsvReader {
             }
             i++
         }
-        if (cell.isNotEmpty() || row.isNotEmpty()) endRow()
+        // The last line, unless reading stopped at a limit mid-row
+        if (i >= text.length && (cell.isNotEmpty() || row.isNotEmpty())) endRow()
         return rows
     }
 
