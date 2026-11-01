@@ -297,4 +297,28 @@ class ScreensTest {
     @Test fun homeShelfWood() = shot("12-home-shelf-wood") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, woodShelf = true, startOnShelf = true, now = now)
     }
+
+    // A made-up book: chapters, an epigraph, styles and a poem
+    private fun book(): ua.hramota.doc.book.Book {
+        val K = ua.hramota.doc.book.BookBlock.Kind
+        fun t(text: String, kind: ua.hramota.doc.book.BookBlock.Kind = K.PARAGRAPH, vararg spans: ua.hramota.doc.book.Span) = ua.hramota.doc.book.BookBlock.Text(text, spans.toList(), kind)
+        val p1 = "Над річкою стояв старий млин, і кожного ранку мірошник відчиняв його важкі двері ще до схід сонця."
+        return ua.hramota.doc.book.Book("Казка про млин", "Олена Вигадана", listOf(
+            t("Розділ перший", K.HEADING1),
+            t("Хто рано встає, тому й бог дає.", K.QUOTE),
+            t(p1, K.PARAGRAPH, ua.hramota.doc.book.Span(p1.indexOf("старий млин"), p1.indexOf("старий млин") + 11, italic = true)),
+            t("Вода шуміла під колесом, а в повітрі пахло борошном і свіжим хлібом. Діти з усього села прибігали подивитися, як крутяться жорна, і мірошник щоразу розповідав їм нову історію."),
+            t("— Колись, — казав він, — цей млин молов не зерно, а зорі.", K.PARAGRAPH, ua.hramota.doc.book.Span(0, 0)),
+            t("* * *", K.SUBTITLE),
+            t("Тихо крутиться колесо,", K.POEM), t("тихо ллється вода,", K.POEM), t("і над млином до ранку", K.POEM), t("світить зірка руда.", K.POEM),
+            t("Розділ другий", K.HEADING1),
+            t("Наступного дня мірошник прокинувся раніше, ніж звичайно."),
+        ), emptyMap(), null)
+    }
+    @Test fun viewerBook() = shot("13-viewer-book") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}) }
+    @Config(qualifiers = "+night")
+    @Test fun viewerBookDark() = shot("13-viewer-book-dark") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}) }
+    @Config(fontScale = 1.6f)
+    @Test fun viewerBookLargeFont() = shot("13-viewer-book-large-font") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}) }
+    @Test fun viewerBookContents() = shot("13-viewer-book-contents") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, startInOverview = true, bookmarks = setOf(3)) }
 }

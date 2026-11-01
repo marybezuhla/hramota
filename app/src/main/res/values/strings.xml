@@ -139,4 +139,6 @@
     <string name="more">More</string>
     <string name="settings_wood">Wooden bookshelf</string>
     <string name="settings_wood_hint">Covers on wooden shelves, like the classic book app</string>
+    <string name="book_contents">Contents</string>
+    <string name="book_bookmarks">Bookmarks</string>
 </resources>

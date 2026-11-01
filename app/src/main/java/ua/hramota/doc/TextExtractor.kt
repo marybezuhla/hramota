@@ -16,14 +16,15 @@ data class Paragraph(val text: String, val heading: Int = 0)
 enum class Format(val label: String) {
     PDF("PDF"), DOCX("DOCX"), ODT("ODT"), TXT("TXT"), MARKDOWN("MD"),
     DOC("DOC"), XLSX("XLSX"), XLS("XLS"), ODS("ODS"), CSV("CSV"),
-    PPTX("PPTX"), PPT("PPT"), ODP("ODP"), RTF("RTF"), UNKNOWN("");
+    PPTX("PPTX"), PPT("PPT"), ODP("ODP"), RTF("RTF"), EPUB("EPUB"), FB2("FB2"), UNKNOWN("");
 
     /** Formats whose text can be read and compared now. */
-    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV || this == XLSX || this == XLS || this == PPTX || this == PPT
+    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV || this == XLSX || this == XLS || this == PPTX || this == PPT || this == EPUB || this == FB2
 
     companion object {
         fun detect(name: String?, mime: String?): Format {
             val ext = name?.substringAfterLast('.', "")?.lowercase().orEmpty()
+            if (name?.lowercase()?.endsWith(".fb2.zip") == true) return FB2
             byExtension[ext]?.let { return it }
             return when (mime) {
                 "application/pdf" -> PDF
@@ -40,6 +41,8 @@ enum class Format(val label: String) {
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> PPTX
                 "application/vnd.ms-powerpoint" -> PPT
                 "application/vnd.oasis.opendocument.presentation" -> ODP
+                "application/epub+zip" -> EPUB
+                "application/x-fictionbook+xml", "application/x-fictionbook", "text/fb2+xml" -> FB2
                 else -> UNKNOWN
             }
         }
@@ -47,7 +50,7 @@ enum class Format(val label: String) {
         private val byExtension = mapOf(
             "pdf" to PDF, "docx" to DOCX, "odt" to ODT, "txt" to TXT, "md" to MARKDOWN, "markdown" to MARKDOWN,
             "doc" to DOC, "rtf" to RTF, "xlsx" to XLSX, "xls" to XLS, "ods" to ODS, "csv" to CSV, "tsv" to CSV,
-            "pptx" to PPTX, "ppt" to PPT, "odp" to ODP,
+            "pptx" to PPTX, "ppt" to PPT, "odp" to ODP, "epub" to EPUB, "fb2" to FB2,
         )
     }
 }
@@ -104,6 +107,8 @@ object TextExtractor {
         Format.XLS -> sheetText(ua.hramota.doc.sheet.XlsReader.read(input))
         Format.PPTX -> ua.hramota.doc.slides.PptxReader.read(input, withMedia = false).paragraphs { "#$it" }
         Format.PPT -> ua.hramota.doc.slides.PptReader.read(input).paragraphs { "#$it" }
+        Format.EPUB -> ua.hramota.doc.book.EpubReader.read(input, withImages = false).paragraphs()
+        Format.FB2 -> ua.hramota.doc.book.Fb2Reader.read(input, withImages = false).paragraphs()
         else -> throw IOException("No text reader for $format")
     }
 
