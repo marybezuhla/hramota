@@ -174,7 +174,14 @@ class ScreensTest {
     }
 
     @Test fun viewerPages() = shot("04-viewer-docx-pages") {
-        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {})
+        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, bookmarks = setOf(0))
+    }
+    @Test fun viewerOverview() = shot("04-viewer-overview") {
+        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, bookmarks = setOf(0, 3), startInOverview = true)
+    }
+    @Config(qualifiers = "+night")
+    @Test fun viewerOverviewDark() = shot("04-viewer-overview-dark") {
+        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, bookmarks = setOf(2), startInOverview = true)
     }
     @Config(qualifiers = "+night")
     @Test fun viewerPagesDark() = shot("04-viewer-docx-pages-dark") {

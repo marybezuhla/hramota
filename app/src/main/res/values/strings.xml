@@ -21,6 +21,12 @@
     <string name="simplified_note">Simplified view: text only. Exact page layout is coming.</string>
     <string name="mode_reading">Reading</string>
     <string name="mode_pages">Pages</string>
+    <string name="overview">Page overview</string>
+    <string name="overview_all">All pages (%1$d)</string>
+    <string name="overview_bookmarks">Bookmarks (%1$d)</string>
+    <string name="overview_no_bookmarks">No bookmarks yet. Tap the ribbon at the top to bookmark the page you are on.</string>
+    <string name="bookmark_add">Bookmark this page</string>
+    <string name="bookmark_remove">Remove bookmark</string>
     <string name="page_of">Page %1$d of %2$d</string>
     <string name="compare_title">Compare versions</string>
     <string name="compare_older">Earlier</string>

@@ -21,6 +21,12 @@
     <string name="simplified_note">Спрощений перегляд: лише текст. Точний вигляд сторінок — у роботі.</string>
     <string name="mode_reading">Читання</string>
     <string name="mode_pages">Сторінки</string>
+    <string name="overview">Огляд сторінок</string>
+    <string name="overview_all">Усі сторінки (%1$d)</string>
+    <string name="overview_bookmarks">Закладки (%1$d)</string>
+    <string name="overview_no_bookmarks">Закладок поки немає. Торкніться стрічки вгорі, щоб додати закладку на сторінку, яку читаєте.</string>
+    <string name="bookmark_add">Додати закладку</string>
+    <string name="bookmark_remove">Прибрати закладку</string>
     <string name="page_of">Сторінка %1$d з %2$d</string>
     <string name="compare_title">Порівняння версій</string>
     <string name="compare_older">Попередня</string>

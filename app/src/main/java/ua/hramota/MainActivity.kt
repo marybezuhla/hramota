@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.ui.HomeScreen
 import ua.hramota.ui.HramotaTheme
@@ -50,8 +51,9 @@ class MainActivity : ComponentActivity() {
                         onOpenFile = { pick.launch(arrayOf("*/*")) },
                         onCompare = { comparing = true; compareFirst = null; pick.launch(arrayOf("*/*")) },
                         onOpenRecent = { openViewer(Uri.parse(it.uri), it.name) },
-                        onRemove = { recents.remove(it.uri) },
-                        onClear = { recents.clear() },
+                        // Forgetting a file also forgets its bookmarks
+                        onRemove = { recents.remove(it.uri); Bookmarks(applicationContext).remove(it.uri) },
+                        onClear = { recents.clear(); Bookmarks(applicationContext).clearAll() },
                     )
                 }
             }

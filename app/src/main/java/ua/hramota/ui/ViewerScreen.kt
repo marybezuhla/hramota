@@ -19,7 +19,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -58,11 +64,37 @@ sealed interface ViewerState {
 }
 
 @Composable
-fun ViewerScreen(name: String, state: ViewerState, onBack: () -> Unit, startInReading: Boolean = false) {
+fun ViewerScreen(
+    name: String,
+    state: ViewerState,
+    onBack: () -> Unit,
+    startInReading: Boolean = false,
+    bookmarks: Set<Int> = emptySet(),
+    onToggleBookmark: (Int) -> Unit = {},
+    startInOverview: Boolean = false,
+) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
+    var overview by rememberSaveable { mutableStateOf(startInOverview) }
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val current by remember { derivedStateOf { list.firstVisibleItemIndex } }
+    BackHandler(enabled = overview) { overview = false }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        TopBar(title = name, onBack = onBack) {
-            if (state is ViewerState.Paged && state.reading != null) {
+        TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
+            if (state is ViewerState.Paged && !reading) {
+                if (!overview) IconButton(onClick = { onToggleBookmark(current) }) {
+                    val marked = current in bookmarks
+                    Icon(
+                        if (marked) AppIcons.Bookmark else AppIcons.BookmarkOutline,
+                        contentDescription = stringResource(if (marked) R.string.bookmark_remove else R.string.bookmark_add),
+                        tint = if (marked) MaterialTheme.colorScheme.secondary else LocalContentColor.current,
+                    )
+                }
+                IconButton(onClick = { overview = !overview }) {
+                    Icon(AppIcons.Overview, contentDescription = stringResource(R.string.overview), tint = if (overview) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                }
+            }
+            if (state is ViewerState.Paged && state.reading != null && !overview) {
                 TextButton(onClick = { reading = !reading }) {
                     Text(stringResource(if (reading) R.string.mode_pages else R.string.mode_reading))
                 }
@@ -80,8 +112,14 @@ fun ViewerScreen(name: String, state: ViewerState, onBack: () -> Unit, startInRe
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state)
-                is ViewerState.Paged -> if (reading && state.reading != null) TextDocument(ViewerState.Text(state.reading, Format.DOCX), note = false)
-                    else PageDocument(state.pages)
+                is ViewerState.Paged -> when {
+                    reading && state.reading != null -> TextDocument(ViewerState.Text(state.reading, Format.DOCX), note = false)
+                    overview -> PageOverview(state.pages, bookmarks, current) { page ->
+                        overview = false
+                        scope.launch { list.scrollToItem(page) }
+                    }
+                    else -> ZoomablePages(state.pages, list, bookmarks)
+                }
             }
         }
     }
@@ -134,37 +172,3 @@ private fun ParagraphText(p: Paragraph) {
         )
     }
 }
-
-/** Pages one under another; each is drawn when it scrolls into view, at the screen's width. */
-@Composable
-private fun PageDocument(pages: Pages) {
-    val list = rememberLazyListState()
-    val current by remember { derivedStateOf { list.firstVisibleItemIndex + 1 } }
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant)) {
-        val widthPx = with(LocalDensity.current) { (maxWidth - 16.dp).roundToPx() }
-        LazyColumn(state = list, contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(pages.pageCount, key = { it }) { index ->
-                var image by remember(index, widthPx) { mutableStateOf<ImageBitmap?>(null) }
-                LaunchedEffect(index, widthPx) { image = pages.render(index, widthPx) }
-                Box(Modifier.fillMaxWidth().aspectRatio(safeRatio(pages.aspect(index))).background(Color.White)) {
-                    image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
-                }
-            }
-        }
-        if (pages.pageCount > 1) Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.85f),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-        ) {
-            Text(
-                stringResource(R.string.page_of, current, pages.pageCount),
-                color = MaterialTheme.colorScheme.inverseOnSurface,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            )
-        }
-    }
-}
-
-/** Width / height for a page, never zero, negative or infinite, whatever the file says. */
-private fun safeRatio(aspect: Float): Float = (1f / aspect).takeIf { it.isFinite() && it > 0f }?.coerceIn(0.25f, 4f) ?: (1f / 1.414f)
