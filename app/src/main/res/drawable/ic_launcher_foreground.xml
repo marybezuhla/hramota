@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A page with a folded corner, lines of text and a round seal -->
+<!-- Грамота: a document on two yellow pages (the app's icon, drawn as vectors so it stays sharp at any size) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF" android:strokeColor="#24467A" android:strokeWidth="3"
-        android:strokeLineJoin="round"
-        android:pathData="M37,30 H62 L73,41 V78 H37 Z" />
-    <path android:fillColor="#00000000" android:strokeColor="#24467A" android:strokeWidth="3"
-        android:strokeLineJoin="round" android:pathData="M62,30 V41 H73" />
-    <path android:fillColor="#00000000" android:strokeColor="#24467A" android:strokeWidth="3"
-        android:strokeLineCap="round" android:pathData="M44,49 H66 M44,56 H66 M44,63 H56" />
-    <path android:fillColor="#B4472E" android:pathData="M64,70 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFEB42A" android:pathData="M32.00,43.10 H59.70 A2.3,2.3 0 0 1 62.00,45.40 V70.80 A2.3,2.3 0 0 1 59.70,73.10 H32.00 A2.3,2.3 0 0 1 29.70,70.80 V45.40 A2.3,2.3 0 0 1 32.00,43.10 Z" />
+    <path android:fillColor="#FF083665" android:pathData="M37.80,33.60 H64.90 A4.3,4.3 0 0 1 69.20,37.90 V77.20 A4.3,4.3 0 0 1 64.90,81.50 H37.80 A4.3,4.3 0 0 1 33.50,77.20 V37.90 A4.3,4.3 0 0 1 37.80,33.60 Z" />
+    <path android:fillColor="#FFFEB42A" android:pathData="M37.80,35.60 H64.90 A2.3,2.3 0 0 1 67.20,37.90 V77.20 A2.3,2.3 0 0 1 64.90,79.50 H37.80 A2.3,2.3 0 0 1 35.50,77.20 V37.90 A2.3,2.3 0 0 1 37.80,35.60 Z" />
+    <path android:fillColor="#FF083665" android:pathData="M42.20,28.90 H65.50 L78.20,41.60 V71.90 A4.3,4.3 0 0 1 73.90,74.20 H44.20 A4.3,4.3 0 0 1 39.90,69.90 V33.20 A4.3,4.3 0 0 1 44.20,28.90 Z" />
+    <path android:fillColor="#FFFAE7CF" android:pathData="M44.20,30.90 H64.70 L76.20,42.40 V69.90 A2.3,2.3 0 0 1 73.90,72.20 H44.20 A2.3,2.3 0 0 1 41.90,69.90 V33.20 A2.3,2.3 0 0 1 44.20,30.90 Z" />
+    <path android:fillColor="#FF083665" android:pathData="M64.70,30.90 V42.40 H76.20 Z" android:fillAlpha="0.18" />
+    <path android:strokeColor="#FF003165" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M48.7,49.5 H70.8" />
+    <path android:strokeColor="#FF003165" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M48.7,56.1 H70.8" />
+    <path android:strokeColor="#FF003165" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M48.7,63.1 H70.8" />
 </vector>
