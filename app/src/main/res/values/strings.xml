@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hramota</string>
+    <string name="home_tagline">Private office. Works offline.</string>
+    <string name="open_file">Open a file</string>
+    <string name="compare_versions">Compare two versions</string>
+    <string name="compare_pick_first">Choose the earlier version</string>
+    <string name="compare_pick_second">Now choose the newer version</string>
+    <string name="recent">Recent</string>
+    <string name="recent_empty">Files you open will appear here. Hramota only sees files you choose.</string>
+    <string name="recent_clear">Clear</string>
+    <string name="recent_remove">Remove from recent</string>
+    <string name="privacy_note">No internet access: nothing leaves your phone.</string>
+    <string name="loading">Opening…</string>
+    <string name="back">Back</string>
+    <string name="open_failed">This file could not be opened. It may be damaged, or access to it has expired.</string>
+    <string name="unsupported_title">This format is not supported yet</string>
+    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, ODT, TXT and Markdown.</string>
+    <string name="simplified_note">Simplified view: text only. Exact page layout is coming.</string>
+    <string name="page_of">Page %1$d of %2$d</string>
+    <string name="compare_title">Compare versions</string>
+    <string name="compare_older">Earlier</string>
+    <string name="compare_newer">Newer</string>
+    <string name="compare_no_changes">The texts are the same.</string>
+    <string name="compare_prev">Previous change</string>
+    <string name="compare_next">Next change</string>
+    <string name="compare_position">%1$d of %2$d</string>
+    <plurals name="compare_changes">
+        <item quantity="one">%d change</item>
+        <item quantity="other">%d changes</item>
+    </plurals>
+    <string name="legend_added">added</string>
+    <string name="legend_removed">removed</string>
+    <string name="compare_too_big">The documents differ too much to compare paragraph by paragraph; the changed part is shown as a whole.</string>
+</resources>

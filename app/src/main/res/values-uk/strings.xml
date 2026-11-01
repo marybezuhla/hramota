@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Грамота</string>
+    <string name="home_tagline">Приватний офіс. Працює без інтернету.</string>
+    <string name="open_file">Відкрити файл</string>
+    <string name="compare_versions">Порівняти дві версії</string>
+    <string name="compare_pick_first">Оберіть попередню версію</string>
+    <string name="compare_pick_second">Тепер оберіть нову версію</string>
+    <string name="recent">Нещодавні</string>
+    <string name="recent_empty">Тут з\'являться файли, які ви відкриєте. Грамота бачить лише файли, які ви обрали.</string>
+    <string name="recent_clear">Очистити</string>
+    <string name="recent_remove">Прибрати з нещодавніх</string>
+    <string name="privacy_note">Без доступу до інтернету: ніщо не залишає телефон.</string>
+    <string name="loading">Відкриваю…</string>
+    <string name="back">Назад</string>
+    <string name="open_failed">Не вдалося відкрити файл. Можливо, він пошкоджений або доступ до нього закінчився.</string>
+    <string name="unsupported_title">Цей формат поки не підтримується</string>
+    <string name="unsupported_body">Файли %1$s з\'являться згодом. Поки Грамота відкриває PDF, DOCX, ODT, TXT і Markdown.</string>
+    <string name="simplified_note">Спрощений перегляд: лише текст. Точний вигляд сторінок — у роботі.</string>
+    <string name="page_of">Сторінка %1$d з %2$d</string>
+    <string name="compare_title">Порівняння версій</string>
+    <string name="compare_older">Попередня</string>
+    <string name="compare_newer">Нова</string>
+    <string name="compare_no_changes">Тексти однакові.</string>
+    <string name="compare_prev">Попередня зміна</string>
+    <string name="compare_next">Наступна зміна</string>
+    <string name="compare_position">%1$d з %2$d</string>
+    <plurals name="compare_changes">
+        <item quantity="one">%d зміна</item>
+        <item quantity="few">%d зміни</item>
+        <item quantity="many">%d змін</item>
+        <item quantity="other">%d зміни</item>
+    </plurals>
+    <string name="legend_added">додано</string>
+    <string name="legend_removed">видалено</string>
+    <string name="compare_too_big">Документи відрізняються надто сильно для порівняння за абзацами; змінену частину показано цілком.</string>
+</resources>
