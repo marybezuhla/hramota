@@ -75,6 +75,7 @@ internal class BlockBuilder {
             val all = spans.filter { it.start < text.length }.map { if (it.end > text.length) it.copy(end = text.length) else it }
             // A paragraph pages long is cut after a sentence, so no page waits for one huge layout
             var from = 0
+            if (text.isEmpty()) blocks += BookBlock.Text(text, emptyList(), kind)
             while (from < text.length) {
                 var to = text.length
                 if (to - from > LONG) {
