@@ -70,6 +70,7 @@ fun InspectorBanner(inspection: Inspection) {
         Text(
             stringResource(if (risky) R.string.insp_banner_risky else R.string.insp_banner, list.joinToString(" · ") { it.label }),
             style = MaterialTheme.typography.bodySmall, color = fg, modifier = Modifier.weight(1f), maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
         Text(stringResource(R.string.insp_more), style = MaterialTheme.typography.labelMedium, color = fg, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
     }

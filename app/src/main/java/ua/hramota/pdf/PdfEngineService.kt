@@ -26,6 +26,22 @@ class PdfEngineService : Service() {
     private class Engine : Binder() {
         private val lock = Any()
         private var handle = 0L
+        /** When the call now inside PDFium started (0 = none). */
+        @Volatile private var busySince = 0L
+
+        init {
+            // Watchdog: a file that makes PDFium loop or work for too long ends this process,
+            // so the app gets an error instead of waiting forever (this process serves one document)
+            Thread({
+                while (true) {
+                    try { Thread.sleep(1000) } catch (_: InterruptedException) { return@Thread }
+                    val since = busySince
+                    if (since != 0L && android.os.SystemClock.elapsedRealtime() - since > CALL_LIMIT_MS) {
+                        android.os.Process.killProcess(android.os.Process.myPid())
+                    }
+                }
+            }, "pdf-watchdog").apply { isDaemon = true }.start()
+        }
 
         fun closeAll() = synchronized(lock) {
             if (handle > 0) PdfiumNative.close(handle)
@@ -36,6 +52,13 @@ class PdfEngineService : Service() {
             if (code < FIRST_CALL_TRANSACTION || code > LAST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
             data.enforceInterface(DESCRIPTOR)
             synchronized(lock) {
+                busySince = android.os.SystemClock.elapsedRealtime()
+                try { return dispatch(code, data, reply) } finally { busySince = 0L }
+            }
+        }
+
+        private fun dispatch(code: Int, data: Parcel, reply: Parcel?): Boolean {
+            run {
                 when (code) {
                     OPEN -> {
                         val pfd: ParcelFileDescriptor? = data.readFileDescriptor()
@@ -103,5 +126,7 @@ class PdfEngineService : Service() {
         /** Pages scanned for links by the inspector. */
         const val INSPECT_PAGES = 300
         const val MAX_TEXT = 200_000
+        /** Longest a single PDFium call may take before the engine process ends itself. */
+        const val CALL_LIMIT_MS = 20_000L
     }
 }
