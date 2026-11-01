@@ -16,6 +16,14 @@ import java.security.MessageDigest
 data class Note(val block: Int, val start: Int, val endBlock: Int, val end: Int, val color: Int, val text: String = "", val at: Long = 0)
 
 /**
+ * A shelf of one's own: a name, a look ("modern", "wood" or "list") and a colour (a hue in degrees;
+ * below 0 the natural colour). Documents are put on it like tags; [ALL] holds every kept document.
+ */
+data class ShelfDef(val id: String, val name: String, val style: String = "modern", val hue: Float = -1f, val created: Long = 0) {
+    companion object { const val ALL = "all" }
+}
+
+/**
  * What Hramota remembers about a document, by its content (not its name or place): the same file
  * downloaded again a year later opens with its bookmarks and where reading stopped.
  */
@@ -36,7 +44,12 @@ data class LibraryEntry(
     val onShelf: Boolean = false,
     val openedAt: Long = 0,
     val notes: List<Note> = emptyList(),
-)
+    /** Shelves of one's own the document stands on (it is on the shelf "All" while its copy is kept). */
+    val shelves: Set<String> = emptySet(),
+) {
+    /** On the shelf: kept inside Hramota. */
+    val kept: Boolean get() = copy != null
+}
 
 /**
  * The document memory: one small JSON file in the app's private storage (no cloud backup), a few
@@ -46,6 +59,46 @@ class Library private constructor(private val context: Context) {
     private val file = AtomicFile(File(context.filesDir, "library.json"))
     private val state = MutableStateFlow(load())
     val entries: StateFlow<Map<String, LibraryEntry>> = state.asStateFlow()
+    private val shelfFile = AtomicFile(File(context.filesDir, "shelves.json"))
+    private val shelfState = MutableStateFlow(loadShelves())
+    /** "All" first, then one's own shelves in the order they were made. */
+    val shelves: StateFlow<List<ShelfDef>> = shelfState.asStateFlow()
+
+    @Synchronized fun putShelf(def: ShelfDef) {
+        val list = shelfState.value.filter { it.id != def.id } + def
+        shelfState.value = list.sortedWith(compareBy({ it.id != ShelfDef.ALL }, { it.created }))
+        saveShelves(shelfState.value)
+    }
+
+    /** Takes a shelf away; the documents on it stay in Hramota. */
+    fun removeShelf(id: String) {
+        if (id == ShelfDef.ALL) return
+        synchronized(this) { shelfState.value = shelfState.value.filter { it.id != id }; saveShelves(shelfState.value) }
+        for (e in state.value.values) if (id in e.shelves) update(e.id) { it?.copy(shelves = it.shelves - id) }
+    }
+
+    fun setShelves(id: String, shelves: Set<String>) = update(id) { e -> e?.copy(shelves = shelves.filter { s -> shelfState.value.any { it.id == s } }.toSet()) }
+
+    private fun loadShelves(): List<ShelfDef> {
+        val list = try {
+            val json = JSONArray(String(shelfFile.readFully()))
+            (0 until minOf(json.length(), MAX_SHELVES)).mapNotNull { i ->
+                val o = json.optJSONObject(i) ?: return@mapNotNull null
+                ShelfDef(o.optString("id").ifEmpty { return@mapNotNull null }, o.optString("name").take(80), o.optString("style").takeIf { it in STYLES } ?: "modern",
+                    o.optDouble("hue", -1.0).toFloat().takeIf { it.isFinite() }?.coerceIn(-1f, 360f) ?: -1f, o.optLong("created"))
+            }
+        } catch (e: Exception) { emptyList() }
+        // "All" is always there; its first look follows the old wooden-shelf setting
+        return if (list.any { it.id == ShelfDef.ALL }) list.sortedWith(compareBy({ it.id != ShelfDef.ALL }, { it.created }))
+        else listOf(ShelfDef(ShelfDef.ALL, "", if (Settings.get(context).state.value.woodShelf) "wood" else "modern")) + list
+    }
+
+    private fun saveShelves(list: List<ShelfDef>) {
+        val json = JSONArray()
+        for (d in list) json.put(JSONObject().apply { put("id", d.id); put("name", d.name); put("style", d.style); put("hue", d.hue.toDouble()); put("created", d.created) })
+        val out = shelfFile.startWrite()
+        try { out.write(json.toString().toByteArray()); shelfFile.finishWrite(out) } catch (e: Exception) { shelfFile.failWrite(out) }
+    }
 
     fun get(id: String): LibraryEntry? = state.value[id]
 
@@ -74,6 +127,12 @@ class Library private constructor(private val context: Context) {
 
     fun setPosition(id: String, position: Int, total: Int) = update(id) { it?.copy(position = position.coerceAtLeast(0), total = total.coerceAtLeast(0)) }
 
+    /** Takes the copy out of Hramota (off the shelf); bookmarks, notes and the place stay remembered. */
+    fun dropCopy(id: String) {
+        get(id)?.copy?.let { File(it).delete() }
+        update(id) { it?.copy(copy = null, shelves = emptySet()) }
+    }
+
     /** Forgets everything about a document, and deletes the copy kept inside Hramota. */
     fun forget(id: String) {
         get(id)?.copy?.let { File(it).delete() }
@@ -81,7 +140,10 @@ class Library private constructor(private val context: Context) {
         update(id) { null }
     }
 
-    fun clearAll() { state.value.keys.toList().forEach(::forget) }
+    fun clearAll() {
+        state.value.keys.toList().forEach(::forget)
+        synchronized(this) { shelfState.value = shelfState.value.filter { it.id == ShelfDef.ALL }; saveShelves(shelfState.value) }
+    }
 
     private fun load(): Map<String, LibraryEntry> = try {
         val json = JSONArray(String(file.readFully()))
@@ -99,6 +161,7 @@ class Library private constructor(private val context: Context) {
                         Note(n.optInt("b"), n.optInt("s"), n.optInt("eb"), n.optInt("e"), n.optInt("c"), n.optString("t").take(MAX_NOTE_TEXT), n.optLong("at"))
                     }
                 } ?: emptyList(),
+                shelves = o.optJSONArray("shelves")?.let { a -> (0 until minOf(a.length(), MAX_SHELVES)).map { a.optString(it) }.filter { it.isNotEmpty() }.toSet() } ?: emptySet(),
             )
             e.id to e
         }
@@ -111,6 +174,7 @@ class Library private constructor(private val context: Context) {
             e.uri?.let { put("uri", it) }; e.copy?.let { put("copy", it) }
             put("position", e.position); put("total", e.total)
             put("bookmarks", JSONArray(e.bookmarks.sorted())); put("shelf", e.onShelf); put("opened", e.openedAt)
+            if (e.shelves.isNotEmpty()) put("shelves", JSONArray(e.shelves.toList()))
             if (e.notes.isNotEmpty()) put("notes", JSONArray().apply {
                 for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
             })
@@ -122,6 +186,8 @@ class Library private constructor(private val context: Context) {
     companion object {
         const val MAX_BOOKMARKS = 1000
         const val MAX_NOTES = 5000
+        const val MAX_SHELVES = 200
+        val STYLES = setOf("modern", "wood", "list")
         const val MAX_NOTE_TEXT = 10_000
         @Volatile private var instance: Library? = null
         fun get(context: Context): Library = instance ?: synchronized(this) { instance ?: Library(context.applicationContext).also { instance = it } }

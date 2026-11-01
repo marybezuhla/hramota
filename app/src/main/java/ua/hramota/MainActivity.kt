@@ -52,7 +52,9 @@ class MainActivity : ComponentActivity() {
                     val files by recents.files.collectAsStateWithLifecycle()
                     val library = ua.hramota.data.Library.get(applicationContext)
                     val known by library.entries.collectAsStateWithLifecycle()
-                    val shelf = known.values.filter { it.onShelf }.sortedByDescending { it.openedAt }
+                    val shelves by library.shelves.collectAsStateWithLifecycle()
+                    // The shelf holds only documents kept inside Hramota
+                    val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
                     BackHandler(showSettings) { showSettings = false }
                     if (showSettings) SettingsScreen(
                         settings = settings,
@@ -75,9 +77,12 @@ class MainActivity : ComponentActivity() {
                         onClear = { recents.clear() },
                         onSettings = { showSettings = true },
                         shelf = shelf,
-                        woodShelf = settings.woodShelf,
+                        shelves = shelves,
                         onOpenShelf = { e -> openShelf(e) },
                         onShelfAction = { e, a -> shelfAction(e, a) },
+                        onPutShelf = { library.putShelf(it) },
+                        onRemoveShelf = { library.removeShelf(it) },
+                        onSetShelves = { e, s -> library.setShelves(e.id, s) },
                     )
                 }
             }
@@ -134,13 +139,9 @@ class MainActivity : ComponentActivity() {
     private fun shelfAction(e: ua.hramota.data.LibraryEntry, a: ua.hramota.ui.ShelfAction) {
         val library = ua.hramota.data.Library.get(applicationContext)
         when (a) {
-            ua.hramota.ui.ShelfAction.REMOVE -> library.update(e.id) { it?.copy(onShelf = false) }
             ua.hramota.ui.ShelfAction.FORGET -> library.forget(e.id)
-            ua.hramota.ui.ShelfAction.DROP_COPY -> { e.copy?.let { java.io.File(it).delete() }; library.update(e.id) { it?.copy(copy = null) } }
-            ua.hramota.ui.ShelfAction.KEEP_COPY -> lifecycleScope.launch {
-                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Shelf.keepCopy(this@MainActivity, e) }
-                if (!ok) android.widget.Toast.makeText(this@MainActivity, getString(R.string.shelf_copy_failed), android.widget.Toast.LENGTH_LONG).show()
-            }
+            // Off the shelf; bookmarks, notes and the place stay remembered for the original file
+            ua.hramota.ui.ShelfAction.DROP_COPY -> library.dropCopy(e.id)
         }
     }
 

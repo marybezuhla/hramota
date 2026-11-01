@@ -75,7 +75,6 @@ fun SettingsScreen(
             }
 
             Toggle(stringResource(R.string.settings_dynamic), stringResource(R.string.settings_dynamic_hint), settings.dynamicColor) { v -> onChange { it.copy(dynamicColor = v) } }
-            Toggle(stringResource(R.string.settings_wood), stringResource(R.string.settings_wood_hint), settings.woodShelf) { v -> onChange { it.copy(woodShelf = v) } }
 
             Section(stringResource(R.string.settings_documents))
             Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
