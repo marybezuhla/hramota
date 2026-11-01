@@ -1,5 +1,7 @@
 package ua.hramota.doc
 
+import ua.hramota.doc.slides.paragraphs
+
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayOutputStream
