@@ -39,6 +39,8 @@ class DocxDocument(
     val fonts: ThemeFonts,
     /** Relationship id → picture path, e.g. "rId5" → "media/image1.png". */
     val rels: Map<String, String>,
+    /** "Don't use HTML paragraph auto spacing": paragraph gaps add up instead of taking the larger. */
+    val addSpacing: Boolean = false,
 ) {
     fun picture(rel: String): ByteArray? = rels[rel]?.let { media[it] }
 }
@@ -64,7 +66,7 @@ object DocxReader {
                 val name = e.name
                 when {
                     name == "word/document.xml" || name == "word/styles.xml" || name == "word/numbering.xml" ||
-                        name == "word/theme/theme1.xml" || name == "word/_rels/document.xml.rels" -> parts[name] = readLimited(zip, MAX_PART)
+                        name == "word/theme/theme1.xml" || name == "word/_rels/document.xml.rels" || name == "word/settings.xml" -> parts[name] = readLimited(zip, MAX_PART)
                     name.startsWith("word/media/") -> {
                         val bytes = readLimited(zip, MAX_PART)
                         mediaTotal += bytes.size
@@ -106,7 +108,9 @@ object DocxReader {
                 XmlPullParser.END_DOCUMENT -> break
             }
         }
-        return DocxDocument(page, blocks, media, fonts, rels)
+        val settings = parts["word/settings.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
+        val addSpacing = settings?.path("compat", "doNotUseHTMLParagraphAutoSpacing").isOn() == true
+        return DocxDocument(page, blocks, media, fonts, rels, addSpacing)
     }
 
     private fun pageSetup(s: XmlNode): PageSetup {
@@ -154,14 +158,18 @@ object DocxReader {
         fun para(p: XmlNode): Block.Para {
             val direct = ParaProps.parse(p.child("pPr"))
             var (styleP, styleR) = styles.paragraph(direct?.styleId)
-            // In a table, the table style's paragraph formatting replaces that of the default style
-            // (Word's rule): e.g. "Table Grid" removes the space after paragraphs in its cells
-            if (tableStyles.isNotEmpty() && styles.paraStyleId(direct?.styleId) == styles.defaultParagraphStyle) {
+            // In a table Word applies: document defaults < table style < paragraph style < direct.
+            // A paragraph-style value equal to the document default does not override the table style.
+            var defaults = styles.defaultPara
+            var runDefaults = styles.defaultRun
+            if (tableStyles.isNotEmpty()) {
                 val (tableP, tableR) = styles.table(tableStyles.last())
-                styleP = styleP.with(tableP); styleR = styleR.with(tableR)
+                styleP = styleP.withoutDefaults(styles.defaultPara)
+                defaults = defaults.with(tableP)
+                runDefaults = runDefaults.with(tableR)
             }
-            var props = styles.defaultPara.with(styleP).with(direct)
-            val baseRun = styles.defaultRun.with(styleR)
+            var props = defaults.with(styleP).with(direct)
+            val baseRun = runDefaults.with(styleR)
             var label: String? = null
             var labelProps: RunProps? = null
             val numId = props.numId
@@ -169,7 +177,7 @@ object DocxReader {
                 val lvl = props.numLevel ?: 0
                 numbering.level(numId, lvl)?.let { level ->
                     // List indents come from the numbering level unless the paragraph sets its own
-                    props = styles.defaultPara.with(styleP).with(level.para).with(direct)
+                    props = defaults.with(styleP).with(level.para).with(direct)
                     label = numbering.next(numId, lvl)
                     labelProps = baseRun.with(level.run)
                 }

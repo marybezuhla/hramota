@@ -101,6 +101,14 @@ data class ParaProps(
         shading = o.shading ?: shading,
     )
 
+    /** These spacing values, minus those equal to [defaults] (they then do not override a table style). */
+    fun withoutDefaults(defaults: ParaProps): ParaProps = copy(
+        before = before.takeIf { it != defaults.before },
+        after = after.takeIf { it != defaults.after },
+        line = line.takeIf { it != defaults.line || lineRule != defaults.lineRule },
+        lineRule = lineRule.takeIf { line != defaults.line || it != defaults.lineRule },
+    )
+
     companion object {
         fun parse(n: XmlNode?): ParaProps? {
             if (n == null) return null
