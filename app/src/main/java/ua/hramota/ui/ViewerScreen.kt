@@ -125,9 +125,13 @@ fun ViewerScreen(
     /** How books look (paper, type, pages), and how to change it. */
     readSettings: ua.hramota.data.AppSettings = ua.hramota.data.AppSettings(),
     onReadSettings: ((ua.hramota.data.AppSettings) -> ua.hramota.data.AppSettings) -> Unit = {},
+    /** A book's marked passages and notes. */
+    notes: List<ua.hramota.data.Note> = emptyList(),
+    onNote: (ua.hramota.data.Note) -> Unit = {},
+    onRemoveNote: (Long) -> Unit = {},
 ) {
     // A book takes the colours of its paper, the bars too
-    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings) }
+    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings, notes = notes, onNote = onNote, onRemoveNote = onRemoveNote) }
 }
 
 @Composable
@@ -149,6 +153,10 @@ private fun ViewerContent(
     /** How books look (paper, type, pages), and how to change it. */
     readSettings: ua.hramota.data.AppSettings = ua.hramota.data.AppSettings(),
     onReadSettings: ((ua.hramota.data.AppSettings) -> ua.hramota.data.AppSettings) -> Unit = {},
+    /** A book's marked passages and notes. */
+    notes: List<ua.hramota.data.Note> = emptyList(),
+    onNote: (ua.hramota.data.Note) -> Unit = {},
+    onRemoveNote: (Long) -> Unit = {},
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
@@ -332,15 +340,15 @@ private fun ViewerContent(
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
-                is ViewerState.Reader -> if (overview) BookContents(state.book, bookmarks, textList.firstVisibleItemIndex) { i ->
+                is ViewerState.Reader -> if (overview) BookContents(state.book, bookmarks, textList.firstVisibleItemIndex, { i ->
                     overview = false
                     textList.requestScrollToItem(i)
                     bookTarget = BookTarget(i)
-                } else {
+                }, notes, onNote, onRemoveNote) else {
                     val paper = paperFor(readSettings.readPaper)
                     val language = remember(state.book) { BookLook.languageOf(state.book) }
                     val look = remember(readSettings, paper, language) { BookLook(readSettings, paper, language) }
-                    BookDocument(state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks)
+                    BookDocument(state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks, notes, onNote, onRemoveNote)
                 }
                 is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Sheets -> WorkbookDocument(

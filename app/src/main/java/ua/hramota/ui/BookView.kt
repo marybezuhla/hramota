@@ -70,6 +70,12 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalTextToolbar
+import ua.hramota.data.Note
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -123,18 +129,47 @@ private fun flush(book: Book, i: Int): Boolean {
 internal fun BookDocument(
     book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?,
     target: BookTarget?, bookmarks: Set<Int>,
+    notes: List<Note> = emptyList(), onNote: (Note) -> Unit = {}, onRemoveNote: (Long) -> Unit = {},
 ) {
+    val selection = remember { BookSelection() }
+    val real = LocalClipboard.current
+    val taking = remember(real) { TakingClipboard(real) }
+    // The blocks on screen, where selected text is looked for
+    val visible = remember { Visible() }
+    var editing by remember { mutableStateOf<Pair<Note, Boolean>?>(null) }
+    val view = BookView(look, hits, current, notes, selection.reset, visible)
     Box(Modifier.fillMaxSize().background(look.paper.background)) {
-        if (look.settings.readPaged) BookPages(book, list, look, hits, current, target, bookmarks)
-        else BookScroll(book, list, look, hits, current)
+        CompositionLocalProvider(LocalTextToolbar provides selection, LocalClipboard provides taking) {
+            if (look.settings.readPaged) BookPages(book, list, view, target, bookmarks)
+            else BookScroll(book, list, view)
+        }
+        SelectionMenu(
+            selection, taking,
+            onMark = { t, c -> locate(book, visible.blocks(), t)?.let { onNote(it.copy(color = c)) } },
+            onNote = { t -> locate(book, visible.blocks(), t)?.let { editing = it to true } },
+        )
+    }
+    editing?.let { (n, new) ->
+        NoteDialog(excerpt(book, n), n, onSave = { onNote(it); editing = null }, onDelete = if (new) null else ({ onRemoveNote(n.at); editing = null }), onDismiss = { editing = null })
     }
 }
 
+internal class Visible { var blocks: () -> List<Int> = { emptyList() } }
+
+/** What every block on screen is drawn with. */
+private class BookView(
+    val look: BookLook, val hits: Map<Int, List<SearchHit>>, val current: SearchHit?, val notes: List<Note>, val reset: Int, val visible: Visible,
+) {
+    fun text(b: BookBlock.Text, i: Int) = look.text(b, hits[i], current, marksIn(notes, i, b.text.length, look.paper.dark))
+}
+
 @Composable
-private fun BookScroll(book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?) {
+private fun BookScroll(book: Book, list: LazyListState, v: BookView) {
+    val look = v.look
+    v.visible.blocks = { list.layoutInfo.visibleItemsInfo.map { it.index } }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
-        SelectionContainer {
+        key(v.reset) { SelectionContainer {
             // A comfortable line on a tablet too: about 60–70 characters at most
             LazyColumn(Modifier.fillMaxSize().widthIn(max = 640.dp + look.margin * 2), state = list, contentPadding = PaddingValues(start = look.margin, end = look.margin, top = 12.dp, bottom = 64.dp)) {
                 itemsIndexed(book.blocks, contentType = { _, b -> if (b is BookBlock.Image) 1 else (b as BookBlock.Text).kind.ordinal + 2 }) { i, b ->
@@ -143,12 +178,12 @@ private fun BookScroll(book: Book, list: LazyListState, look: BookLook, hits: Ma
                         is BookBlock.Text -> {
                             val (top, bottom, indent) = look.space(b.kind)
                             if (b.kind == BookBlock.Kind.BREAK) Box(Modifier.height(top))
-                            else Text(look.text(b, hits[i], current), style = look.style(b, flush(book, i)), modifier = Modifier.fillMaxWidth().padding(top = top, bottom = bottom, start = indent))
+                            else Text(v.text(b, i), style = look.style(b, flush(book, i)), modifier = Modifier.fillMaxWidth().padding(top = top, bottom = bottom, start = indent))
                         }
                     }
                 }
             }
-        }
+        } }
     }
 }
 
@@ -271,10 +306,9 @@ private fun pageOf(pages: List<Page>, block: Int, char: Int): Int {
 }
 
 @Composable
-private fun BookPages(
-    book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?,
-    target: BookTarget?, bookmarks: Set<Int>,
-) {
+private fun BookPages(book: Book, list: LazyListState, v: BookView, target: BookTarget?, bookmarks: Set<Int>) {
+    val look = v.look
+    val current = v.current
     val density = LocalDensity.current
     val resolver = LocalFontFamilyResolver.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -344,8 +378,9 @@ private fun BookPages(
             PageKeys.handler = h
             onDispose { if (PageKeys.handler === h) PageKeys.handler = null }
         }
+        v.visible.blocks = { pages.getOrNull(pager.currentPage)?.slices?.map { it.block }?.distinct().orEmpty() }
         val page: @Composable (Int) -> Unit = { p ->
-            pages.getOrNull(p)?.let { BookPage(book, look, it, p, pages.size, complete, hits, current, bookmarks, pages.getOrNull(p + 1)?.firstBlock ?: Int.MAX_VALUE, textWidth, header, footer) }
+            pages.getOrNull(p)?.let { BookPage(book, v, it, p, pages.size, complete, bookmarks, pages.getOrNull(p + 1)?.firstBlock ?: Int.MAX_VALUE, textWidth, header, footer) }
         }
         val taps = Modifier.pointerInput(Unit) {
             // The edges of the page turn it, as in a paper book
@@ -358,10 +393,10 @@ private fun BookPages(
 
 @Composable
 private fun BookPage(
-    book: Book, look: BookLook, page: Page, index: Int, count: Int, complete: Boolean,
-    hits: Map<Int, List<SearchHit>>, current: SearchHit?, bookmarks: Set<Int>, nextFirst: Int,
+    book: Book, v: BookView, page: Page, index: Int, count: Int, complete: Boolean, bookmarks: Set<Int>, nextFirst: Int,
     textWidth: Int, header: Int, footer: Int,
 ) {
+    val look = v.look
     val density = LocalDensity.current
     val marked = bookmarks.any { it >= page.firstBlock && it < nextFirst } || page.firstBlock in bookmarks
     Box(Modifier.fillMaxSize().background(look.paper.background)) {
@@ -369,7 +404,7 @@ private fun BookPage(
             Box(Modifier.height(with(density) { header.toDp() }).fillMaxWidth().padding(horizontal = look.margin), contentAlignment = Alignment.Center) {
                 Text(page.chapter.ifEmpty { book.title }, style = MaterialTheme.typography.labelMedium.copy(fontFamily = look.family), color = look.paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            SelectionContainer(Modifier.weight(1f)) {
+            key(v.reset) { SelectionContainer(Modifier.weight(1f)) {
                 // Exactly the width the pages were laid out for, so every line breaks where it was measured
                 Column(Modifier.layout { m, c -> val p = m.measure(c.copy(minWidth = textWidth, maxWidth = textWidth)); layout(p.width, p.height) { p.place(0, 0) } }) {
                     for (s in page.slices) {
@@ -382,7 +417,7 @@ private fun BookPage(
                                 val indent = look.space(b.kind).third
                                 Box(Modifier.padding(top = padTop, start = indent).fillMaxWidth().height(h).clipToBounds()) {
                                     Text(
-                                        look.text(b, hits[s.block], current), style = look.style(b, flush(book, s.block)),
+                                        v.text(b, s.block), style = look.style(b, flush(book, s.block)),
                                         modifier = Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true).offset { IntOffset(0, -s.top) },
                                     )
                                 }
@@ -390,7 +425,7 @@ private fun BookPage(
                         }
                     }
                 }
-            }
+            } }
             Box(Modifier.height(with(density) { footer.toDp() }).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(if (complete) "${index + 1} / $count" else "${index + 1}", style = MaterialTheme.typography.labelMedium, color = look.paper.muted)
             }
@@ -587,7 +622,12 @@ internal fun decodeFitting(bytes: ByteArray?, widthPx: Int): ImageBitmap? {
 
 /** The contents: chapters and bookmarks; a tap goes there. */
 @Composable
-internal fun BookContents(book: Book, bookmarks: Set<Int>, current: Int, onGo: (Int) -> Unit) {
+internal fun BookContents(
+    book: Book, bookmarks: Set<Int>, current: Int, onGo: (Int) -> Unit,
+    notes: List<Note> = emptyList(), onNote: (Note) -> Unit = {}, onRemoveNote: (Long) -> Unit = {},
+) {
+    var editing by remember { mutableStateOf<Note?>(null) }
+    editing?.let { n -> NoteDialog(excerpt(book, n), n, onSave = { onNote(it); editing = null }, onDelete = { onRemoveNote(n.at); editing = null }, onDismiss = { editing = null }) }
     val heads = remember(book) {
         book.blocks.withIndex().filter { (_, b) -> b is BookBlock.Text && (b.kind == BookBlock.Kind.HEADING1 || b.kind == BookBlock.Kind.HEADING2) }
             .map { (i, b) -> Triple(i, (b as BookBlock.Text).text.replace('\n', ' ').take(120), b.kind == BookBlock.Kind.HEADING2) }
@@ -613,6 +653,21 @@ internal fun BookContents(book: Book, bookmarks: Set<Int>, current: Int, onGo: (
                 Row(Modifier.fillMaxWidth().clickable { onGo(i) }.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                     Text(t.ifEmpty { "…" }, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        if (notes.isNotEmpty()) {
+            item { Section(stringResource(R.string.book_notes)) }
+            for (n in notes) item(key = "n${n.at}") {
+                Row(Modifier.fillMaxWidth().clickable { onGo(n.block) }.padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(width = 4.dp, height = 40.dp).background(NOTE_COLORS[n.color.coerceIn(0, NOTE_COLORS.size - 1)]))
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(excerpt(book, n), maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = Literata))
+                        if (n.text.isNotEmpty()) Text(n.text, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+                    }
+                    androidx.compose.material3.IconButton(onClick = { editing = n }) {
+                        Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = stringResource(R.string.note_edit))
+                    }
                 }
             }
         }
