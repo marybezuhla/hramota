@@ -36,6 +36,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import ua.hramota.ui.CompareScreen
 import ua.hramota.ui.CompareState
 import ua.hramota.ui.HomeScreen
+import ua.hramota.ui.SettingsScreen
+import ua.hramota.data.AppSettings
+import ua.hramota.doc.CsvReader
 import ua.hramota.ui.HramotaTheme
 import ua.hramota.ui.ViewerScreen
 import ua.hramota.ui.ViewerState
@@ -226,4 +229,25 @@ class ScreensTest {
     @Test fun compareLargeFont() = shot("08-compare-large-font") {
         CompareScreen("Договір поставки v1.docx", "Договір поставки v2.docx", CompareState.Ready(Diff.compare(contractV1, contractV2)), onBack = {})
     }
+
+    @Composable
+    private fun settings() = SettingsScreen(AppSettings(), "0.4.0", onChange = {}, onClearRecent = {}, onBack = {})
+    @Test fun settingsScreen() = shot("09-settings") { settings() }
+    @Config(qualifiers = "+night")
+    @Test fun settingsDark() = shot("09-settings-dark") { settings() }
+    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
+    @Test fun settingsEnglish() = shot("09-settings-en") { settings() }
+    @Config(fontScale = 1.5f)
+    @Test fun settingsLargeFont() = shot("09-settings-large-font") { settings() }
+
+    private val budgetCsv = """Місяць;Продукти;Транспорт;Комунальні;Разом
+Січень;6200;1100;3400;10700
+Лютий;5900;1050;3600;10550
+Березень;6400;1200;2900;10500
+Квітень;6100;980;2100;9180
+Травень;6600;1300;1800;9700
+"Червень, з відпусткою";9800;4200;1700;15700"""
+    @Test fun viewerCsv() = shot("10-viewer-csv") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
+    @Config(qualifiers = "+night")
+    @Test fun viewerCsvDark() = shot("10-viewer-csv-dark") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
 }

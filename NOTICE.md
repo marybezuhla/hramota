@@ -15,3 +15,7 @@
 ## PDFium (`pdfium/`)
 
 Рушій PDF із Chromium (BSD-3-Clause; ліцензії складників — у `pdfium/licenses`), готова збірка з [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) (MIT), реліз `chromium/8125`, без V8. Походження перевірено атестацією GitHub (`pdfium/ATTESTATION.txt`).
+
+## Тестові файли DOC (`app/src/test/resources/legacy`)
+
+Зразки документів Word 97–2003 (у тому числі пошкоджені, з фазингу) з тестових даних [Apache POI](https://github.com/apache/poi) (`test-data/document`), ліцензія Apache 2.0. Використовуються лише в тестах, у застосунок не входять.

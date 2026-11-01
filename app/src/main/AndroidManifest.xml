@@ -48,6 +48,11 @@
                 <data android:mimeType="application/vnd.oasis.opendocument.text" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="text/markdown" />
+                <data android:mimeType="application/msword" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+                <data android:mimeType="application/csv" />
+                <data android:mimeType="text/tab-separated-values" />
             </intent-filter>
         </activity>
 

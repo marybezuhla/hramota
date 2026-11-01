@@ -91,6 +91,8 @@ sealed interface ViewerState {
     data object Password : ViewerState
     data class Unsupported(val format: Format) : ViewerState
     data class Text(val paragraphs: List<Paragraph>, val format: Format) : ViewerState
+    /** A table of plain cells (CSV); the first row is shown as the header. */
+    data class Table(val rows: List<List<String>>) : ViewerState
     /** Pages as they print; [reading] is the same text for the reading view, when there is one. */
     data class Paged(val pages: Pages, val reading: List<Paragraph>? = null, val inspection: Inspection? = null) : ViewerState
 }
@@ -105,6 +107,7 @@ fun ViewerScreen(
     onToggleBookmark: (Int) -> Unit = {},
     startInOverview: Boolean = false,
     startSearch: String? = null,
+    showInspector: Boolean = true,
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
@@ -180,7 +183,7 @@ fun ViewerScreen(
             }
         }
         val inspection = (state as? ViewerState.Paged)?.inspection
-        if (inspection != null && inspection.notable && !overview) InspectorBanner(inspection)
+        if (showInspector && inspection != null && inspection.notable && !overview) InspectorBanner(inspection)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (state) {
                 ViewerState.Loading -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -194,6 +197,7 @@ fun ViewerScreen(
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state)
+                is ViewerState.Table -> TableDocument(state.rows)
                 is ViewerState.Paged -> when {
                     reading && state.reading != null -> TextDocument(ViewerState.Text(state.reading, Format.DOCX), note = false)
                     overview -> PageOverview(state.pages, bookmarks, current) { page ->
@@ -305,7 +309,7 @@ private fun Message(title: String, body: String?) {
 
 /** Reading view: text flows to the screen width, headings stand out, text can be selected and copied. */
 @Composable
-private fun TextDocument(state: ViewerState.Text, note: Boolean = state.format == Format.ODT) {
+private fun TextDocument(state: ViewerState.Text, note: Boolean = state.format == Format.ODT || state.format == Format.DOC) {
     SelectionContainer {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
             if (note) item {

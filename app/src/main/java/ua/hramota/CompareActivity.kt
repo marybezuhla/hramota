@@ -17,7 +17,8 @@ import ua.hramota.data.Recents
 import ua.hramota.diff.Diff
 import ua.hramota.ui.CompareScreen
 import ua.hramota.ui.CompareState
-import ua.hramota.ui.HramotaTheme
+import ua.hramota.ui.AppTheme
+import ua.hramota.ui.applySecureScreen
 
 /** Two versions of a document: what was added, removed or changed, paragraph by paragraph. */
 class CompareActivity : ComponentActivity() {
@@ -31,8 +32,9 @@ class CompareActivity : ComponentActivity() {
         val newerName = Recents.displayName(this, newer)
         labelTask("$olderName ↔ $newerName")
 
+        applySecureScreen()
         setContent {
-            HramotaTheme {
+            AppTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val state by produceState<CompareState>(CompareState.Loading, older, newer) {
                         value = withContext(Dispatchers.Default) {

@@ -18,7 +18,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.ui.HomeScreen
-import ua.hramota.ui.HramotaTheme
+import androidx.activity.compose.BackHandler
+import ua.hramota.data.Settings
+import ua.hramota.ui.AppTheme
+import ua.hramota.ui.SettingsScreen
+import ua.hramota.ui.applySecureScreen
 
 /** Home: open a file, start a comparison, reopen a recent file. */
 class MainActivity : ComponentActivity() {
@@ -27,6 +31,7 @@ class MainActivity : ComponentActivity() {
     /** The earlier version, while the newer one is being chosen. */
     private var compareFirst by mutableStateOf<Uri?>(null)
     private var comparing by mutableStateOf(false)
+    private var showSettings by mutableStateOf(false)
 
     // The system file picker: Hramota sees only the file chosen there
     private val pick = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> onPicked(uri) }
@@ -37,11 +42,20 @@ class MainActivity : ComponentActivity() {
         recents = Recents(applicationContext)
         compareFirst = savedInstanceState?.getString(KEY_FIRST)?.let(Uri::parse)
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
+        showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
+        applySecureScreen()
         setContent {
-            HramotaTheme {
+            AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val files by recents.files.collectAsStateWithLifecycle()
-                    HomeScreen(
+                    BackHandler(showSettings) { showSettings = false }
+                    if (showSettings) SettingsScreen(
+                        settings = settings,
+                        version = appVersion(),
+                        onChange = { Settings.get(this).update(it) },
+                        onClearRecent = { recents.clear(); Bookmarks(applicationContext).clearAll() },
+                        onBack = { showSettings = false },
+                    ) else HomeScreen(
                         recents = files,
                         comparePrompt = when {
                             !comparing -> null
@@ -54,6 +68,7 @@ class MainActivity : ComponentActivity() {
                         // Forgetting a file also forgets its bookmarks
                         onRemove = { recents.remove(it.uri); Bookmarks(applicationContext).remove(it.uri) },
                         onClear = { recents.clear(); Bookmarks(applicationContext).clearAll() },
+                        onSettings = { showSettings = true },
                     )
                 }
             }
@@ -64,6 +79,7 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         compareFirst?.let { outState.putString(KEY_FIRST, it.toString()) }
         outState.putBoolean(KEY_COMPARING, comparing)
+        outState.putBoolean(KEY_SETTINGS, showSettings)
     }
 
     private fun onPicked(uri: Uri?) {
@@ -97,8 +113,13 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun appVersion(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+    } catch (e: Exception) { "?" }
+
     private companion object {
         const val KEY_FIRST = "compare_first"
         const val KEY_COMPARING = "comparing"
+        const val KEY_SETTINGS = "settings"
     }
 }

@@ -17,6 +17,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
+import ua.hramota.doc.CsvReader
+import ua.hramota.doc.EncryptedDocumentException
 import ua.hramota.doc.Format
 import ua.hramota.doc.PdfSource
 import ua.hramota.pdf.PdfEngineUnavailableException
@@ -24,7 +26,8 @@ import ua.hramota.pdf.PdfPasswordException
 import ua.hramota.pdf.PdfiumPages
 import ua.hramota.doc.docx.DocxPages
 import ua.hramota.doc.docx.DocxReader
-import ua.hramota.ui.HramotaTheme
+import ua.hramota.ui.AppTheme
+import ua.hramota.ui.applySecureScreen
 import ua.hramota.ui.ViewerScreen
 import ua.hramota.ui.ViewerState
 
@@ -43,8 +46,9 @@ class ViewerActivity : ComponentActivity() {
         val bookmarkStore = Bookmarks(applicationContext)
         var bookmarks by mutableStateOf(bookmarkStore.pages(uri.toString()))
 
+        applySecureScreen()
         setContent {
-            HramotaTheme {
+            AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val state by produceState<ViewerState>(ViewerState.Loading, uri) {
                         // An open PDF is closed if the window goes away before it is shown
@@ -58,10 +62,15 @@ class ViewerActivity : ComponentActivity() {
                                         val doc = contentResolver.openInputStream(uri)?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
                                         ViewerState.Paged(DocxPages(doc, appFonts(applicationContext)), doc.readingText(), doc.inspection)
                                     }
+                                    format == Format.CSV -> ViewerState.Table(
+                                        contentResolver.openInputStream(uri)?.use { CsvReader.read(it) } ?: return@withContext ViewerState.Failed,
+                                    )
                                     format.hasText -> ViewerState.Text(readText(this@ViewerActivity, uri, format), format)
                                     else -> ViewerState.Unsupported(format)
                                 }
                             } catch (e: PdfPasswordException) {
+                                ViewerState.Password
+                            } catch (e: EncryptedDocumentException) {
                                 ViewerState.Password
                             } catch (e: Exception) {
                                 ViewerState.Failed
@@ -83,6 +92,8 @@ class ViewerActivity : ComponentActivity() {
                     }
                     ViewerScreen(
                         name, state, onBack = { finishAndRemoveTask() },
+                        startInReading = settings.docxReading,
+                        showInspector = settings.inspector,
                         bookmarks = bookmarks,
                         onToggleBookmark = { page -> bookmarks = bookmarkStore.toggle(uri.toString(), page) },
                     )

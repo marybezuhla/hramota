@@ -17,7 +17,7 @@ enum class Format(val label: String) {
     PPTX("PPTX"), PPT("PPT"), ODP("ODP"), RTF("RTF"), UNKNOWN("");
 
     /** Formats whose text can be read and compared now. */
-    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN
+    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV
 
     companion object {
         fun detect(name: String?, mime: String?): Format {
@@ -31,7 +31,7 @@ enum class Format(val label: String) {
                 "text/plain" -> TXT
                 "application/msword" -> DOC
                 "application/rtf", "text/rtf" -> RTF
-                "text/csv" -> CSV
+                "text/csv", "text/comma-separated-values", "application/csv", "text/tab-separated-values" -> CSV
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> XLSX
                 "application/vnd.ms-excel" -> XLS
                 "application/vnd.oasis.opendocument.spreadsheet" -> ODS
@@ -44,7 +44,7 @@ enum class Format(val label: String) {
 
         private val byExtension = mapOf(
             "pdf" to PDF, "docx" to DOCX, "odt" to ODT, "txt" to TXT, "md" to MARKDOWN, "markdown" to MARKDOWN,
-            "doc" to DOC, "rtf" to RTF, "xlsx" to XLSX, "xls" to XLS, "ods" to ODS, "csv" to CSV,
+            "doc" to DOC, "rtf" to RTF, "xlsx" to XLSX, "xls" to XLS, "ods" to ODS, "csv" to CSV, "tsv" to CSV,
             "pptx" to PPTX, "ppt" to PPT, "odp" to ODP,
         )
     }
@@ -65,6 +65,9 @@ object TextExtractor {
         Format.ODT -> fromZip(input, "content.xml", ::odt)
         Format.TXT -> plain(input, markdown = false)
         Format.MARKDOWN -> plain(input, markdown = true)
+        Format.DOC -> DocReader.read(input)
+        // A table compared row by row
+        Format.CSV -> CsvReader.read(input).map { Paragraph(it.joinToString(" | ")) }
         else -> throw IOException("No text reader for $format")
     }
 
@@ -172,9 +175,8 @@ object TextExtractor {
 
     /** Plain text: blank-line-free lines become paragraphs; Markdown "#" lines become headings. */
     fun plain(input: InputStream, markdown: Boolean): List<Paragraph> {
-        val bytes = ByteArrayOutputStream()
-        Limited(input, MAX_TEXT_BYTES).copyTo(bytes)
-        val text = bytes.toString(Charsets.UTF_8.name()).removePrefix("﻿")
+        // Text saved by older Windows programs is often in Windows-1251, not UTF-8
+        val text = TextDecoding.decode(TextDecoding.readLimited(input, MAX_TEXT_BYTES))
         return text.split(Regex("\r\n|\n|\r")).map { line ->
             if (markdown) {
                 val m = Regex("^(#{1,6})\\s+(.*)$").find(line)
