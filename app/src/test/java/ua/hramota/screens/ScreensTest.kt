@@ -260,4 +260,27 @@ class ScreensTest {
     @Config(qualifiers = "+night")
     @Test fun viewerSheetDark() = shot("11-viewer-sheet-dark") { ViewerScreen("Сімейний бюджет.xlsx", ViewerState.Sheets(budget()), onBack = {}) }
     @Test fun viewerSheetSearch() = shot("11-viewer-sheet-search", settle = 40) { ViewerScreen("Сімейний бюджет.xlsx", ViewerState.Sheets(budget()), onBack = {}, startSearch = "квітень") }
+
+    // The launcher icon as a phone shows it: background and foreground in a circle, and the one-colour themed version
+    @Test fun launcherIcon() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val size = 432
+        val out = Bitmap.createBitmap(size * 2 + 40, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawColor(0xFF1C1B1F.toInt())
+        for ((k, fg) in listOf(ua.hramota.R.drawable.ic_launcher_foreground, ua.hramota.R.drawable.ic_launcher_monochrome).withIndex()) {
+            canvas.save()
+            canvas.translate(k * (size + 40f), 0f)
+            val path = android.graphics.Path().apply { addCircle(size / 2f, size / 2f, size / 3f, android.graphics.Path.Direction.CW) }
+            canvas.clipPath(path)
+            canvas.drawColor(if (k == 0) app.getColor(ua.hramota.R.color.icon_bg) else 0xFFD8E2FF.toInt())
+            val d = app.getDrawable(fg)!!
+            if (k == 1) d.setTint(0xFF0F3A70.toInt())
+            d.setBounds(0, 0, size, size)
+            d.draw(canvas)
+            canvas.restore()
+        }
+        val dir = File("build/screens").apply { mkdirs() }
+        File(dir, "00-icon.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
 }

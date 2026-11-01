@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed (one-colour) icon: pages and document as shapes, the text lines cut out -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FF000000" android:fillAlpha="0.55" android:pathData="M29.7,45.4 A2.3,2.3 0 0 1 32.0,43.1 H33.5 V73.1 H32.0 A2.3,2.3 0 0 1 29.7,70.8 Z" />
+    <path android:fillColor="#FF000000" android:fillAlpha="0.75" android:pathData="M35.5,37.9 A2.3,2.3 0 0 1 37.8,35.6 H39.9 V74.2 H67.2 V77.2 A2.3,2.3 0 0 1 64.9,79.5 H37.8 A2.3,2.3 0 0 1 35.5,77.2 Z" />
+    <path android:fillColor="#FF000000" android:fillType="evenOdd" android:pathData="M44.20,30.90 H64.70 L76.20,42.40 V69.90 A2.3,2.3 0 0 1 73.90,72.20 H44.20 A2.3,2.3 0 0 1 41.90,69.90 V33.20 A2.3,2.3 0 0 1 44.20,30.90 Z M48.7,48.0 H70.8 V51.0 H48.7 Z M48.7,54.6 H70.8 V57.6 H48.7 Z M48.7,61.6 H70.8 V64.6 H48.7 Z" />
+</vector>
