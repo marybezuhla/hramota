@@ -58,8 +58,8 @@ object CsvReader {
     fun read(input: InputStream): CsvTable = parse(TextDecoding.decode(TextDecoding.readLimited(input, MAX_BYTES)))
 
     fun parse(text: String): CsvTable {
-        val rows = rows(text)
-        val truncated = rows.size >= MAX_ROWS || rows.sumOf { it.size }.toLong() >= MAX_CELLS
+        var truncated = false
+        val rows = rows(text) { truncated = true }
         val columns = rows.maxOfOrNull { it.size } ?: 0
         val widths = IntArray(columns)
         for (r in rows.asSequence().take(WIDTH_ROWS)) for ((c, cell) in r.withIndex()) {
@@ -71,7 +71,8 @@ object CsvReader {
         return CsvTable(rows, truncated, widths)
     }
 
-    fun rows(text: String): List<List<String>> {
+    /** Rows of [text]; [onCut] is called if a limit stopped reading before the end. */
+    fun rows(text: String, onCut: () -> Unit = {}): List<List<String>> {
         val sep = guessSeparator(text)
         val rows = ArrayList<List<String>>()
         var row = ArrayList<String>()
@@ -105,7 +106,7 @@ object CsvReader {
             i++
         }
         // The last line, unless reading stopped at a limit mid-row
-        if (i >= text.length && (cell.isNotEmpty() || row.isNotEmpty())) endRow()
+        if (i < text.length) onCut() else if (cell.isNotEmpty() || row.isNotEmpty()) endRow()
         return rows
     }
 
