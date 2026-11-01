@@ -73,6 +73,15 @@ class SheetsTest {
         assertEquals("2:30 PM", NumberFormat.format(46096.0 + 14.5 / 24, "h:mm AM/PM", locale = us))
         assertEquals("27:00:00", NumberFormat.format(27.0 / 24, "[h]:mm:ss", locale = us))
         assertEquals("Разом: 5", NumberFormat.format(5.0, "\"Разом: \"0", locale = us))
+        // Found by the independent review
+        assertEquals("2.68", NumberFormat.format(2.675, "0.00", locale = us))
+        assertEquals("", NumberFormat.format(0.0, "#", locale = us).trim())
+        assertEquals("1.2M", NumberFormat.format(1_234_567.0, "#,##0.0,,\"M\"", locale = us))
+        assertEquals("5 шт.", NumberFormat.format(5.0, "General\" шт.\"", locale = us))
+        assertEquals("0.5", NumberFormat.format(0.5, "# ?/?", locale = us))
+        assertEquals("#NUM!", NumberFormat.format(1e308, "0%", locale = us))
+        assertEquals("#NUM!", NumberFormat.format(1e308, "0.00E+00%", locale = us))
+        NumberFormat.format(1.0, "0." + "0".repeat(100_000), locale = us)
     }
 
     @Test fun columnsAndReferences() {
