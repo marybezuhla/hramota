@@ -60,14 +60,43 @@ object TextExtractor {
     /** Largest plain text file read. */
     const val MAX_TEXT_BYTES = 20L * 1024 * 1024
 
-    fun read(input: InputStream, format: Format): List<Paragraph> = when (format) {
+    /** Longest paragraph shown as one piece; longer ones are split so the screen never lays out megabytes at once. */
+    const val MAX_PARAGRAPH = 4000
+    /** Most paragraphs kept from one file. */
+    const val MAX_PARAGRAPHS = 500_000
+
+    fun read(input: InputStream, format: Format): List<Paragraph> = split(readWhole(input, format))
+
+    /** Splits very long paragraphs (at a space when there is one nearby) and caps the count. */
+    fun split(paragraphs: List<Paragraph>): List<Paragraph> {
+        if (paragraphs.size <= MAX_PARAGRAPHS && paragraphs.all { it.text.length <= MAX_PARAGRAPH }) return paragraphs
+        val out = ArrayList<Paragraph>()
+        for (p in paragraphs) {
+            if (out.size >= MAX_PARAGRAPHS) break
+            var start = 0
+            val t = p.text
+            if (t.length <= MAX_PARAGRAPH) { out += p; continue }
+            while (start < t.length && out.size < MAX_PARAGRAPHS) {
+                var end = minOf(t.length, start + MAX_PARAGRAPH)
+                if (end < t.length) {
+                    val space = t.lastIndexOf(' ', end)
+                    if (space > start + MAX_PARAGRAPH / 2) end = space + 1
+                }
+                out += Paragraph(t.substring(start, end), p.heading)
+                start = end
+            }
+        }
+        return out
+    }
+
+    private fun readWhole(input: InputStream, format: Format): List<Paragraph> = when (format) {
         Format.DOCX -> fromZip(input, "word/document.xml", ::docx)
         Format.ODT -> fromZip(input, "content.xml", ::odt)
         Format.TXT -> plain(input, markdown = false)
         Format.MARKDOWN -> plain(input, markdown = true)
         Format.DOC -> DocReader.read(input)
         // A table compared row by row
-        Format.CSV -> CsvReader.read(input).map { Paragraph(it.joinToString(" | ")) }
+        Format.CSV -> CsvReader.read(input).rows.map { Paragraph(it.joinToString(" | ")) }
         else -> throw IOException("No text reader for $format")
     }
 

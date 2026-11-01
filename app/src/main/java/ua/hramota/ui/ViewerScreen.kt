@@ -92,7 +92,7 @@ sealed interface ViewerState {
     data class Unsupported(val format: Format) : ViewerState
     data class Text(val paragraphs: List<Paragraph>, val format: Format) : ViewerState
     /** A table of plain cells (CSV); the first row is shown as the header. */
-    data class Table(val rows: List<List<String>>) : ViewerState
+    data class Table(val table: ua.hramota.doc.CsvTable) : ViewerState
     /** Pages as they print; [reading] is the same text for the reading view, when there is one. */
     data class Paged(val pages: Pages, val reading: List<Paragraph>? = null, val inspection: Inspection? = null) : ViewerState
 }
@@ -197,7 +197,7 @@ fun ViewerScreen(
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state)
-                is ViewerState.Table -> TableDocument(state.rows)
+                is ViewerState.Table -> TableDocument(state.table)
                 is ViewerState.Paged -> when {
                     reading && state.reading != null -> TextDocument(ViewerState.Text(state.reading, Format.DOCX), note = false)
                     overview -> PageOverview(state.pages, bookmarks, current) { page ->
