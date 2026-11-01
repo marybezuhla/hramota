@@ -16,6 +16,10 @@ import androidx.compose.ui.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.hramota.data.Bookmarks
+import ua.hramota.data.Library
+import ua.hramota.data.LibraryEntry
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ua.hramota.data.Recents
 import ua.hramota.doc.CsvReader
 import ua.hramota.doc.docx.WordBinaryReader
@@ -50,16 +54,35 @@ class ViewerActivity : ComponentActivity() {
         // Files opened from other apps ("Open with") also appear in the recent list
         if (savedInstanceState == null) Recents(applicationContext).add(uri, name)
         val format = formatOf(this, uri, name)
-        val bookmarkStore = Bookmarks(applicationContext)
-        var bookmarks by mutableStateOf(bookmarkStore.pages(uri.toString()))
+        val library = Library.get(applicationContext)
+        val remember = ua.hramota.data.Settings.get(this).state.value.rememberRecent
+        // The document as Hramota knows it (by content), found before it is shown
+        var docId by mutableStateOf<String?>(null)
+        var startPosition by mutableIntStateOf(0)
 
         applySecureScreen()
         setContent {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val entries by library.entries.collectAsStateWithLifecycle()
                     val state by produceState<ViewerState>(ViewerState.Loading, uri) {
                         // An open PDF is closed if the window goes away before it is shown
                         var opened: java.io.Closeable? = null
+                        withContext(Dispatchers.IO) { Library.fingerprint(this@ViewerActivity, uri) }?.let { id ->
+                            val old = Bookmarks(applicationContext)
+                            val oldMarks = old.pages(uri.toString())
+                            library.update(id) { e ->
+                                when {
+                                    e != null -> e.copy(title = name, uri = uri.toString(), openedAt = System.currentTimeMillis(), bookmarks = e.bookmarks.ifEmpty { oldMarks })
+                                    remember || oldMarks.isNotEmpty() -> LibraryEntry(id, name, format.label, uri.toString(), bookmarks = oldMarks, openedAt = System.currentTimeMillis())
+                                    else -> null
+                                }
+                            }
+                            // Bookmarks kept by address before are now kept with the document
+                            if (oldMarks.isNotEmpty()) old.remove(uri.toString())
+                            startPosition = library.get(id)?.position ?: 0
+                            docId = id
+                        }
                         try {
                         value = withContext(Dispatchers.IO) {
                             try {
@@ -111,8 +134,15 @@ class ViewerActivity : ComponentActivity() {
                         name, state, onBack = { finishAndRemoveTask() },
                         startInReading = settings.docxReading,
                         showInspector = settings.inspector,
-                        bookmarks = bookmarks,
-                        onToggleBookmark = { page -> bookmarks = bookmarkStore.toggle(uri.toString(), page) },
+                        bookmarks = docId?.let { entries[it]?.bookmarks }.orEmpty(),
+                        onToggleBookmark = { page ->
+                            docId?.let { id ->
+                                if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
+                                library.toggleBookmark(id, page)
+                            }
+                        },
+                        startPosition = startPosition,
+                        onPosition = { position, total -> docId?.let { id -> library.setPosition(id, position, total) } },
                     )
                 }
             }

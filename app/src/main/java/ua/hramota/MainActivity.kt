@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
                         settings = settings,
                         version = appVersion(),
                         onChange = { Settings.get(this).update(it) },
-                        onClearRecent = { recents.clear(); Bookmarks(applicationContext).clearAll() },
+                        onClearRecent = { recents.clear(); Bookmarks(applicationContext).clearAll(); ua.hramota.data.Library.get(applicationContext).clearAll() },
                         onBack = { showSettings = false },
                     ) else HomeScreen(
                         recents = files,
@@ -65,9 +65,9 @@ class MainActivity : ComponentActivity() {
                         onOpenFile = { pick.launch(arrayOf("*/*")) },
                         onCompare = { comparing = true; compareFirst = null; pick.launch(arrayOf("*/*")) },
                         onOpenRecent = { openViewer(Uri.parse(it.uri), it.name) },
-                        // Forgetting a file also forgets its bookmarks
-                        onRemove = { recents.remove(it.uri); Bookmarks(applicationContext).remove(it.uri) },
-                        onClear = { recents.clear(); Bookmarks(applicationContext).clearAll() },
+                        // The recent list only: bookmarks and the shelf stay with the documents
+                        onRemove = { recents.remove(it.uri) },
+                        onClear = { recents.clear() },
                         onSettings = { showSettings = true },
                     )
                 }

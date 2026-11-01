@@ -114,6 +114,9 @@ fun ViewerScreen(
     startInOverview: Boolean = false,
     startSearch: String? = null,
     showInspector: Boolean = true,
+    /** Where reading stopped last time (page, or position in the text); reported back as it changes. */
+    startPosition: Int = 0,
+    onPosition: (Int, Int) -> Unit = { _, _ -> },
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
@@ -124,6 +127,8 @@ fun ViewerScreen(
     // After rotation the saved page may not be laid out yet: go there once it is
     var savedPage by rememberSaveable { mutableIntStateOf(0) }
     var restored by remember { mutableStateOf(false) }
+    // Opening a document again: go to where reading stopped (once its pages are there)
+    LaunchedEffect(startPosition) { if (startPosition > 0 && savedPage == 0) { savedPage = startPosition; restored = false } }
     val laidPages = (state as? ViewerState.Paged)?.pages
     LaunchedEffect(current, laidPages?.pageCount, laidPages?.complete) {
         if (laidPages == null) return@LaunchedEffect
@@ -152,6 +157,19 @@ fun ViewerScreen(
         else -> null
     }
     val inPages = readingParagraphs == null && textPages != null
+
+    // Where reading is, saved a moment after scrolling stops; a text (a book) also opens where it stopped
+    val position by remember(inPages) { derivedStateOf { if (inPages) list.firstVisibleItemIndex else textList.firstVisibleItemIndex } }
+    var textRestored by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state is ViewerState.Text, startPosition) {
+        if (state is ViewerState.Text && !textRestored && startPosition > 0) { textList.scrollToItem(startPosition); textRestored = true }
+    }
+    LaunchedEffect(position, restored) {
+        if (state is ViewerState.Loading || (inPages && !restored)) return@LaunchedEffect
+        delay(800)
+        val total = if (inPages) laidPages?.pageCount ?: 0 else textList.layoutInfo.totalItemsCount
+        onPosition(position, total)
+    }
 
     // Search: pages are scanned in order and results appear as they are found
     var searching by rememberSaveable { mutableStateOf(startSearch != null) }
