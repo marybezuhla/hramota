@@ -6,6 +6,12 @@ import android.graphics.Canvas
 import android.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import java.io.Closeable
+import java.util.concurrent.CountDownLatch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -15,18 +21,64 @@ import ua.hramota.doc.TextPages
 
 /**
  * A DOCX laid out on pages once, then drawn page by page at the width it is shown.
- * Create off the main thread: the layout of a long document takes a moment.
+ * Create off the main thread. With [background], the constructor returns as soon as the first page
+ * is ready and the rest is laid out on other threads; [pageCount] grows (and the screen with it)
+ * until [complete]. Without it, everything is laid out before the constructor returns.
  */
-class DocxPages(doc: DocxDocument, fonts: Fonts) : TextPages {
+class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : TextPages, Closeable {
     private val pictures = PictureCache(doc)
     private val layout = DocxLayout(doc, fonts) { rel, w, h -> pictures.get(rel, w, h) }
-    val pages: List<LaidOutPage> = layout.layout()
+    private val laidOut = ArrayList<LaidOutPage>()
     private val ratio = (layout.pageHeight / layout.pageWidth).takeIf { it.isFinite() && it > 0f } ?: 1.414f
     private val lock = Mutex()
     private val painter = PagePainter()
 
-    override val pageCount: Int get() = pages.size
+    /** Pages laid out so far; read by the screen, so it follows as the count grows. */
+    private var count by mutableIntStateOf(0)
+    private var done by mutableStateOf(false)
+    override val complete: Boolean get() = done
+    @Volatile private var closed = false
+    /** Why layout stopped early, if it did (shown instead of a silent end). */
+    @Volatile var failure: Throwable? = null
+        private set
+
+    private fun add(page: LaidOutPage) {
+        synchronized(laidOut) { laidOut += page }
+        count = synchronized(laidOut) { laidOut.size }
+    }
+
+    init {
+        if (!background) {
+            layout.layout(onPage = ::add)
+            done = true
+        } else {
+            val first = CountDownLatch(1)
+            Thread({
+                try {
+                    layout.layout(parallel = true, stop = { closed }) { add(it); first.countDown() }
+                } catch (e: Throwable) {
+                    // Out of memory or a broken document part: keep the pages done so far
+                    failure = e
+                } finally {
+                    done = true
+                    first.countDown()
+                }
+            }, "docx-pages").apply { isDaemon = true }.start()
+            first.await()
+            failure?.let { if (count == 0) throw it }
+        }
+    }
+
+    /** The pages laid out so far (a copy). */
+    val pages: List<LaidOutPage> get() = synchronized(laidOut) { laidOut.toList() }
+    private fun page(index: Int): LaidOutPage? = synchronized(laidOut) { laidOut.getOrNull(index) }
+    private val indices: IntRange get() = 0 until synchronized(laidOut) { laidOut.size }
+
+    override val pageCount: Int get() = count
     override fun aspect(index: Int): Float = ratio
+
+    /** Stops laying out (the window was closed). */
+    override fun close() { closed = true }
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.Default) {
         lock.withLock { draw(index, widthPx)?.asImageBitmap() }
@@ -35,14 +87,14 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : TextPages {
     /** One paragraph slice on a page and where its text starts in the page's text. */
     private class Segment(val item: PageItem.Text, val pageStart: Int, val layoutStart: Int, val layoutEnd: Int)
 
-    private val pageTexts = arrayOfNulls<Pair<String, List<Segment>>>(pages.size)
+    private val pageTexts = HashMap<Int, Pair<String, List<Segment>>>()
 
     /** The page's text in reading order (paragraphs joined by a line break) and where each slice sits in it. */
     private fun textOf(index: Int): Pair<String, List<Segment>> {
         pageTexts[index]?.let { return it }
         val sb = StringBuilder()
         val segments = ArrayList<Segment>()
-        for (item in pages[index].items) {
+        for (item in page(index)?.items.orEmpty()) {
             if (item !is PageItem.Text) continue
             val l = item.layout
             val a = l.getLineStart(item.first)
@@ -56,11 +108,11 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : TextPages {
     }
 
     override suspend fun pageText(index: Int): String = withContext(Dispatchers.Default) {
-        if (index !in pages.indices) "" else lock.withLock { textOf(index).first }
+        if (index !in indices) "" else lock.withLock { textOf(index).first }
     }
 
     override suspend fun boxes(index: Int, start: Int, end: Int): List<PageBox> = withContext(Dispatchers.Default) {
-        if (index !in pages.indices || end <= start) return@withContext emptyList()
+        if (index !in indices || end <= start) return@withContext emptyList()
         lock.withLock {
             val out = ArrayList<PageBox>()
             for (seg in textOf(index).second) {
@@ -88,7 +140,7 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : TextPages {
     }
 
     override suspend fun charAt(index: Int, x: Float, y: Float): Int = withContext(Dispatchers.Default) {
-        if (index !in pages.indices) return@withContext -1
+        if (index !in indices) return@withContext -1
         lock.withLock {
             val ux = x * layout.pageWidth
             val uy = y * layout.pageHeight
@@ -109,14 +161,15 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : TextPages {
 
     /** Draws page [index] into a new bitmap [widthPx] wide (also used by tests). */
     fun draw(index: Int, widthPx: Int): Bitmap? {
-        if (index !in pages.indices || widthPx <= 0) return null
+        val page = page(index) ?: return null
+        if (widthPx <= 0) return null
         val w = widthPx.coerceAtMost(2048)
         val h = (w * ratio).toInt().coerceIn(1, 2048 * 3)
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         bitmap.eraseColor(Color.WHITE)
         val canvas = Canvas(bitmap)
         canvas.scale(w / layout.pageWidth, w / layout.pageWidth)
-        painter.draw(canvas, pages[index])
+        painter.draw(canvas, page)
         return bitmap
     }
 }
@@ -127,7 +180,7 @@ private class PictureCache(private val doc: DocxDocument) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?) = size > 12
     }
 
-    fun get(rel: String, w: Int, h: Int): Bitmap? {
+    @Synchronized fun get(rel: String, w: Int, h: Int): Bitmap? {
         val key = "$rel@${w / 64}"
         cache[key]?.let { return it }
         val bytes = doc.picture(rel) ?: return null

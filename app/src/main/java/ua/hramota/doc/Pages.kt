@@ -4,7 +4,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 
 /** Pages of a document (PDF or laid-out DOCX), drawn on demand at the width they are shown. */
 interface Pages {
+    /** Pages ready so far; a long DOCX is still being laid out while the first pages are shown. */
     val pageCount: Int
+    /** False while more pages may still come. */
+    val complete: Boolean get() = true
     /** Height divided by width of page [index]. */
     fun aspect(index: Int): Float
     suspend fun render(index: Int, widthPx: Int): ImageBitmap?

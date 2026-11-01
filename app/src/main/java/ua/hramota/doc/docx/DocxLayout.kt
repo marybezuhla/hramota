@@ -19,6 +19,10 @@ import android.text.style.StrikethroughSpan
 import android.text.style.TabStopSpan
 import android.text.style.TypefaceSpan
 import android.text.style.UnderlineSpan
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -26,12 +30,39 @@ import kotlin.math.roundToInt
 /** Something drawn on a page, in layout units ([DocxLayout.U] per point). */
 sealed interface PageItem {
     /** Lines [first]..[last] of a paragraph layout, their top at ([x], [y]). */
-    class Text(val layout: StaticLayout, val first: Int, val last: Int, val x: Float, val y: Float) : PageItem
+    class Text(val source: TextSource, val first: Int, val last: Int, val x: Float, val y: Float) : PageItem {
+        val layout: StaticLayout get() = source.layout
+    }
     class Fill(val rect: RectF, val color: Int) : PageItem
     class Rule(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val width: Float) : PageItem
 }
 
 class LaidOutPage(val items: List<PageItem>)
+
+/**
+ * A paragraph's layout, built when it is needed and kept in a small shared cache: pages remember
+ * only where lines go, so a document of a thousand pages never holds all its layouts at once.
+ * Building again gives the same layout (same text, fonts and width).
+ */
+class TextSource internal constructor(private val cache: LayoutCache, private val build: () -> StaticLayout) {
+    val layout: StaticLayout get() = cache.get(this, build)
+    /** A new layout, not kept (for measuring). */
+    fun fresh(): StaticLayout = build()
+}
+
+/** The most recently used paragraph layouts. */
+class LayoutCache(private val max: Int) {
+    private val map = object : LinkedHashMap<TextSource, StaticLayout>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TextSource, StaticLayout>?) = size > max
+    }
+    fun get(key: TextSource, build: () -> StaticLayout): StaticLayout {
+        synchronized(this) { map[key]?.let { return it } }
+        // Built outside the lock, so pages being drawn never wait for one another's paragraphs
+        val layout = build()
+        synchronized(this) { map[key] = layout }
+        return layout
+    }
+}
 
 /**
  * Lays a DOCX out on pages the way Word does: Word's line heights, greedy line breaking without
@@ -45,7 +76,13 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         fun tw(twips: Int): Float = twips * U / 20f
         private const val DEFAULT_TAB = 720
         private const val CELL_MARGIN = 108
+        /** Paragraphs and rows measured as one piece of work. */
+        private const val WINDOW = 48
+        private val THREADS = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 6)
     }
+
+    /** Layouts of the paragraphs on the last few pages drawn or searched. */
+    private val cache = LayoutCache(512)
 
     val pageWidth = tw(doc.page.width)
     val pageHeight = tw(doc.page.height)
@@ -62,26 +99,42 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         typeface = fonts.typeface(Fonts.Family.CARLITO, bold = false, italic = false)
     }
 
-    fun layout(): List<LaidOutPage> {
+    /** Each measuring thread has its own copy of the paint. */
+    private val paints = ThreadLocal.withInitial { TextPaint(basePaint) }
+
+    /**
+     * Lays out every page. With [parallel], paragraphs and table rows are measured on several threads
+     * a little ahead of placing them; [onPage] receives each page as soon as it is complete, and
+     * [stop] ends the work early (the window was closed).
+     */
+    fun layout(parallel: Boolean = false, stop: () -> Boolean = { false }, onPage: (LaidOutPage) -> Unit = {}): List<LaidOutPage> {
+        val pool = if (parallel) Executors.newFixedThreadPool(THREADS) { r -> Thread(r, "docx-layout").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 } } else null
+        try { return place(Ahead(split(doc.blocks), pool), stop, onPage) } finally { pool?.shutdownNow() }
+    }
+
+    private fun place(ahead: Ahead, stop: () -> Boolean, onPage: (LaidOutPage) -> Unit): List<LaidOutPage> {
         val pages = ArrayList<LaidOutPage>()
         var items = ArrayList<PageItem>()
         var y = top
         var firstPage = true
         var pendingAfter = 0f
         fun newPage() {
-            pages += LaidOutPage(items); items = ArrayList(); y = top; firstPage = false; pendingAfter = 0f
+            val page = LaidOutPage(items)
+            pages += page; onPage(page)
+            items = ArrayList(); y = top; firstPage = false; pendingAfter = 0f
         }
         fun atTop() = items.isEmpty()
 
-        val blocks = split(doc.blocks)
+        val blocks = ahead.blocks
         var prev: Block.Para? = null
         for ((index, entry) in blocks.withIndex()) {
+            if (stop()) return pages
             val (block, breakBefore) = entry
             if (breakBefore && !atTop()) newPage()
             when (block) {
                 is Block.Para -> {
                     if (block.props.pageBreakBefore == true && !atTop()) newPage()
-                    val p = paragraph(block, contentWidth)
+                    val p = ahead.para(index)
                     // "Don't add space between paragraphs of the same style" works on both sides of the gap
                     val nextBlock = blocks.getOrNull(index + 1)?.first as? Block.Para
                     val sameAsPrev = prev?.props?.styleId == block.props.styleId
@@ -93,7 +146,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                     if (atTop() && !firstPage) before = 0f
                     val next = blocks.getOrNull(index + 1)?.first
                     if (block.props.keepNext == true && next is Block.Para && !atTop()) {
-                        val nextP = paragraph(next, contentWidth)
+                        val nextP = ahead.para(index + 1)
                         val need = gap(pendingAfter, before) + p.height + gap(p.after, nextP.before) + nextP.lineHeight(0) + if (nextP.lines > 1) nextP.lineHeight(1) else 0f
                         if (y + need > bottom && need <= bottom - top) newPage().also { before = 0f }
                     }
@@ -114,7 +167,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                         }
                         val sliceH = (line until line + fit).sumOf { p.lineHeight(it).toDouble() }.toFloat()
                         p.shading?.let { items += PageItem.Fill(RectF(left + p.shadeLeft, y, left + contentWidth - p.shadeRight, y + sliceH), it) }
-                        items += PageItem.Text(p.layout, line, line + fit - 1, left + p.x, y)
+                        items += PageItem.Text(p.source, line, line + fit - 1, left + p.x, y)
                         y += sliceH
                         line += fit
                         if (line < p.lines) newPage()
@@ -126,7 +179,9 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 is Block.Table -> {
                     prev = null
                     y = min(y + pendingAfter, bottom); pendingAfter = 0f
-                    for (row in tableRows(block)) {
+                    for (r in block.rows.indices) {
+                        if (stop()) return pages
+                        val row = ahead.row(index, r)
                         // A row that cannot break (exact height, "don't split") moves whole to the next page
                         if ((row.exact || row.cantSplit) && y + row.height > bottom && !atTop()) newPage()
                         val next = IntArray(row.cells.size)
@@ -146,8 +201,71 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 }
             }
         }
-        pages += LaidOutPage(items)
+        val last = LaidOutPage(items)
+        pages += last; onPage(last)
         return pages
+    }
+
+    /**
+     * Paragraphs and table rows measured ahead of placement: the work is cut into windows of
+     * [WINDOW] pieces, several computed at once; windows already placed are let go.
+     */
+    private inner class Ahead(val blocks: List<Pair<Block, Boolean>>, private val pool: ExecutorService?) {
+        private val firstUnit = IntArray(blocks.size + 1)
+        private val tables = arrayOfNulls<TableGeometry>(blocks.size)
+        private val unitBlock: IntArray
+        private val results: Array<Any?>
+        private val futures = HashMap<Int, Future<*>>()
+
+        init {
+            var n = 0
+            for ((i, e) in blocks.withIndex()) {
+                firstUnit[i] = n
+                n += when (val b = e.first) {
+                    is Block.Para -> 1
+                    is Block.Table -> { tables[i] = geometry(b); b.rows.size }
+                }
+            }
+            firstUnit[blocks.size] = n
+            unitBlock = IntArray(n)
+            for (i in blocks.indices) for (u in firstUnit[i] until firstUnit[i + 1]) unitBlock[u] = i
+            results = arrayOfNulls(n)
+        }
+
+        fun para(block: Int): Para = get(firstUnit[block]) as Para
+        fun row(block: Int, row: Int): LaidRow = get(firstUnit[block] + row) as LaidRow
+
+        private fun compute(u: Int): Any {
+            val i = unitBlock[u]
+            return when (val b = blocks[i].first) {
+                is Block.Para -> paragraph(b, contentWidth)
+                is Block.Table -> tableRow(b.rows[u - firstUnit[i]], tables[i]!!)
+            }
+        }
+
+        private fun get(u: Int): Any {
+            if (pool == null) return compute(u)
+            val w = u / WINDOW
+            for (k in w..w + THREADS * 2) submit(k)
+            try { futures[w]?.get() } catch (e: ExecutionException) { throw e.cause ?: e }
+            // Windows behind the one being placed are no longer needed
+            val done = futures.keys.filter { it < w - 1 }
+            for (k in done) {
+                futures.remove(k)
+                for (x in k * WINDOW until minOf(results.size, (k + 1) * WINDOW)) results[x] = null
+            }
+            return results[u] ?: compute(u)
+        }
+
+        private fun submit(w: Int) {
+            if (w * WINDOW >= results.size || futures.containsKey(w)) return
+            futures[w] = pool!!.submit {
+                for (u in w * WINDOW until minOf(results.size, (w + 1) * WINDOW)) {
+                    if (Thread.currentThread().isInterrupted) return@submit
+                    results[u] = compute(u)
+                }
+            }
+        }
     }
 
     /** Splits paragraphs at page breaks; the flag says "start a new page before this". */
@@ -176,10 +294,11 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     }
 
     /** A paragraph laid out at a width, with its spacing in layout units. */
-    inner class Para(val layout: StaticLayout, val x: Float, val before: Float, val after: Float, val widow: Boolean, val shading: Int?, val shadeLeft: Float, val shadeRight: Float) {
-        val lines: Int get() = layout.lineCount
-        fun lineHeight(i: Int): Float = (layout.getLineBottom(i) - layout.getLineTop(i)).toFloat()
-        val height: Float get() = layout.height.toFloat()
+    /** A measured paragraph: where each line starts ([tops], with the bottom last), not the layout itself. */
+    inner class Para(val source: TextSource, val tops: FloatArray, val x: Float, val before: Float, val after: Float, val widow: Boolean, val shading: Int?, val shadeLeft: Float, val shadeRight: Float) {
+        val lines: Int get() = tops.size - 1
+        fun lineHeight(i: Int): Float = tops[i + 1] - tops[i]
+        val height: Float get() = tops[lines]
     }
 
     fun paragraph(b: Block.Para, width: Float): Para {
@@ -191,7 +310,19 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val firstIndent = f - min(0f, f)
         val restIndent = -min(0f, f)
         val layoutWidth = max(U, width - baseX - r).roundToInt()
+        val before = tw(if (pp.beforeAuto == true) 280 else pp.before ?: 0)
+        val after = tw(if (pp.afterAuto == true) 280 else pp.after ?: 0)
+        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth) }
+        val measured = source.fresh()
+        val n = measured.lineCount
+        val tops = FloatArray(n + 1) { if (it < n) measured.getLineTop(it).toFloat() else measured.getLineBottom(n - 1).toFloat() }
+        return Para(source, tops, baseX, before, after, pp.widowControl != false, pp.shading, l, r)
+    }
 
+    private fun build(b: Block.Para, width: Float, baseX: Float, firstIndent: Float, restIndent: Float, layoutWidth: Int): StaticLayout {
+        val pp = b.props
+        val l = tw(pp.left ?: 0)
+        val f = tw(pp.firstLine ?: 0)
         val text = SpannableStringBuilder()
         val metrics = ArrayList<Metric>()
         fun runSpans(start: Int, props: RunProps) {
@@ -269,7 +400,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             "right", "end" -> Layout.Alignment.ALIGN_OPPOSITE
             else -> Layout.Alignment.ALIGN_NORMAL
         }
-        val builder = StaticLayout.Builder.obtain(text, 0, text.length, basePaint, layoutWidth)
+        val builder = StaticLayout.Builder.obtain(text, 0, text.length, paints.get()!!, layoutWidth)
             .setAlignment(align)
             .setIncludePad(false)
             .setLineSpacing(0f, 1f)
@@ -278,10 +409,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
             .setIndents(intArrayOf(firstIndent.roundToInt(), restIndent.roundToInt()), null)
         if (pp.align == "both" || pp.align == "distribute") builder.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
-
-        val before = tw(if (pp.beforeAuto == true) 280 else pp.before ?: 0)
-        val after = tw(if (pp.afterAuto == true) 280 else pp.after ?: 0)
-        return Para(builder.build(), baseX, before, after, pp.widowControl != false, pp.shading, l, r)
+        return builder.build()
     }
 
     /** The gap between two paragraphs: the larger of the two spacings, or their sum if the document asks. */
@@ -294,7 +422,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     }
 
     /** One line of a cell, its top and bottom measured from the top of the row. */
-    private class LineSlot(val layout: StaticLayout, val line: Int, val x: Float, val top: Float, val bottom: Float)
+    private class LineSlot(val source: TextSource, val line: Int, val x: Float, val top: Float, val bottom: Float)
 
     /** A cell of a laid-out row: where it is, its lines, and where its content ends (with spacing after). */
     private class CellLines(val x: Float, val width: Float, val shading: Int?, val mergedAbove: Boolean, val lines: List<LineSlot>, val end: Float)
@@ -325,7 +453,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 val start = i
                 while (i < lines.size && (lines[i].bottom - base <= avail || (forceOne && i == start))) {
                     val l = lines[i]
-                    out += PageItem.Text(l.layout, l.line, l.line, l.x, l.top - base)
+                    out += PageItem.Text(l.source, l.line, l.line, l.x, l.top - base)
                     i++
                 }
                 if (i > start) {
@@ -361,8 +489,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             for (item in lines) {
                 val t = item as PageItem.Text
                 val prev = out.lastOrNull() as? PageItem.Text
-                if (prev != null && prev.layout === t.layout && prev.last + 1 == t.first && prev.x == t.x) {
-                    out[out.size - 1] = PageItem.Text(prev.layout, prev.first, t.last, prev.x, prev.y)
+                if (prev != null && prev.source === t.source && prev.last + 1 == t.first && prev.x == t.x) {
+                    out[out.size - 1] = PageItem.Text(prev.source, prev.first, t.last, prev.x, prev.y)
                 } else out += t
             }
             return out
@@ -370,12 +498,15 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     }
 
     private fun PageItem.moved(dx: Float, dy: Float): PageItem = when (this) {
-        is PageItem.Text -> PageItem.Text(layout, first, last, x + dx, y + dy)
+        is PageItem.Text -> PageItem.Text(source, first, last, x + dx, y + dy)
         is PageItem.Fill -> PageItem.Fill(RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy), color)
         is PageItem.Rule -> PageItem.Rule(x1 + dx, y1 + dy, x2 + dx, y2 + dy, width)
     }
 
-    private fun tableRows(t: Block.Table): List<LaidRow> {
+    /** Where a table's columns are: computed once per table. */
+    private class TableGeometry(val cols: List<Float>, val edges: FloatArray, val x0: Float, val margin: Float, val inset: Float, val borders: Boolean)
+
+    private fun geometry(t: Block.Table): TableGeometry {
         val spans = (t.rows.maxOfOrNull { r -> r.cells.sumOf { it.span } } ?: 1).coerceIn(1, DocxReader.MAX_COLUMNS)
         val grid = if (t.columns.isNotEmpty() && t.columns.sum() > 0) t.columns.map { tw(it) } else List(spans) { contentWidth / spans }
         // Cells may span past the grid: extra columns get the last width
@@ -386,46 +517,48 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         // Before Word 2013 the table's edge sits one cell margin left of the text, so cell text lines up with it
         val x0 = left + tw(t.indent) - if (doc.compatibilityMode < 15) margin else 0f
         val rule = U * 0.5f
-        val inset = if (t.borders) rule else 0f
-        return t.rows.map { row ->
-            var col = 0
-            var height = 0f
-            val cells = ArrayList<CellLines>()
-            for (cell in row.cells) {
-                if (col >= cols.size) break
-                val end = minOf(col + cell.span, cols.size)
-                val cx = x0 + edges[col]
-                val cw = edges[end] - edges[col]
-                col = end
-                val lines = ArrayList<LineSlot>()
-                // Borders take room inside the row
-                var y = inset
-                if (!cell.mergedAbove) {
-                    var cellAfter = 0f
-                    val paras = flatten(cell.blocks)
-                    for ((k, p) in paras.withIndex()) {
-                        val laid = paragraph(p, max(U, cw - 2 * margin))
-                        val prevP = paras.getOrNull(k - 1)
-                        val nextP = paras.getOrNull(k + 1)
-                        val same = { o: Block.Para? -> o != null && o.props.styleId == p.props.styleId && (o.props.contextual == true || p.props.contextual == true) }
-                        y += gap(cellAfter, if (same(prevP)) 0f else laid.before)
-                        val l = laid.layout
-                        for (line in 0 until l.lineCount) {
-                            lines += LineSlot(l, line, cx + margin + laid.x, y + l.getLineTop(line), y + l.getLineBottom(line))
-                        }
-                        y += laid.height
-                        cellAfter = if (same(nextP)) 0f else laid.after
+        return TableGeometry(cols, edges, x0, margin, if (t.borders) rule else 0f, t.borders)
+    }
+
+    /** One table row laid out from y = 0; rows are measured one at a time, so a long table is never all in memory. */
+    private fun tableRow(row: Row, g: TableGeometry): LaidRow {
+        val cols = g.cols; val edges = g.edges; val margin = g.margin; val inset = g.inset
+        var col = 0
+        var height = 0f
+        val cells = ArrayList<CellLines>()
+        for (cell in row.cells) {
+            if (col >= cols.size) break
+            val end = minOf(col + cell.span, cols.size)
+            val cx = g.x0 + edges[col]
+            val cw = edges[end] - edges[col]
+            col = end
+            val lines = ArrayList<LineSlot>()
+            // Borders take room inside the row
+            var y = inset
+            if (!cell.mergedAbove) {
+                var cellAfter = 0f
+                val paras = flatten(cell.blocks)
+                for ((k, p) in paras.withIndex()) {
+                    val laid = paragraph(p, max(U, cw - 2 * margin))
+                    val prevP = paras.getOrNull(k - 1)
+                    val nextP = paras.getOrNull(k + 1)
+                    val same = { o: Block.Para? -> o != null && o.props.styleId == p.props.styleId && (o.props.contextual == true || p.props.contextual == true) }
+                    y += gap(cellAfter, if (same(prevP)) 0f else laid.before)
+                    for (line in 0 until laid.lines) {
+                        lines += LineSlot(laid.source, line, cx + margin + laid.x, y + laid.tops[line], y + laid.tops[line + 1])
                     }
-                    // Space after the last paragraph of a cell still counts, as in Word
-                    y += cellAfter
+                    y += laid.height
+                    cellAfter = if (same(nextP)) 0f else laid.after
                 }
-                height = max(height, y)
-                cells += CellLines(cx, cw, cell.shading, cell.mergedAbove, lines, y)
+                // Space after the last paragraph of a cell still counts, as in Word
+                y += cellAfter
             }
-            val min = row.height?.let { tw(it) } ?: 0f
-            if (row.exact) height = min else height = max(height, min)
-            LaidRow(cells, height, min, row.exact, row.cantSplit, t.borders, inset)
+            height = max(height, y)
+            cells += CellLines(cx, cw, cell.shading, cell.mergedAbove, lines, y)
         }
+        val min = row.height?.let { tw(it) } ?: 0f
+        if (row.exact) height = min else height = max(height, min)
+        return LaidRow(cells, height, min, row.exact, row.cantSplit, g.borders, inset)
     }
 
     /** Paragraphs of a cell; a table inside a cell is read row by row for now. */

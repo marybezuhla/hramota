@@ -86,16 +86,17 @@ class BigDocumentsDeviceTest {
         val bytes = BigDocs.docxTable(ROWS, 1)
         val before = heapMb()
         val (doc, readMs) = timed { DocxReader.read(ByteArrayInputStream(bytes)) }
-        val (pages, layoutMs) = timed { DocxPages(doc, appFonts(context)) }
+        val (pages, firstMs) = timed { DocxPages(doc, appFonts(context), background = true) }
+        val (_, layoutMs) = timed { while (!pages.complete) Thread.sleep(5) }
         val after = heapMb()
         val (bitmap, drawMs) = timed { pages.draw(pages.pageCount - 1, 1080) }
         val (hit, searchMs) = timed { (0 until pages.pageCount).lastOrNull { Search.find(pages.pageText(it), BigDocs.NEEDLE).isNotEmpty() } }
         val pss = Debug.getPss() / 1024
-        log("DOCX table $ROWS rows: ${pages.pageCount} pages; read $readMs ms, layout $layoutMs ms, heap +${after - before} MB (PSS $pss MB), draw last $drawMs ms, search all $searchMs ms")
+        log("DOCX table $ROWS rows: ${pages.pageCount} pages; read $readMs ms, first page $firstMs ms, all pages +$layoutMs ms, heap +${after - before} MB (PSS $pss MB), draw last $drawMs ms, search all $searchMs ms")
         assertTrue("pages: ${pages.pageCount}", pages.pageCount >= 900)
         assertNotNull(bitmap)
         assertTrue("found on $hit", hit != null && hit >= pages.pageCount - 2)
-        assertTrue("open took ${readMs + layoutMs} ms", readMs + layoutMs < 60_000)
+        assertTrue("first page after ${readMs + firstMs} ms", readMs + firstMs < 15_000)
     }
 
     @Test fun compareThousandPages() {
