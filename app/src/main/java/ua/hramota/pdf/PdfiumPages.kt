@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.os.SharedMemory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -62,7 +64,7 @@ class PdfiumPages private constructor(
     /** True once shared memory failed for this document; pages then come in parts over Binder. */
     @Volatile private var inParts = false
     /** Why a page could not be drawn; shown on the page (screen state, so it appears as soon as it is known). */
-    override var problem: String? by androidx.compose.runtime.mutableStateOf(null)
+    override var problem: String? by androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
