@@ -67,16 +67,20 @@ private data class Level(
     val align: String? = null, val marginLeft: Float? = null, val indent: Float? = null,
     val spaceBefore: Float? = null, val spaceAfter: Float? = null, val lineSpacing: Float? = null, val lineExact: Float? = null,
     val bullet: String? = null, val bulletNone: Boolean? = null, val autoNumber: String? = null, val bulletColor: Int? = null,
+    /** Spacing as a share of the line (spcPct), used when no points are given. */
+    val spaceBeforePct: Float? = null, val spaceAfterPct: Float? = null,
 ) {
     fun with(o: Level?): Level = if (o == null) this else Level(
         o.size ?: size, o.bold ?: bold, o.italic ?: italic, o.color ?: color, o.font ?: font,
         o.align ?: align, o.marginLeft ?: marginLeft, o.indent ?: indent,
-        o.spaceBefore ?: spaceBefore, o.spaceAfter ?: spaceAfter,
+        if (o.spaceBeforePct != null) null else o.spaceBefore ?: spaceBefore, if (o.spaceAfterPct != null) null else o.spaceAfter ?: spaceAfter,
         if (o.lineExact != null) null else o.lineSpacing ?: lineSpacing, if (o.lineSpacing != null) null else o.lineExact ?: lineExact,
         if (o.bulletNone == true || o.autoNumber != null) null else o.bullet ?: bullet,
         if (o.bullet != null || o.autoNumber != null) false else o.bulletNone ?: bulletNone,
         if (o.bulletNone == true || o.bullet != null) null else o.autoNumber ?: autoNumber,
         o.bulletColor ?: bulletColor,
+        if (o.spaceBefore != null) null else o.spaceBeforePct ?: spaceBeforePct,
+        if (o.spaceAfter != null) null else o.spaceAfterPct ?: spaceAfterPct,
     )
 }
 
@@ -212,6 +216,8 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
             bulletNone = if (pPr?.child("buNone") != null) true else null,
             autoNumber = pPr?.child("buAutoNum")?.attr("type"),
             bulletColor = pPr?.child("buClr")?.let { color(it) },
+            spaceBeforePct = pPr?.child("spcBef")?.child("spcPct")?.attr("val")?.toFloatOrNull()?.let { it / 100000f },
+            spaceAfterPct = pPr?.child("spcAft")?.child("spcPct")?.attr("val")?.toFloatOrNull()?.let { it / 100000f },
         )
     }
 
@@ -413,8 +419,9 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
                 bulletColor = l.bulletColor,
                 marginLeft = l.marginLeft ?: 0f,
                 indent = l.indent ?: 0f,
-                spaceBefore = (l.spaceBefore ?: 0f) * (1 - spacingCut),
-                spaceAfter = (l.spaceAfter ?: 0f) * (1 - spacingCut),
+                // A percentage is of the line: the font size times 1.2
+                spaceBefore = (l.spaceBefore ?: (l.spaceBeforePct ?: 0f) * (runs.firstOrNull()?.size ?: endSize * scale) * 1.2f) * (1 - spacingCut),
+                spaceAfter = (l.spaceAfter ?: (l.spaceAfterPct ?: 0f) * (runs.firstOrNull()?.size ?: endSize * scale) * 1.2f) * (1 - spacingCut),
                 lineSpacing = ((l.lineSpacing ?: 1f) - spacingCut).coerceAtLeast(0.5f),
                 lineExact = l.lineExact,
                 emptySize = endSize * scale,
