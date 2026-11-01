@@ -49,13 +49,13 @@ class DiffTest {
         assertEquals(Block.Added("Nothing in common at all"), c.blocks[2])
     }
 
-    // Nothing in common and too large for an exact match: paragraphs are paired in order
+    // Nothing in common and too large for an exact match: removed, then added, not paired by chance
     @Test fun hugeDifferenceFallsBackToBlock() {
         val a = List(3000) { "old line $it" }
         val b = List(3000) { "new line $it" }
         val c = Diff.compare(a, b)
         assertTrue(c.coarse)
-        assertEquals(3000, c.changes.size)
+        assertEquals(6000, c.changes.size)
     }
 
     // Large documents with a few changes are matched exactly, wherever the changes are

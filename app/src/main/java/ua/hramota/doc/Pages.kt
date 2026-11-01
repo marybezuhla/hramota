@@ -8,6 +8,8 @@ interface Pages {
     val pageCount: Int
     /** False while more pages may still come. */
     val complete: Boolean get() = true
+    /** True if laying out stopped before the end (not enough memory): the pages shown are not all. */
+    val cutShort: Boolean get() = false
     /** Height divided by width of page [index]. */
     fun aspect(index: Int): Float
     suspend fun render(index: Int, widthPx: Int): ImageBitmap?

@@ -60,9 +60,10 @@ class ViewerActivity : ComponentActivity() {
                                     format == Format.PDF -> openPdf(uri) { opened = it }
                                     format == Format.DOCX -> {
                                         val doc = contentResolver.openInputStream(uri)?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        val reading = doc.readingText()
                                         // The first page shows at once; the rest is laid out while reading
                                         val pages = DocxPages(doc, appFonts(applicationContext), background = true).also { opened = it }
-                                        ViewerState.Paged(pages, doc.readingText(), doc.inspection)
+                                        ViewerState.Paged(pages, reading, doc.inspection)
                                     }
                                     format == Format.CSV -> ViewerState.Table(
                                         contentResolver.openInputStream(uri)?.use { CsvReader.read(it) } ?: return@withContext ViewerState.Failed,

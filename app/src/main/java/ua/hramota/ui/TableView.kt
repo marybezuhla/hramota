@@ -93,7 +93,8 @@ private fun TableRow(row: List<String>, widths: List<Dp>, header: Boolean, grid:
 private fun Cell(text: String, width: Dp, header: Boolean, grid: Color, hits: List<SearchHit>?, current: SearchHit?, offset: Int) {
     // A cell shows at most four lines of a narrow column; more text would only cost layout time
     Text(
-        highlighted(if (text.length > SHOWN) text.take(SHOWN) + "…" else text, hits, current, offset),
+        // A match past the shown part is not drawn over the "…"
+        highlighted(if (text.length > SHOWN) text.take(SHOWN) + "…" else text, hits?.map { if (it.end > offset + SHOWN) it.copy(end = offset + SHOWN) else it }, current?.let { if (it.end > offset + SHOWN) it.copy(end = offset + SHOWN) else it }, offset),
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = if (header) FontWeight.SemiBold else null,
         maxLines = if (header) 2 else 4,
