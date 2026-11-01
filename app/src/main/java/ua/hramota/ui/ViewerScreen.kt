@@ -102,6 +102,8 @@ sealed interface ViewerState {
     data class Sheets(val workbook: ua.hramota.doc.sheet.Workbook) : ViewerState
     /** Pages as they print; [reading] is the same text for the reading view, when there is one. */
     data class Paged(val pages: Pages, val reading: List<Paragraph>? = null, val inspection: Inspection? = null) : ViewerState
+    /** A book (EPUB, FB2): read as a flowing text; its position and bookmarks are block numbers. */
+    data class Reader(val book: ua.hramota.doc.book.Book) : ViewerState
 }
 
 @Composable
@@ -155,6 +157,7 @@ fun ViewerScreen(
         readingParagraphs != null -> remember(readingParagraphs) { Searchable(readingParagraphs.size) { readingParagraphs[it].text } }
         textPages != null -> remember(textPages) { Searchable({ textPages.pageCount }, { textPages.pageText(it) }, { textPages.complete }) }
         state is ViewerState.Text -> remember(state) { Searchable(state.paragraphs.size) { state.paragraphs[it].text } }
+        state is ViewerState.Reader -> remember(state) { Searchable(state.book.blocks.size) { blockText(state.book.blocks[it]) } }
         state is ViewerState.Table -> remember(state) { Searchable(state.table.rows.size) { rowText(state.table.rows[it]) } }
         currentSheet != null -> remember(currentSheet) { Searchable(currentSheet.rows.size) { sheetRowText(currentSheet, currentSheet.rows[it]) } }
         else -> null
@@ -164,8 +167,9 @@ fun ViewerScreen(
     // Where reading is, saved a moment after scrolling stops; a text (a book) also opens where it stopped
     val position by remember(inPages) { derivedStateOf { if (inPages) list.firstVisibleItemIndex else textList.firstVisibleItemIndex } }
     var textRestored by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(state is ViewerState.Text, startPosition) {
-        if (state is ViewerState.Text && !textRestored && startPosition > 0) { textList.scrollToItem(startPosition); textRestored = true }
+    val flowing = state is ViewerState.Text || state is ViewerState.Reader
+    LaunchedEffect(flowing, startPosition) {
+        if (flowing && !textRestored && startPosition > 0) { textList.scrollToItem(startPosition); textRestored = true }
     }
     LaunchedEffect(position, restored) {
         if (state is ViewerState.Loading || (inPages && !restored)) return@LaunchedEffect
@@ -257,9 +261,10 @@ fun ViewerScreen(
             if (source != null) IconButton(onClick = { searching = true; selection = null }) {
                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_open))
             }
-            if (state is ViewerState.Paged && !reading) {
-                if (!overview) IconButton(onClick = { onToggleBookmark(current) }) {
-                    val marked = current in bookmarks
+            if ((state is ViewerState.Paged && !reading) || state is ViewerState.Reader) {
+                val here = if (state is ViewerState.Reader) textList.firstVisibleItemIndex else current
+                if (!overview) IconButton(onClick = { onToggleBookmark(here) }) {
+                    val marked = here in bookmarks
                     Icon(
                         if (marked) AppIcons.Bookmark else AppIcons.BookmarkOutline,
                         contentDescription = stringResource(if (marked) R.string.bookmark_remove else R.string.bookmark_add),
@@ -267,7 +272,7 @@ fun ViewerScreen(
                     )
                 }
                 IconButton(onClick = { overview = !overview }) {
-                    Icon(AppIcons.Overview, contentDescription = stringResource(R.string.overview), tint = if (overview) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                    Icon(AppIcons.Overview, contentDescription = stringResource(if (state is ViewerState.Reader) R.string.book_contents else R.string.overview), tint = if (overview) MaterialTheme.colorScheme.primary else LocalContentColor.current)
                 }
             }
             if (state is ViewerState.Paged && state.reading != null && !overview) {
@@ -291,6 +296,10 @@ fun ViewerScreen(
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                is ViewerState.Reader -> if (overview) BookContents(state.book, bookmarks, textList.firstVisibleItemIndex) { i ->
+                    overview = false
+                    scope.launch { textList.scrollToItem(i) }
+                } else BookDocument(state.book, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Sheets -> WorkbookDocument(
                     state.workbook, sheetIndex, { sheetIndex = it }, sheetState,

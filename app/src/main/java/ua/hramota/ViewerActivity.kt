@@ -26,6 +26,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ua.hramota.data.Recents
 import ua.hramota.doc.CsvReader
+import ua.hramota.doc.book.EpubReader
+import ua.hramota.doc.book.Fb2Reader
 import ua.hramota.doc.docx.WordBinaryReader
 import ua.hramota.doc.sheet.XlsReader
 import ua.hramota.doc.slides.PptxReader
@@ -53,7 +55,9 @@ class ViewerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val uri = intent.data
         if (uri == null) { finish(); return }
-        val name = Recents.displayName(this, uri)
+        // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
+        val ownCopy = uri.authority == "$packageName.files"
+        val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
         labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
         if (savedInstanceState == null) Recents(applicationContext).add(uri, name)
@@ -77,6 +81,7 @@ class ViewerActivity : ComponentActivity() {
                             val oldMarks = old.pages(uri.toString())
                             library.update(id) { e ->
                                 when {
+                                    e != null && ownCopy -> e.copy(openedAt = System.currentTimeMillis())
                                     e != null -> e.copy(title = name, uri = uri.toString(), openedAt = System.currentTimeMillis(), bookmarks = e.bookmarks.ifEmpty { oldMarks })
                                     remember || oldMarks.isNotEmpty() -> LibraryEntry(id, name, format.label, uri.toString(), bookmarks = oldMarks, openedAt = System.currentTimeMillis())
                                     else -> null
@@ -105,6 +110,9 @@ class ViewerActivity : ComponentActivity() {
                                         val deck = contentResolver.openInputStream(uri)?.use { if (format == Format.PPT) PptReader.read(it) else PptxReader.read(it) } ?: return@withContext ViewerState.Failed
                                         ViewerState.Paged(SlidePages(deck, appFonts(applicationContext)), deck.paragraphs { getString(R.string.slide_n, it) }, deck.inspection)
                                     }
+                                    format == Format.EPUB || format == Format.FB2 -> ViewerState.Reader(
+                                        contentResolver.openInputStream(uri)?.use { if (format == Format.EPUB) EpubReader.read(it) else Fb2Reader.read(it) } ?: return@withContext ViewerState.Failed,
+                                    )
                                     format == Format.XLS -> ViewerState.Sheets(contentResolver.openInputStream(uri)?.use { XlsReader.read(it) } ?: return@withContext ViewerState.Failed)
                                     format == Format.CSV -> ViewerState.Table(
                                         contentResolver.openInputStream(uri)?.use { CsvReader.read(it) } ?: return@withContext ViewerState.Failed,
@@ -128,6 +136,21 @@ class ViewerActivity : ComponentActivity() {
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             opened?.close()
                             throw e
+                        }
+                    }
+                    // A book goes on the shelf with a copy kept inside Hramota, and its cover picture as the cover
+                    LaunchedEffect(state, docId) {
+                        val book = (state as? ViewerState.Reader)?.book ?: return@LaunchedEffect
+                        val id = docId ?: return@LaunchedEffect
+                        val e = library.get(id) ?: return@LaunchedEffect
+                        withContext(Dispatchers.IO) {
+                            if (!e.onShelf) library.update(id) { it?.copy(onShelf = true) }
+                            if (e.copy == null && !ownCopy) library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) }
+                            if (!java.io.File(Library.coversDir(applicationContext), "$id.png").exists()) {
+                                val bytes = book.cover?.let { book.images[it] } ?: book.blocks.firstNotNullOfOrNull { (it as? ua.hramota.doc.book.BookBlock.Image)?.key?.let(book.images::get) }
+                                bytes?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleFor(b, 480) }) }
+                                    ?.let { ua.hramota.data.Shelf.saveCover(applicationContext, id, it) }
+                            }
                         }
                     }
                     // The first page becomes the document's cover on the shelf
@@ -211,4 +234,18 @@ class ViewerActivity : ComponentActivity() {
             ViewerState.Paged(PdfSource.open(again).also(onOpen))
         }
     }
+
+    companion object {
+        /** The document's name, for a copy kept inside Hramota (whose file is named by its fingerprint). */
+        const val EXTRA_NAME = "ua.hramota.NAME"
+    }
+}
+
+/** How much to shrink a picture when decoding so its width is about [width] pixels. */
+private fun sampleFor(bytes: ByteArray, width: Int): Int {
+    val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+    var s = 1
+    while (o.outWidth / (s * 2) >= width) s *= 2
+    return s
 }

@@ -147,4 +147,6 @@
     <string name="more">Більше</string>
     <string name="settings_wood">Дерев\'яна книжкова полиця</string>
     <string name="settings_wood_hint">Обкладинки на дерев\'яних полицях, як у класичних книжкових застосунках</string>
+    <string name="book_contents">Зміст</string>
+    <string name="book_bookmarks">Закладки</string>
 </resources>

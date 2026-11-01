@@ -57,6 +57,9 @@
                 <data android:mimeType="application/vnd.ms-excel" />
                 <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
                 <data android:mimeType="application/vnd.ms-powerpoint" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
             </intent-filter>
         </activity>
 

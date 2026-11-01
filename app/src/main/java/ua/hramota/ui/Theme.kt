@@ -110,6 +110,7 @@ fun FormatBadge(format: Format, modifier: Modifier = Modifier) {
         Format.DOCX, Format.DOC, Format.ODT, Format.RTF -> Color(0xFF2F5597)
         Format.XLSX, Format.XLS, Format.ODS, Format.CSV -> Color(0xFF2E7D4F)
         Format.PPTX, Format.PPT, Format.ODP -> Color(0xFFB0651F)
+        Format.EPUB, Format.FB2 -> Color(0xFF7A4E9C)
         else -> Color(0xFF6B6B6B)
     }
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
