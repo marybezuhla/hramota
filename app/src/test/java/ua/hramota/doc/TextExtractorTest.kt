@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -12,6 +13,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 @RunWith(AndroidJUnit4::class)
+@Config(sdk = [35])
 class TextExtractorTest {
     private fun zip(vararg parts: Pair<String, String>): ByteArrayInputStream {
         val out = ByteArrayOutputStream()
