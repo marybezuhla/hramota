@@ -1,5 +1,6 @@
 package ua.hramota.screens
 
+import ua.hramota.doc.book.BookBlock.Kind as K
 import android.app.Application
 import android.content.ComponentName
 import android.graphics.Bitmap
@@ -300,7 +301,6 @@ class ScreensTest {
 
     // A made-up book: chapters, an epigraph, styles and a poem
     private fun book(): ua.hramota.doc.book.Book {
-        val K = ua.hramota.doc.book.BookBlock.Kind
         fun t(text: String, kind: ua.hramota.doc.book.BookBlock.Kind = K.PARAGRAPH, vararg spans: ua.hramota.doc.book.Span) = ua.hramota.doc.book.BookBlock.Text(text, spans.toList(), kind)
         val p1 = "Над річкою стояв старий млин, і кожного ранку мірошник відчиняв його важкі двері ще до схід сонця."
         return ua.hramota.doc.book.Book("Казка про млин", "Олена Вигадана", listOf(
