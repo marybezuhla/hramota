@@ -120,6 +120,8 @@ class ViewerActivity : ComponentActivity() {
         throw e
     } catch (e: Exception) {
         ViewerState.Text(readText(this, uri, Format.DOC), Format.DOC)
+    } catch (e: StackOverflowError) {
+        ViewerState.Text(readText(this, uri, Format.DOC), Format.DOC)
     }
 
     /**

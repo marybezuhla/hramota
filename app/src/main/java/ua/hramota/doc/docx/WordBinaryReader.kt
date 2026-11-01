@@ -26,6 +26,18 @@ private fun u16(b: ByteArray, at: Int) = DocReader.u16(b, at)
 private fun s16(b: ByteArray, at: Int) = DocReader.u16(b, at).toShort().toInt()
 private fun i32(b: ByteArray, at: Int) = DocReader.i32(b, at)
 
+/** A growable list of ints without boxing. */
+private class IntList {
+    private var a = IntArray(64)
+    var size = 0
+        private set
+    operator fun plusAssign(v: Int) { if (size == a.size) a = a.copyOf(size * 2); a[size++] = v }
+    operator fun get(i: Int) = a[i]
+}
+
+/** Most formatting runs read from one file. */
+private const val MAX_RUNS = 4_000_000
+
 /** A property and where its operand is: (sprm, offset, length). */
 private class Sprm(val code: Int, val at: Int, val len: Int)
 
@@ -106,6 +118,8 @@ private class Parser(file: ByteArray) {
         if (flags and 0x0100 != 0) throw EncryptedDocumentException()
         table = ole.stream(if (flags and 0x0200 != 0) "1Table" else "0Table") ?: throw IOException("Table stream missing")
         data = ole.stream("Data")
+        // Streams cannot together be larger than the file (a file pointing them all at the same sectors)
+        if (word.size.toLong() + table.size + (data?.size ?: 0) > file.size.toLong() + 65536) throw IOException("Streams overlap")
     }
 
     // The file information block: text lengths and where each structure lives in the table stream
@@ -117,13 +131,12 @@ private class Parser(file: ByteArray) {
     private val fcLcbStart = lwStart + cslw * 4 + 2
     private val fcLcbCount = u16(word, fcLcbStart - 2)
 
-    /** From where structure [index] starts to the end of the table stream (list levels follow the list table). */
-    private fun partOnwards(index: Int): ByteArray? {
-        if (index >= fcLcbCount) return null
+    /** Where structure [index] starts in the table stream, or -1 (list levels follow the list table, so it is read in place). */
+    private fun start(index: Int): Int {
+        if (index >= fcLcbCount) return -1
         val fc = i32(word, fcLcbStart + index * 8)
         val lcb = i32(word, fcLcbStart + index * 8 + 4)
-        if (lcb <= 0 || fc < 0 || fc >= table.size) return null
-        return table.copyOfRange(fc, table.size)
+        return if (lcb <= 0 || fc < 0 || fc >= table.size) -1 else fc
     }
 
     private fun part(index: Int): ByteArray? {
@@ -199,6 +212,20 @@ private class Parser(file: ByteArray) {
     private val defaultRun = RunProps(font = "Times New Roman", size = 10f, bold = false, italic = false, underline = false, strike = false, caps = false, vanish = false)
     private val styleParas = HashMap<Int, ParaProps>()
     private val styleRuns = HashMap<Int, RunProps>()
+    private val charStyles = HashMap<Int, RunProps>()
+    /** Styles being worked out right now: a style that refers back to itself is not followed again. */
+    private val resolving = HashSet<Int>()
+
+    /** What a character style changes (not a full set of properties), its base character styles first. */
+    private fun charStyle(istd: Int, depth: Int = 0): RunProps = charStyles[istd] ?: run {
+        val s = stds.getOrNull(istd)
+        if (s == null || s.kind != 2 || depth > 20 || !resolving.add(istd)) return@run RunProps()
+        try {
+            val base = if (s.base == 0x0FFF || s.base == istd) RunProps() else charStyle(s.base, depth + 1)
+            val upx = s.chpx
+            (if (upx != null) applyChp(base, base, s.bytes, upx.first, upx.second).props else base).also { charStyles[istd] = it }
+        } finally { resolving.remove(istd) }
+    }
 
     private fun styleId(istd: Int): String {
         val sti = stds.getOrNull(istd)?.sti
@@ -238,7 +265,7 @@ private class Parser(file: ByteArray) {
         for (s in sprms(b, from, to)) {
             val a = s.at
             when (s.code) {
-                0x4A30 -> { val cs = styleRun(u16(b, a)); r = r.with(cs.copy(size = cs.size)) }
+                0x4A30 -> r = r.with(charStyle(u16(b, a)))
                 0x0835 -> r = r.copy(bold = toggle(u8(b, a), style.bold))
                 0x0836 -> r = r.copy(italic = toggle(u8(b, a), style.italic))
                 0x0837 -> r = r.copy(strike = toggle(u8(b, a), style.strike))
@@ -340,15 +367,17 @@ private class Parser(file: ByteArray) {
 
     // ---- Lists ----
     private val numbering: Numbering = run {
-        val lst = partOnwards(73) ?: return@run Numbering.EMPTY
+        val base = start(73)
+        if (base < 0) return@run Numbering.EMPTY
+        val lst = table
         val lfo = part(74) ?: return@run Numbering.EMPTY
         try {
-            val count = u16(lst, 0).coerceAtMost(4096)
+            val count = u16(lst, base).coerceAtMost(4096)
             val lists = HashMap<Int, Map<Int, NumLevel>>()
-            var pos = 2 + count * 28
+            var pos = base + 2 + count * 28
             for (k in 0 until count) {
-                val lsid = i32(lst, 2 + k * 28)
-                val simple = u8(lst, 2 + k * 28 + 26) and 1 != 0
+                val lsid = i32(lst, base + 2 + k * 28)
+                val simple = u8(lst, base + 2 + k * 28 + 26) and 1 != 0
                 val levels = HashMap<Int, NumLevel>()
                 for (lvl in 0 until if (simple) 1 else 9) {
                     val (level, next) = readLevel(lst, pos)
@@ -379,7 +408,7 @@ private class Parser(file: ByteArray) {
                 nums[(k + 1).toString()] = levels.mapValues { (i, l) -> overrides[i]?.let { NumLevel(l.format, l.text, it, l.para, l.run) } ?: l }
             }
             Numbering(nums)
-        } catch (e: IOException) { Numbering.EMPTY }
+        } catch (e: Exception) { Numbering.EMPTY }
     }
 
     private fun readLevel(b: ByteArray, pos: Int): Pair<NumLevel, Int> {
@@ -405,7 +434,8 @@ private class Parser(file: ByteArray) {
     }
 
     // ---- Formatting runs, found by file position ----
-    private class Runs(val starts: IntArray, val ends: IntArray, val pages: Array<ByteArray>, val from: IntArray, val to: IntArray, val istd: IntArray) {
+    /** Formatting runs: their file positions and where their properties sit in the WordDocument stream. */
+    private class Runs(val starts: IntArray, val ends: IntArray, val from: IntArray, val to: IntArray, val istd: IntArray) {
         private var last = 0
         fun find(fc: Int): Int {
             if (last < starts.size && fc >= starts[last] && fc < ends[last]) return last
@@ -423,15 +453,17 @@ private class Parser(file: ByteArray) {
     }
 
     private fun bins(index: Int, paragraphs: Boolean): Runs {
-        val plc = part(index) ?: return Runs(IntArray(0), IntArray(0), emptyArray(), IntArray(0), IntArray(0), IntArray(0))
+        val plc = part(index) ?: return Runs(IntArray(0), IntArray(0), IntArray(0), IntArray(0), IntArray(0))
         val n = (plc.size - 4) / 8
-        val starts = ArrayList<Int>(); val ends = ArrayList<Int>(); val pages = ArrayList<ByteArray>()
-        val from = ArrayList<Int>(); val to = ArrayList<Int>(); val istd = ArrayList<Int>()
+        val starts = IntList(); val ends = IntList(); val from = IntList(); val to = IntList(); val istd = IntList()
+        val seen = HashSet<Int>()
         for (k in 0 until n) {
             val pn = i32(plc, 4 * (n + 1) + k * 4) and 0x3FFFFF
             val off = pn.toLong() * 512
-            if (off + 512 > word.size) continue
-            val page = word.copyOfRange(off.toInt(), off.toInt() + 512)
+            // Each page once: a table pointing every entry at the same page cannot multiply it
+            if (off + 512 > word.size || !seen.add(pn) || starts.size > MAX_RUNS) continue
+            val base = off.toInt()
+            val page = word.copyOfRange(base, base + 512)
             val count = u8(page, 511)
             for (r in 0 until count) {
                 if (4 * (r + 2) > 511) break
@@ -440,20 +472,23 @@ private class Parser(file: ByteArray) {
                     val bx = 4 * (count + 1) + r * 13
                     if (bx >= 511) break
                     val o = u8(page, bx) * 2
-                    if (o == 0) { starts += a; ends += b; pages += page; from += 0; to += 0; istd += 0; continue }
+                    if (o == 0) { starts += a; ends += b; from += 0; to += 0; istd += 0; continue }
                     val cb = u8(page, o)
                     val (s, len) = if (cb == 0) (o + 2) to 2 * u8(page, o + 1) else (o + 1) to (2 * cb - 1)
                     if (len < 2 || s + len > 512) continue
-                    starts += a; ends += b; pages += page; istd += u16(page, s); from += s + 2; to += s + len
+                    starts += a; ends += b; istd += u16(page, s); from += base + s + 2; to += base + s + len
                 } else {
                     val o = u8(page, 4 * (count + 1) + r) * 2
                     val cb = if (o == 0) 0 else u8(page, o)
-                    starts += a; ends += b; pages += page; istd += 0
-                    from += if (o == 0) 0 else o + 1; to += if (o == 0) 0 else minOf(512, o + 1 + cb)
+                    starts += a; ends += b; istd += 0
+                    from += if (o == 0) 0 else base + o + 1; to += if (o == 0) 0 else base + minOf(512, o + 1 + cb)
                 }
             }
         }
-        return Runs(starts.toIntArray(), ends.toIntArray(), pages.toTypedArray(), from.toIntArray(), to.toIntArray(), istd.toIntArray())
+        // Positions sorted for the binary search, as Word writes them
+        val order = (0 until starts.size).sortedBy { starts[it] }
+        fun IntList.ordered() = IntArray(order.size) { this[order[it]] }
+        return Runs(starts.ordered(), ends.ordered(), from.ordered(), to.ordered(), istd.ordered())
     }
 
     private val chpRuns = bins(12, paragraphs = false)
@@ -461,6 +496,8 @@ private class Parser(file: ByteArray) {
 
     // ---- Sections: page size and where new pages start ----
     private var page = PageSetup(width = 12240, height = 15840, top = 1440, bottom = 1440, left = 1800, right = 1800)
+    /** Where each section starts, and those that start on a new page. */
+    private val sectionStarts = HashSet<Int>()
     private val sectionBreaks = HashSet<Int>()
     init {
         part(6)?.let { plc ->
@@ -469,7 +506,7 @@ private class Parser(file: ByteArray) {
                 val cp = i32(plc, k * 4)
                 val fc = i32(plc, 4 * (n + 1) + k * 12 + 2)
                 var newPage = true
-                if (fc >= 0 && fc + 2 <= word.size) {
+                if (fc >= 0 && fc <= word.size - 2) {
                     val cb = u16(word, fc)
                     var p = page
                     for (s in sprms(word, fc + 2, fc + 2 + cb)) when (s.code) {
@@ -483,7 +520,7 @@ private class Parser(file: ByteArray) {
                     }
                     if (k == 0) page = p
                 }
-                if (k > 0 && newPage) sectionBreaks += cp
+                if (k > 0) { sectionStarts += cp; if (newPage) sectionBreaks += cp }
             }
         }
     }
@@ -519,8 +556,8 @@ private class Parser(file: ByteArray) {
             val width = if (compressed) 1 else 2
             if (fc < 0 || fc.toLong() + count.toLong() * width > word.size) throw IOException("Text piece out of range")
             val text = if (compressed) String(word, fc, count, cp1252) else String(word, fc, count * 2, Charsets.UTF_16LE)
-            for (k in 0 until count) builder.char(text[k], cpStart + k, fc + k * width)
-            if (builder.size > DocReader.MAX_CHARS) break
+            for (k in 0 until count) { builder.char(text[k], cpStart + k, fc + k * width); if (builder.full) break }
+            if (builder.size > DocReader.MAX_CHARS || builder.full) break
         }
         builder.finish()
         val names = ole.names
@@ -545,13 +582,18 @@ private class Parser(file: ByteArray) {
         val blocks = ArrayList<Block>()
         val media = HashMap<String, ByteArray>()
         var size = 0
+        /** Paragraphs and cells so far, against the same limit as DOCX. */
+        private var count = 0
+        val full: Boolean get() = count > DocxReader.MAX_BLOCKS
         private var mediaBytes = 0L
+        private val tried = HashSet<String>()
 
         // The paragraph being read: text runs by character formatting run
         private val runText = ArrayList<StringBuilder>()
         private val runIndex = ArrayList<Int>()
         private val pieces = ArrayList<Any>()  // a run number (Int) or a ready inline (Inline)
         private var fields = ArrayList<Boolean>()
+        private var deeper = 0
         private var fieldCode = StringBuilder()
         private var pendingBreak = false
 
@@ -566,7 +608,7 @@ private class Parser(file: ByteArray) {
             return runCache.getOrPut(key) {
                 val base = styleRun(istd)
                 if (run < 0) Chp(base, false, null, false, false)
-                else applyChp(base, base, chpRuns.pages[run], chpRuns.from[run], chpRuns.to[run])
+                else applyChp(base, base, word, chpRuns.from[run], chpRuns.to[run])
             }
         }
 
@@ -581,15 +623,17 @@ private class Parser(file: ByteArray) {
             if (cp in sectionBreaks && runText.isEmpty() && pieces.isEmpty()) pendingBreak = true
             val run = chpRuns.find(fc)
             when (c.code) {
-                0x13 -> { if (fields.size < 20) fields += false; fieldCode.clear(); return }
-                0x14 -> { if (fields.isNotEmpty()) { fields[fields.size - 1] = true; fieldDone() }; return }
-                0x15 -> { if (fields.isNotEmpty()) { if (!fields.last()) fieldDone(); fields.removeAt(fields.size - 1) }; return }
+                0x13 -> { if (fields.size < 20) fields += false else deeper++; fieldCode.clear(); return }
+                0x14 -> { if (deeper == 0 && fields.isNotEmpty()) { fields[fields.size - 1] = true; fieldDone() }; return }
+                0x15 -> { if (deeper > 0) deeper-- else if (fields.isNotEmpty()) { if (!fields.last()) fieldDone(); fields.removeAt(fields.size - 1) }; return }
             }
+            // A field code never holds a paragraph mark: a field left open ends here, so the text goes on
+            if ((c.code == 0x0D || c.code == 0x07) && fields.any { !it }) { fields.clear(); deeper = 0 }
             if (fields.isNotEmpty() && !fields.last()) { if (fieldCode.length < 200) fieldCode.append(c); return }
             when (c.code) {
                 0x0D, 0x07 -> endParagraph(fc, c.code == 0x07, run)
                 // A section mark ends its paragraph; the next section starts on a new page (or not, as it says)
-                0x0C -> if (cp + 1 in sectionBreaks || cp + 1 >= ccpText) endParagraph(fc, false, run) else pieces += Inline.PageBreak
+                0x0C -> if (cp + 1 in sectionStarts || cp + 1 >= ccpText) endParagraph(fc, false, run) else pieces += Inline.PageBreak
                 0x0B -> pieces += Inline.LineBreak
                 0x09 -> pieces += Inline.Tab
                 0x1E -> add('‑', run)
@@ -611,7 +655,7 @@ private class Parser(file: ByteArray) {
             val c = chp(run, 0)
             val fc = c.picture ?: return
             val d = data ?: return
-            if (fc < 0 || fc + 0x44 > d.size) return
+            if (fc < 0 || fc > d.size - 0x44) return
             val lcb = i32(d, fc)
             val header = u16(d, fc + 4)
             val end = (fc.toLong() + lcb).coerceAtMost(d.size.toLong()).toInt()
@@ -619,7 +663,8 @@ private class Parser(file: ByteArray) {
             val mx = u16(d, fc + 0x20).takeIf { it > 0 } ?: 1000; val my = u16(d, fc + 0x22).takeIf { it > 0 } ?: 1000
             val w = dxa * mx / 1000f / 20f; val h = dya * my / 1000f / 20f
             val key = "pic$fc"
-            if (key !in media && mediaBytes < DocxReader.MAX_MEDIA_TOTAL) {
+            // Each picture record is looked into once, found or not
+            if (tried.add(key) && mediaBytes < DocxReader.MAX_MEDIA_TOTAL) {
                 extractImage(d, fc + header, end)?.let { media[key] = it; mediaBytes += it.size }
             }
             pieces += Inline.Image(key, w.coerceIn(0f, 1584f), h.coerceIn(0f, 1584f))
@@ -628,7 +673,9 @@ private class Parser(file: ByteArray) {
         /** The PNG or JPEG inside a picture record (other kinds are not drawn yet). */
         private fun extractImage(d: ByteArray, from: Int, to: Int): ByteArray? {
             var i = maxOf(0, from)
-            while (i + 8 < to) {
+            // The picture starts right after a short record header: no need to search further
+            val limit = minOf(to, from + 65536)
+            while (i + 8 < limit) {
                 if (d[i] == 0x89.toByte() && d[i + 1] == 'P'.code.toByte() && d[i + 2] == 'N'.code.toByte() && d[i + 3] == 'G'.code.toByte()) return d.copyOfRange(i, to)
                 if (d[i] == 0xFF.toByte() && d[i + 1] == 0xD8.toByte() && d[i + 2] == 0xFF.toByte()) return d.copyOfRange(i, to)
                 i++
@@ -640,7 +687,7 @@ private class Parser(file: ByteArray) {
             val pr = papRuns.find(fc)
             val istd = if (pr >= 0) papRuns.istd[pr] else 0
             val extra = PapExtra()
-            val direct = if (pr >= 0) applyPap(ParaProps(), papRuns.pages[pr], papRuns.from[pr], papRuns.to[pr], extra) else ParaProps()
+            val direct = if (pr >= 0) applyPap(ParaProps(), word, papRuns.from[pr], papRuns.to[pr], extra) else ParaProps()
             val styleP = stylePara(istd)
             var props = styleP.with(direct)
             var label: String? = null
@@ -669,19 +716,20 @@ private class Parser(file: ByteArray) {
             val mark = chp(markRun, istd).props
             runText.clear(); runIndex.clear(); pieces.clear()
             val para = Block.Para(props, mark, inlines, label, labelProps)
+            count++
 
             // Where it goes: a table cell, the end of a row, or the body
             when {
                 extra.inTable && extra.depth > 1 && extra.innerRowEnd -> Unit  // a nested table's row mark: its text is already in the cell
                 extra.inTable && extra.rowEnd && extra.depth <= 1 -> {
                     if (cell.isNotEmpty()) { cells += cell.toList(); cell.clear() }
-                    rows += cells.toList() to extra.tap
+                    rows += cells.take(DocxReader.MAX_COLUMNS) to extra.tap
                     cells.clear()
                 }
                 extra.inTable -> {
                     flushTableIfNeeded(keep = true)
                     cell += para
-                    if (cellMark && extra.depth <= 1) { cells += cell.toList(); cell.clear() }
+                    if (cellMark && extra.depth <= 1) { if (cells.size < DocxReader.MAX_COLUMNS) cells += cell.toList(); cell.clear() }
                 }
                 else -> { flushTableIfNeeded(keep = false); blocks += para }
             }
