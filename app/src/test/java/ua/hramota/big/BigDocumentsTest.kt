@@ -87,9 +87,9 @@ class BigDocumentsTest {
         val own = HashMap<String, Int>()
         val inside = HashMap<String, Int>()
         var samples = 0
-        @Volatile var running = true
+        val running = java.util.concurrent.atomic.AtomicBoolean(true)
         val sampler = Thread {
-            while (running) {
+            while (running.get()) {
                 val stack = worker.stackTrace
                 if (stack.isNotEmpty()) {
                     samples++
@@ -103,7 +103,7 @@ class BigDocumentsTest {
         }
         sampler.start()
         repeat(3) { DocxReader.read(ByteArrayInputStream(bytes)) }
-        running = false
+        running.set(false)
         sampler.join()
         report("Reader profile, $samples samples. Own time: " + own.entries.sortedByDescending { it.value }.take(12).joinToString { "${it.key} ${it.value * 100 / samples}%" })
         report("Reader profile, inclusive: " + inside.entries.sortedByDescending { it.value }.take(20).joinToString { "${it.key} ${it.value * 100 / samples}%" })
