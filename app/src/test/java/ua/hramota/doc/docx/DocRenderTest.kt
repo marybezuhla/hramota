@@ -60,7 +60,13 @@ class DocRenderTest {
         for (file in dir("legacy").listFiles { f -> f.name.endsWith(".doc") }!!) {
             try {
                 val doc = file.inputStream().use { WordBinaryReader.read(it) }
-                assertTrue(file.name, DocxPages(doc, fonts).pageCount > 0)
+                val pages = DocxPages(doc, fonts)
+                assertTrue(file.name, pages.pageCount > 0)
+                // For review: the first pages of Word-made files
+                val out = File("build/render-doc-word").apply { mkdirs() }
+                for (i in 0 until minOf(2, pages.pageCount)) {
+                    File(out, "${file.nameWithoutExtension}-${i + 1}.png").outputStream().use { pages.draw(i, 1240)!!.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                }
             } catch (e: IOException) {
                 assertTrue(file.name, file.name.startsWith("fuzzed"))
             }
