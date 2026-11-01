@@ -17,7 +17,7 @@
     <string name="back">Back</string>
     <string name="open_failed">This file could not be opened. It may be damaged, or access to it has expired.</string>
     <string name="unsupported_title">This format is not supported yet</string>
-    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, ODT, CSV, TXT and Markdown.</string>
+    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, PPTX, ODT, CSV, TXT and Markdown.</string>
     <string name="simplified_note">Simplified view: text only. Exact page layout is coming.</string>
     <string name="mode_reading">Reading</string>
     <string name="mode_pages">Pages</string>
@@ -120,4 +120,5 @@
     <string name="settings_licenses">Licences</string>
     <string name="licenses_text">Hramota — GPL-3.0.\n\nPDFium — BSD 3-Clause (Google, the PDFium authors).\npdfium-binaries — MIT (Benoît Blanchon).\n\nFonts Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX and Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
     <string name="pages_cut">not all pages: out of memory</string>
+    <string name="slide_n">Slide %1$d</string>
 </resources>

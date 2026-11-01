@@ -94,12 +94,19 @@ jobs:
           set -e
           test -d app/build/render || { echo "no renders"; exit 0; }
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui fonts-crosextra-carlito \
+          sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui libreoffice-impress-nogui fonts-crosextra-carlito \
             fonts-crosextra-caladea fonts-liberation poppler-utils python3-pil > /dev/null
           mkdir -p ref
           soffice --headless --convert-to pdf --outdir ref app/src/test/resources/docs/*.docx > /dev/null
           for f in ref/*.pdf; do pdftoppm -r 150 -png "$f" "ref/$(basename "$f" .pdf)"; done
           python3 scripts/compare_render.py app/build/render ref render-report
+          # Slides against LibreOffice
+          if [ -d app/build/render-slides ]; then
+            mkdir -p ref-slides
+            soffice --headless --convert-to pdf --outdir ref-slides app/src/test/resources/slides/*.pptx > /dev/null
+            for f in ref-slides/*.pdf; do pdftoppm -scale-to-x 1600 -scale-to-y -1 -png "$f" "ref-slides/$(basename "$f" .pdf)"; done
+            python3 scripts/compare_render.py app/build/render-slides ref-slides render-report-slides
+          fi
           # Old Word files (the same test documents saved as .doc) against LibreOffice too
           if [ -d app/build/render-doc ]; then
             mkdir -p ref-doc
@@ -126,6 +133,7 @@ jobs:
           cp app/build/render-doc/*.txt log/render-doc/ 2>/dev/null || true
           cp render-report-doc-vs-docx/report.md log/render-doc/vs-docx.md 2>/dev/null || true
           cp -r app/build/render-doc-word log/render-doc-word 2>/dev/null || true
+          cp -r render-report-slides log/render-slides 2>/dev/null || cp -r app/build/render-slides log/render-slides 2>/dev/null || true
           cp app/build/render/*.txt log/render/ 2>/dev/null || true
           cp app/build/big/report.txt log/big-report.txt 2>/dev/null || true
           # The first errors as annotations, so they show on the pull request without opening the log.

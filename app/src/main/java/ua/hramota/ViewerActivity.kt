@@ -20,6 +20,9 @@ import ua.hramota.data.Recents
 import ua.hramota.doc.CsvReader
 import ua.hramota.doc.docx.WordBinaryReader
 import ua.hramota.doc.sheet.XlsReader
+import ua.hramota.doc.slides.PptxReader
+import ua.hramota.doc.slides.SlidePages
+import ua.hramota.doc.slides.paragraphs
 import ua.hramota.doc.sheet.XlsxReader
 import ua.hramota.doc.EncryptedDocumentException
 import ua.hramota.doc.Format
@@ -70,6 +73,10 @@ class ViewerActivity : ComponentActivity() {
                                     }
                                     format == Format.DOC -> openDoc(uri) { opened = it }
                                     format == Format.XLSX -> ViewerState.Sheets(contentResolver.openInputStream(uri)?.use { XlsxReader.read(it) } ?: return@withContext ViewerState.Failed)
+                                    format == Format.PPTX -> {
+                                        val deck = contentResolver.openInputStream(uri)?.use { PptxReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        ViewerState.Paged(SlidePages(deck, appFonts(applicationContext)), deck.paragraphs { getString(R.string.slide_n, it) }, deck.inspection)
+                                    }
                                     format == Format.XLS -> ViewerState.Sheets(contentResolver.openInputStream(uri)?.use { XlsReader.read(it) } ?: return@withContext ViewerState.Failed)
                                     format == Format.CSV -> ViewerState.Table(
                                         contentResolver.openInputStream(uri)?.use { CsvReader.read(it) } ?: return@withContext ViewerState.Failed,
