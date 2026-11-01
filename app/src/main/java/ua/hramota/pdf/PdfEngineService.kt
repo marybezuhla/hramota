@@ -94,12 +94,12 @@ class PdfEngineService : Service() {
 
     companion object {
         const val DESCRIPTOR = "ua.hramota.pdf.Engine"
-        const val OPEN = FIRST_CALL_TRANSACTION
-        const val SIZES = FIRST_CALL_TRANSACTION + 1
-        const val RENDER = FIRST_CALL_TRANSACTION + 2
-        const val INSPECT = FIRST_CALL_TRANSACTION + 3
-        const val TEXT = FIRST_CALL_TRANSACTION + 4
-        const val CLOSE = FIRST_CALL_TRANSACTION + 5
+        const val OPEN = IBinder.FIRST_CALL_TRANSACTION
+        const val SIZES = IBinder.FIRST_CALL_TRANSACTION + 1
+        const val RENDER = IBinder.FIRST_CALL_TRANSACTION + 2
+        const val INSPECT = IBinder.FIRST_CALL_TRANSACTION + 3
+        const val TEXT = IBinder.FIRST_CALL_TRANSACTION + 4
+        const val CLOSE = IBinder.FIRST_CALL_TRANSACTION + 5
         /** Pages scanned for links by the inspector. */
         const val INSPECT_PAGES = 300
         const val MAX_TEXT = 200_000
