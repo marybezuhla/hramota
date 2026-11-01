@@ -41,6 +41,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -118,11 +120,13 @@ fun ViewerScreen(
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     var hitIndex by remember { mutableIntStateOf(0) }
     var scanning by remember { mutableStateOf(false) }
+    // The query whose search has finished: "not found" is said only about that one
+    var searched by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(textPages, query, searching) {
-        hits = emptyList(); hitIndex = 0; scanning = false
+        hits = emptyList(); hitIndex = 0; scanning = false; searched = null
         if (!searching || textPages == null || query.isBlank()) return@LaunchedEffect
-        delay(300)
         scanning = true
+        delay(300)
         val found = ArrayList<SearchHit>()
         for (p in 0 until textPages.pageCount) {
             val pageText = textPages.pageText(p)
@@ -130,7 +134,9 @@ fun ViewerScreen(
             if (p % 8 == 7 || p == textPages.pageCount - 1 || found.size >= MAX_HITS) hits = found.toList()
             if (found.size >= MAX_HITS) break
         }
+        hits = found.toList()
         scanning = false
+        searched = query
     }
     val hitsByPage = remember(hits) { hits.groupBy { it.page } }
     val currentHit = hits.getOrNull(hitIndex)
@@ -146,7 +152,7 @@ fun ViewerScreen(
             onQuery = { query = it },
             position = if (hits.isEmpty()) 0 else hitIndex + 1,
             total = hits.size,
-            scanning = scanning,
+            scanning = scanning || searched != query,
             onPrev = { if (hits.isNotEmpty()) hitIndex = (hitIndex - 1 + hits.size) % hits.size },
             onNext = { if (hits.isNotEmpty()) hitIndex = (hitIndex + 1) % hits.size },
             onClose = { searching = false },
@@ -244,13 +250,16 @@ private fun SearchBar(
 ) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: IllegalStateException) {} }
+    // The field keeps its own cursor; it starts at the end of any text already there
+    var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
+    if (field.text != query) field = TextFieldValue(query, TextRange(query.length))
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.search_close)) }
         Box(Modifier.weight(1f).padding(horizontal = 4.dp)) {
             if (query.isEmpty()) Text(stringResource(R.string.search_hint), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
             BasicTextField(
-                value = query,
-                onValueChange = { onQuery(it.take(Search.MAX_QUERY)) },
+                value = field,
+                onValueChange = { v -> field = v; onQuery(v.text.take(Search.MAX_QUERY)) },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
