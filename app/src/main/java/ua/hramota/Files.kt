@@ -8,6 +8,10 @@ import android.os.Build
 import ua.hramota.doc.Format
 import ua.hramota.doc.Paragraph
 import ua.hramota.doc.TextExtractor
+import ua.hramota.doc.docx.Block
+import ua.hramota.doc.docx.DocxDocument
+import ua.hramota.doc.docx.Fonts
+import ua.hramota.doc.docx.Inline
 import java.io.IOException
 
 /** The format of a file the app was given, by its name and the type its app reports. */
@@ -29,4 +33,29 @@ fun Activity.labelTask(name: String) {
         ActivityManager.TaskDescription(name)
     }
     setTaskDescription(description)
+}
+
+@Volatile private var fonts: Fonts? = null
+
+/** One set of document fonts for the whole app, so each typeface is loaded once. */
+fun appFonts(context: Context): Fonts = fonts ?: synchronized(Fonts::class.java) {
+    fonts ?: Fonts(context.applicationContext.assets).also { fonts = it }
+}
+
+/** The document's text as paragraphs, for the reading view. */
+fun DocxDocument.readingText(): List<Paragraph> {
+    val out = ArrayList<Paragraph>()
+    fun add(blocks: List<Block>) {
+        for (b in blocks) when (b) {
+            is Block.Para -> out += Paragraph(
+                (b.label?.let { "$it " } ?: "") + b.inlines.joinToString("") { i ->
+                    when (i) { is Inline.Text -> i.text; Inline.Tab -> "\t"; Inline.LineBreak -> "\n"; else -> "" }
+                },
+                TextExtractor.headingLevel(b.props.styleId),
+            )
+            is Block.Table -> b.rows.forEach { r -> r.cells.forEach { add(it.blocks) } }
+        }
+    }
+    add(blocks)
+    return out
 }

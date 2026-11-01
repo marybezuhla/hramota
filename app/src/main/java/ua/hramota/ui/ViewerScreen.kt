@@ -23,6 +23,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -43,7 +45,7 @@ import androidx.compose.ui.unit.sp
 import ua.hramota.R
 import ua.hramota.doc.Format
 import ua.hramota.doc.Paragraph
-import ua.hramota.doc.PdfPages
+import ua.hramota.doc.Pages
 
 /** What the viewer shows for one file. */
 sealed interface ViewerState {
@@ -51,13 +53,21 @@ sealed interface ViewerState {
     data object Failed : ViewerState
     data class Unsupported(val format: Format) : ViewerState
     data class Text(val paragraphs: List<Paragraph>, val format: Format) : ViewerState
-    data class Pdf(val pages: PdfPages) : ViewerState
+    /** Pages as they print; [reading] is the same text for the reading view, when there is one. */
+    data class Paged(val pages: Pages, val reading: List<Paragraph>? = null) : ViewerState
 }
 
 @Composable
-fun ViewerScreen(name: String, state: ViewerState, onBack: () -> Unit) {
+fun ViewerScreen(name: String, state: ViewerState, onBack: () -> Unit, startInReading: Boolean = false) {
+    var reading by rememberSaveable { mutableStateOf(startInReading) }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        TopBar(title = name, onBack = onBack)
+        TopBar(title = name, onBack = onBack) {
+            if (state is ViewerState.Paged && state.reading != null) {
+                TextButton(onClick = { reading = !reading }) {
+                    Text(stringResource(if (reading) R.string.mode_pages else R.string.mode_reading))
+                }
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (state) {
                 ViewerState.Loading -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -70,7 +80,8 @@ fun ViewerScreen(name: String, state: ViewerState, onBack: () -> Unit) {
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state)
-                is ViewerState.Pdf -> PdfDocument(state.pages)
+                is ViewerState.Paged -> if (reading && state.reading != null) TextDocument(ViewerState.Text(state.reading, Format.DOCX), note = false)
+                    else PageDocument(state.pages)
             }
         }
     }
@@ -86,10 +97,10 @@ private fun Message(title: String, body: String?) {
 
 /** Reading view: text flows to the screen width, headings stand out, text can be selected and copied. */
 @Composable
-private fun TextDocument(state: ViewerState.Text) {
+private fun TextDocument(state: ViewerState.Text, note: Boolean = state.format == Format.ODT) {
     SelectionContainer {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
-            if (state.format == Format.DOCX || state.format == Format.ODT) item {
+            if (note) item {
                 Text(
                     stringResource(R.string.simplified_note),
                     style = MaterialTheme.typography.bodySmall,
@@ -124,9 +135,9 @@ private fun ParagraphText(p: Paragraph) {
     }
 }
 
-/** PDF pages one under another; each is drawn when it scrolls into view, at the screen's width. */
+/** Pages one under another; each is drawn when it scrolls into view, at the screen's width. */
 @Composable
-private fun PdfDocument(pages: PdfPages) {
+private fun PageDocument(pages: Pages) {
     val list = rememberLazyListState()
     val current by remember { derivedStateOf { list.firstVisibleItemIndex + 1 } }
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant)) {

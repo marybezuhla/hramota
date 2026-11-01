@@ -12,14 +12,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.Closeable
 
-/** Pages of a PDF, drawn on demand at the width they are shown. */
-interface PdfPages {
-    val pageCount: Int
-    /** Height divided by width of page [index]. */
-    fun aspect(index: Int): Float
-    suspend fun render(index: Int, widthPx: Int): ImageBitmap?
-}
-
 /**
  * The phone's own PDF engine (PdfRenderer, PDFium inside Android). It handles one page at a time,
  * so every call goes through one lock; recently drawn pages are kept in a small cache.
@@ -28,7 +20,7 @@ class PdfSource private constructor(
     private val fd: ParcelFileDescriptor,
     private val renderer: PdfRenderer,
     private val aspects: FloatArray,
-) : PdfPages, Closeable {
+) : Pages, Closeable {
     private val lock = Mutex()
     private val cache = object : LinkedHashMap<Long, ImageBitmap>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ImageBitmap>?) = size > CACHE_PAGES
