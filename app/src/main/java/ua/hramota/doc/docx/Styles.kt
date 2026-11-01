@@ -41,7 +41,7 @@ data class RunProps(
             return RunProps(
                 font = font,
                 fontTheme = if (font == null) theme else null,
-                size = n.child("sz")?.attr("val")?.toFloatOrNull()?.div(2f),
+                size = n.child("sz")?.attr("val")?.toIntOrNull()?.coerceIn(1, 3276)?.div(2f),
                 bold = n.child("b").isOn(),
                 italic = n.child("i").isOn(),
                 underline = if (n.child("u") == null) null else u != "none",
@@ -110,6 +110,9 @@ data class ParaProps(
     )
 
     companion object {
+        /** Longest length accepted from a file: 22 inches, Word's largest page side, in twips. */
+        const val MAX_LEN = 31680
+
         fun parse(n: XmlNode?): ParaProps? {
             if (n == null) return null
             val ind = n.child("ind")
@@ -119,22 +122,24 @@ data class ParaProps(
             return ParaProps(
                 styleId = n.child("pStyle")?.attr("val"),
                 align = n.child("jc")?.attr("val"),
-                left = (ind?.attr("left") ?: ind?.attr("start"))?.toIntOrNull(),
-                right = (ind?.attr("right") ?: ind?.attr("end"))?.toIntOrNull(),
-                firstLine = if (hanging != null) -hanging else ind?.attr("firstLine")?.toIntOrNull(),
-                before = sp?.attr("before")?.toIntOrNull(),
-                after = sp?.attr("after")?.toIntOrNull(),
+                left = (ind?.attr("left") ?: ind?.attr("start"))?.toIntOrNull()?.coerceIn(-MAX_LEN, MAX_LEN),
+                right = (ind?.attr("right") ?: ind?.attr("end"))?.toIntOrNull()?.coerceIn(-MAX_LEN, MAX_LEN),
+                firstLine = (if (hanging != null) -hanging else ind?.attr("firstLine")?.toIntOrNull())?.coerceIn(-MAX_LEN, MAX_LEN),
+                before = sp?.attr("before")?.toIntOrNull()?.coerceIn(0, MAX_LEN),
+                after = sp?.attr("after")?.toIntOrNull()?.coerceIn(0, MAX_LEN),
                 beforeAuto = sp?.attr("beforeAutospacing")?.let { it == "1" || it == "true" },
                 afterAuto = sp?.attr("afterAutospacing")?.let { it == "1" || it == "true" },
-                line = sp?.attr("line")?.toIntOrNull(),
+                // "auto" is in 240ths of a line (up to 10 lines); exact and "at least" in twips
+                line = sp?.attr("line")?.toIntOrNull()?.coerceIn(1, if ((sp.attr("lineRule") ?: "auto") == "auto") 2400 else MAX_LEN),
                 lineRule = sp?.let { if (it.attr("line") != null) it.attr("lineRule") ?: "auto" else null },
                 contextual = n.child("contextualSpacing").isOn(),
                 keepNext = n.child("keepNext").isOn(),
                 pageBreakBefore = n.child("pageBreakBefore").isOn(),
                 widowControl = n.child("widowControl").isOn(),
                 numId = num?.child("numId")?.attr("val"),
-                numLevel = num?.child("ilvl")?.attr("val")?.toIntOrNull(),
-                tabs = n.child("tabs")?.all("tab")?.filter { it.attr("val") != "clear" }?.mapNotNull { it.attr("pos")?.toIntOrNull() }?.sorted(),
+                numLevel = num?.child("ilvl")?.attr("val")?.toIntOrNull()?.coerceIn(0, 8),
+                tabs = n.child("tabs")?.all("tab")?.filter { it.attr("val") != "clear" }
+                    ?.mapNotNull { it.attr("pos")?.toIntOrNull()?.coerceIn(-MAX_LEN, MAX_LEN) }?.sorted()?.take(64),
                 shading = n.child("shd")?.attr("fill")?.let(::hexColor),
             )
         }
@@ -236,7 +241,7 @@ class Numbering(private val nums: Map<String, Map<Int, NumLevel>>) {
         val l = levels[lvl] ?: return null
         val c = counters.getOrPut(numId) { IntArray(9) { i -> (levels[i]?.start ?: 1) - 1 } }
         if (lvl !in 0..8) return null
-        c[lvl]++
+        c[lvl] = (c[lvl] + 1).coerceAtMost(MAX_NUMBER)
         for (deeper in lvl + 1..8) c[deeper] = (levels[deeper]?.start ?: 1) - 1
         if (l.format == "bullet") return bullet(l.text)
         if (l.format == "none") return ""
@@ -249,6 +254,8 @@ class Numbering(private val nums: Map<String, Map<Int, NumLevel>>) {
 
     companion object {
         val EMPTY = Numbering(emptyMap())
+        /** Largest list number shown; also keeps "aaaa…" labels short. */
+        const val MAX_NUMBER = 32767
 
         fun parse(root: XmlNode?): Numbering {
             if (root == null) return EMPTY
@@ -259,7 +266,7 @@ class Numbering(private val nums: Map<String, Map<Int, NumLevel>>) {
                     (l.attr("ilvl")?.toIntOrNull() ?: 0) to NumLevel(
                         format = l.child("numFmt")?.attr("val") ?: "decimal",
                         text = l.child("lvlText")?.attr("val") ?: "",
-                        start = l.child("start")?.attr("val")?.toIntOrNull() ?: 1,
+                        start = l.child("start")?.attr("val")?.toIntOrNull()?.coerceIn(0, MAX_NUMBER) ?: 1,
                         para = ParaProps.parse(l.child("pPr")),
                         run = RunProps.parse(l.child("rPr")),
                     )
@@ -269,7 +276,7 @@ class Numbering(private val nums: Map<String, Map<Int, NumLevel>>) {
             for (n in root.all("num")) {
                 val id = n.attr("numId") ?: continue
                 val levels = abstract[n.child("abstractNumId")?.attr("val")] ?: continue
-                val overrides = n.all("lvlOverride").associate { (it.attr("ilvl")?.toIntOrNull() ?: 0) to it.child("startOverride")?.attr("val")?.toIntOrNull() }
+                val overrides = n.all("lvlOverride").associate { (it.attr("ilvl")?.toIntOrNull() ?: 0) to it.child("startOverride")?.attr("val")?.toIntOrNull()?.coerceIn(0, MAX_NUMBER) }
                 nums[id] = levels.mapValues { (i, l) -> overrides[i]?.let { s -> NumLevel(l.format, l.text, s, l.para, l.run) } ?: l }
             }
             return Numbering(nums)
@@ -298,13 +305,13 @@ class Numbering(private val nums: Map<String, Map<Int, NumLevel>>) {
 
         private fun letters(n: Int, a: Char): String {
             val k = (n - 1).coerceAtLeast(0)
-            return (a + k % 26).toString().repeat(k / 26 + 1)
+            return (a + k % 26).toString().repeat((k / 26 + 1).coerceAtMost(4))
         }
 
         private const val UK = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЮЯ"
         private fun cyrillic(n: Int): String {
             val k = (n - 1).coerceAtLeast(0)
-            return UK[k % UK.length].toString().repeat(k / UK.length + 1)
+            return UK[k % UK.length].toString().repeat((k / UK.length + 1).coerceAtMost(4))
         }
 
         private fun roman(n: Int): String {

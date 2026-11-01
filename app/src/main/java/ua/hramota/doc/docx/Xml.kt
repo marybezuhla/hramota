@@ -23,17 +23,36 @@ class XmlNode(val name: String, val attrs: Map<String, String>) {
         return n
     }
 
-    /** First descendant at any depth with this local name. */
+    /** First descendant at any depth with this local name (no recursion: depth is up to the file). */
     fun find(name: String): XmlNode? {
-        for (c in children) {
-            if (c.name == name) return c
-            c.find(name)?.let { return it }
+        val stack = ArrayDeque<XmlNode>()
+        for (i in children.indices.reversed()) stack.addLast(children[i])
+        while (stack.isNotEmpty()) {
+            val n = stack.removeLast()
+            if (n.name == name) return n
+            for (i in n.children.indices.reversed()) stack.addLast(n.children[i])
         }
         return null
     }
 }
 
 object Xml {
+    /** Office parts never declare a DOCTYPE; one is refused, so entity tricks cannot expand. */
+    fun checkNoDoctype(bytes: ByteArray) {
+        // A DOCTYPE can only come before the root element: look at everything up to it
+        var i = 0
+        while (i < bytes.size - 1) {
+            if (bytes[i] == '<'.code.toByte()) {
+                val next = bytes[i + 1].toInt().toChar()
+                if (next.isLetter()) return
+                if (next == '!' && String(bytes, i, minOf(9, bytes.size - i), Charsets.ISO_8859_1).equals("<!DOCTYPE", ignoreCase = true)) {
+                    throw java.io.IOException("DOCTYPE is not allowed")
+                }
+            }
+            i++
+        }
+    }
+
     fun parser(input: InputStream): XmlPullParser =
         XmlPullParserFactory.newInstance().apply { isNamespaceAware = true }.newPullParser().apply { setInput(input, "UTF-8") }
 

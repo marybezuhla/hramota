@@ -20,8 +20,9 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : Pages {
     private val pictures = PictureCache(doc)
     private val layout = DocxLayout(doc, fonts) { rel, w, h -> pictures.get(rel, w, h) }
     val pages: List<LaidOutPage> = layout.layout()
-    private val ratio = layout.pageHeight / layout.pageWidth
+    private val ratio = (layout.pageHeight / layout.pageWidth).takeIf { it.isFinite() && it > 0f } ?: 1.414f
     private val lock = Mutex()
+    private val painter = PagePainter()
 
     override val pageCount: Int get() = pages.size
     override fun aspect(index: Int): Float = ratio
@@ -39,7 +40,7 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : Pages {
         bitmap.eraseColor(Color.WHITE)
         val canvas = Canvas(bitmap)
         canvas.scale(w / layout.pageWidth, w / layout.pageWidth)
-        PagePainter.draw(canvas, pages[index])
+        painter.draw(canvas, pages[index])
         return bitmap
     }
 }

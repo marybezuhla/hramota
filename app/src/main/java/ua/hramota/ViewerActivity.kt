@@ -39,12 +39,15 @@ class ViewerActivity : ComponentActivity() {
             HramotaTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val state by produceState<ViewerState>(ViewerState.Loading, uri) {
+                        // An open PDF is closed if the window goes away before it is shown
+                        var opened: PdfSource? = null
+                        try {
                         value = withContext(Dispatchers.IO) {
                             try {
                                 when {
                                     format == Format.PDF -> {
                                         val fd = contentResolver.openFileDescriptor(uri, "r") ?: return@withContext ViewerState.Failed
-                                        ViewerState.Paged(PdfSource.open(fd))
+                                        ViewerState.Paged(PdfSource.open(fd).also { opened = it })
                                     }
                                     format == Format.DOCX -> {
                                         val doc = contentResolver.openInputStream(uri)?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
@@ -55,7 +58,16 @@ class ViewerActivity : ComponentActivity() {
                                 }
                             } catch (e: Exception) {
                                 ViewerState.Failed
+                            } catch (e: OutOfMemoryError) {
+                                // A file too large or built to exhaust memory: say it cannot be opened
+                                ViewerState.Failed
+                            } catch (e: StackOverflowError) {
+                                ViewerState.Failed
                             }
+                        }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            opened?.close()
+                            throw e
                         }
                     }
                     // The PDF engine holds the open file: release it when the window goes
