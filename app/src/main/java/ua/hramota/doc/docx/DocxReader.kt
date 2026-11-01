@@ -41,6 +41,8 @@ class DocxDocument(
     val rels: Map<String, String>,
     /** "Don't use HTML paragraph auto spacing": paragraph gaps add up instead of taking the larger. */
     val addSpacing: Boolean = false,
+    /** Word version the document was laid out for (15 = Word 2013 and later). */
+    val compatibilityMode: Int = 15,
 ) {
     fun picture(rel: String): ByteArray? = rels[rel]?.let { media[it] }
 }
@@ -110,7 +112,11 @@ object DocxReader {
         }
         val settings = parts["word/settings.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
         val addSpacing = settings?.path("compat", "doNotUseHTMLParagraphAutoSpacing").isOn() == true
-        return DocxDocument(page, blocks, media, fonts, rels, addSpacing)
+        val compat = settings?.child("compat")?.all("compatSetting")
+            ?.firstOrNull { it.attr("name") == "compatibilityMode" }?.attr("val")?.toIntOrNull()
+            // No setting means an older Word document
+            ?: if (settings != null) 12 else 15
+        return DocxDocument(page, blocks, media, fonts, rels, addSpacing, compat)
     }
 
     private fun pageSetup(s: XmlNode): PageSetup {

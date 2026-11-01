@@ -141,10 +141,14 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     /** Splits paragraphs at page breaks; the flag says "start a new page before this". */
     private fun split(blocks: List<Block>): List<Pair<Block, Boolean>> {
         val out = ArrayList<Pair<Block, Boolean>>()
+        // A break at the very end of a paragraph keeps the paragraph mark with it (as Word shows it)
+        // and moves the next block to the new page
+        var carry = false
         for (b in blocks) {
-            if (b !is Block.Para || b.inlines.none { it == Inline.PageBreak }) { out += b to false; continue }
+            if (b !is Block.Para || b.inlines.none { it == Inline.PageBreak }) { out += b to carry; carry = false; continue }
             var part = ArrayList<Inline>()
-            var breakNext = false
+            var breakNext = carry
+            carry = false
             var first = true
             for (i in b.inlines) {
                 if (i == Inline.PageBreak) {
@@ -153,7 +157,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 } else part += i
             }
             // Text after the break starts the next page; an empty remainder is just the paragraph mark
-            out += b.copy(inlines = part, label = null, props = b.props.copy(before = 0)) to breakNext
+            if (part.isEmpty()) carry = true
+            else out += b.copy(inlines = part, label = null, props = b.props.copy(before = 0)) to breakNext
         }
         return out
     }
@@ -287,9 +292,11 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             val n = t.rows.maxOfOrNull { r -> r.cells.sumOf { it.span } } ?: 1
             List(n) { contentWidth / n }
         }
-        val x0 = left + tw(t.indent)
         val margin = tw(CELL_MARGIN)
+        // Before Word 2013 the table's edge sits one cell margin left of the text, so cell text lines up with it
+        val x0 = left + tw(t.indent) - if (doc.compatibilityMode < 15) margin else 0f
         val rule = U * 0.5f
+        val inset = if (t.borders) rule else 0f
         return t.rows.map { row ->
             val items = ArrayList<PageItem>()
             var col = 0
@@ -301,7 +308,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 val cw = cols.drop(col).take(cell.span).sum()
                 col += cell.span
                 val inner = ArrayList<PageItem>()
-                var y = 0f
+                // Borders take room inside the row
+                var y = inset
                 if (!cell.mergedAbove) {
                     var cellAfter = 0f
                     val paras = flatten(cell.blocks)
@@ -318,7 +326,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                     // Space after the last paragraph of a cell still counts, as in Word
                     y += cellAfter
                 }
-                height = max(height, y)
+                height = max(height, y + inset)
                 cellBoxes += Triple(cx, cw, cell)
                 contents += y to inner
             }
