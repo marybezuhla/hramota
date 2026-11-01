@@ -60,7 +60,7 @@ class ScreensTest {
         shadowOf(app.packageManager).addActivityIfNotPresent(ComponentName(app, ComponentActivity::class.java))
     }
 
-    private fun shot(name: String, content: @Composable () -> Unit) = ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+    private fun shot(name: String, settle: Int = 8, content: @Composable () -> Unit) = ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
         scenario.onActivity { activity ->
             activity.setContent {
                 HramotaTheme {
@@ -69,7 +69,7 @@ class ScreensTest {
             }
         }
         // Let delays (search waits for typing to pause) and background work finish
-        repeat(8) {
+        repeat(settle) {
             shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
             Thread.sleep(40)
             compose.waitForIdle()
@@ -192,7 +192,7 @@ class ScreensTest {
         val info = ua.hramota.doc.Inspection(comments = 2, trackedChanges = true)
         ViewerScreen("Протокол.docx", ViewerState.Paged(docxPages("03-lists.docx"), emptyList(), info), onBack = {})
     }
-    @Test fun viewerSearch() = shot("04-viewer-search") {
+    @Test fun viewerSearch() = shot("04-viewer-search", settle = 40) {
         ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, startSearch = "розділ договору")
     }
     @Test fun viewerOverview() = shot("04-viewer-overview") {
@@ -250,6 +250,6 @@ class ScreensTest {
     @Test fun viewerCsv() = shot("10-viewer-csv") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
     @Config(qualifiers = "+night")
     @Test fun viewerCsvDark() = shot("10-viewer-csv-dark") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
-    @Test fun viewerCsvSearch() = shot("10-viewer-csv-search") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}, startSearch = "2100") }
-    @Test fun viewerTextSearch() = shot("04-viewer-reading-search") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}, startSearch = "листопада") }
+    @Test fun viewerCsvSearch() = shot("10-viewer-csv-search", settle = 40) { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}, startSearch = "2100") }
+    @Test fun viewerTextSearch() = shot("04-viewer-reading-search", settle = 40) { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}, startSearch = "листопада") }
 }
