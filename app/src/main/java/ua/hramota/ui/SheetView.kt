@@ -349,6 +349,13 @@ private class Ctx(
                     k++
                 }
             }
+            // A merged area that starts outside this part (across the frozen line, or above or left of the view) still shows its content here
+            for (m in merges) {
+                if (m.top >= firstRow && m.left >= firstCol && m.top >= r0 && m.left >= c0) continue
+                val row = sheet.row(m.top) ?: continue
+                val k = row.find(m.left)
+                if (k >= 0) cell(row, k, m.top, m.left, ::x, ::y, merges, found[m.top]?.get(m.left), lastCol)
+            }
         }
     }
 
