@@ -35,7 +35,10 @@ jobs:
             f="pdfium-android-$abi.tgz"
             curl -fsSL -o "dl/$f" "https://github.com/bblanchon/pdfium-binaries/releases/download/${RELEASE/\//%2F}/$f"
             # Built by bblanchon/pdfium-binaries' own release workflow, or stop here
-            gh attestation verify "dl/$f" --repo bblanchon/pdfium-binaries | tee -a out/attestation.txt
+            gh attestation verify "dl/$f" --repo bblanchon/pdfium-binaries --format json > "out/attestation-$abi.json"
+            # Keep a readable proof: which file, built by which workflow and commit
+            jq -r '.[0].verificationResult | "\(.statement.subject[0].name) sha256:\(.statement.subject[0].digest.sha256) built by \(.signature.certificate.buildSignerURI) at \(.signature.certificate.sourceRepositoryDigest)"' \
+              "out/attestation-$abi.json" | tee -a out/attestation.txt
             mkdir -p "x/$abi" && tar -xzf "dl/$f" -C "x/$abi"
           done
           (cd dl && sha256sum *.tgz) > out/SHA256SUMS-tgz

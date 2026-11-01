@@ -36,6 +36,9 @@ class XmlNode(val name: String, val attrs: Map<String, String>) {
     }
 }
 
+/** Elements whose text is kept: document text, field codes, and document properties. */
+private val TEXT_ELEMENTS = setOf("t", "instrText", "delText", "creator", "lastModifiedBy", "title")
+
 object Xml {
     /** Office parts never declare a DOCTYPE; one is refused, so entity tricks cannot expand. */
     fun checkNoDoctype(bytes: ByteArray) {
@@ -79,7 +82,7 @@ object Xml {
                 XmlPullParser.TEXT -> {
                     val top = stack.last()
                     // Only text elements keep their text; whitespace between elements is noise
-                    if (top.name == "t" || top.name == "instrText" || top.name == "delText") top.text += p.text
+                    if (top.name in TEXT_ELEMENTS) top.text += p.text
                 }
                 XmlPullParser.END_TAG -> stack.removeAt(stack.size - 1)
                 XmlPullParser.END_DOCUMENT -> return root
