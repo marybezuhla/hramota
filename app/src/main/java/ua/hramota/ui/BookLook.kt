@@ -70,7 +70,7 @@ fun BookTheme(on: Boolean, settings: AppSettings, content: @Composable () -> Uni
             surfaceContainer = p.background, surfaceContainerLow = p.background, surfaceContainerHigh = p.background,
         )
         MaterialTheme(colorScheme = cs) {
-            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(p.background)) { content() }
+            androidx.compose.material3.Surface(androidx.compose.ui.Modifier.fillMaxSize(), color = p.background, contentColor = p.text) { content() }
         }
     }
 }
