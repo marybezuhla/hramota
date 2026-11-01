@@ -63,7 +63,7 @@ class SheetsTest {
         assertEquals("-1,234", NumberFormat.format(-1234.4, "#,##0", locale = us))
         assertEquals("(1,234.00)", NumberFormat.format(-1234.0, "#,##0.00;(#,##0.00)", locale = us))
         assertEquals("12.5%", NumberFormat.format(0.125, "0.0%", locale = us))
-        assertEquals("1 234,50 ₴", NumberFormat.format(1234.5, "#,##0.00 [\$₴-422]", locale = uk).replace(' ', ' ').replace(' ', ' '))
+        assertEquals("1 234,50 ₴", NumberFormat.format(1234.5, "#,##0.00 [\$₴-422]", locale = uk).replace(Regex("[\\u00A0\\u202F\\u2009]"), " "))
         assertEquals("1.23E+04", NumberFormat.format(12345.0, "0.00E+00", locale = us))
         assertEquals("007", NumberFormat.format(7.0, "000", locale = us))
         assertEquals("15.03.2026", NumberFormat.format(46096.0, "dd.mm.yyyy", locale = us))
