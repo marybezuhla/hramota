@@ -73,6 +73,24 @@ class PdfEngineTest {
         }
     }
 
+    /** The fallback transfer (pages sent in parts over Binder) draws the same page. */
+    @Test fun pagesInParts() = runBlocking {
+        val pages = PdfiumPages.open(context, asset("sample.pdf"))
+        try {
+            pages.useParts()
+            val bitmap = pages.render(0, 640)!!.asAndroidBitmap()
+            var blue = 0
+            for (y in 0 until bitmap.height step 2) for (x in 0 until bitmap.width step 2) {
+                val c = bitmap.getPixel(x, y)
+                if ((c and 0xFF) > 200 && ((c shr 16) and 0xFF) < 60 && ((c shr 8) and 0xFF) < 60) blue++
+            }
+            assertTrue("blue pixels: $blue", blue > 500)
+            assertNotNull(pages.render(1, 2048))
+        } finally {
+            pages.close()
+        }
+    }
+
     @Test fun damagedFileFailsCleanly() = runBlocking {
         try {
             PdfiumPages.open(context, asset("broken.pdf")).close()

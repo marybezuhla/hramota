@@ -153,12 +153,17 @@ fun ZoomablePages(
             items(pages.pageCount, key = { it }) { index ->
                 val renderW = (widthPx * quality).roundToInt()
                 var image by remember(index) { mutableStateOf<ImageBitmap?>(null) }
-                LaunchedEffect(index, renderW) { pages.render(index, renderW)?.let { image = it } }
+                var failed by remember(index) { mutableStateOf(false) }
+                LaunchedEffect(index, renderW) {
+                    val drawn = pages.render(index, renderW)
+                    if (drawn != null) { image = drawn; failed = false } else if (image == null) failed = true
+                }
                 Box(
                     Modifier.fillMaxWidth().aspectRatio(pageRatio(pages.aspect(index))).background(Color.White)
                         .then(if (text != null) Modifier.selectText(text, index, selection, onSelection) else Modifier),
                 ) {
                     image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+                    if (failed && image == null) PageProblem(pages.problem)
                     if (text != null) TextMarks(text, index, hits[index].orEmpty(), currentHit, selection)
                     if (index in bookmarks) Icon(
                         AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary,
@@ -257,6 +262,15 @@ fun PageOverview(pages: Pages, bookmarks: Set<Int>, current: Int, onOpen: (Int) 
                 }
             }
         }
+    }
+}
+
+/** Said on a page that could not be drawn, instead of leaving a blank sheet; the detail helps fix it. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.PageProblem(detail: String?) {
+    Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(stringResource(R.string.page_failed), color = Color(0xFF555555), style = MaterialTheme.typography.bodyMedium)
+        if (detail != null) Text(detail.take(160), color = Color(0xFF888888), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
     }
 }
 

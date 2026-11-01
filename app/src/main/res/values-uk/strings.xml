@@ -100,4 +100,5 @@
     <string name="copy">Копіювати</string>
     <string name="share">Поділитися</string>
     <string name="clear_selection">Скасувати виділення</string>
+    <string name="page_failed">Не вдалося показати сторінку</string>
 </resources>

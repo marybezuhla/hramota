@@ -127,9 +127,21 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                     prev = null
                     y = min(y + pendingAfter, bottom); pendingAfter = 0f
                     for (row in tableRows(block)) {
-                        if (y + row.height > bottom && !atTop()) newPage()
-                        row.items.forEach { items += it.moved(0f, y) }
-                        y += row.height
+                        // A row that cannot break (exact height, "don't split") moves whole to the next page
+                        if ((row.exact || row.cantSplit) && y + row.height > bottom && !atTop()) newPage()
+                        val next = IntArray(row.cells.size)
+                        var used = 0f
+                        while (true) {
+                            val unbroken = row.exact || row.cantSplit
+                            val seg = row.segment(next, if (unbroken) Float.MAX_VALUE else bottom - y, used, forceOne = atTop())
+                            if (seg == null) { newPage(); continue }
+                            seg.items.forEach { items += it.moved(0f, y) }
+                            y += seg.height
+                            used += seg.height
+                            if (seg.done) break
+                            // As in Word, a row breaks across pages, each cell going on from its next line
+                            newPage()
+                        }
                     }
                 }
             }
@@ -281,8 +293,81 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         else -> doc.fonts.minor
     }
 
-    /** A table row laid out at y = 0: its cells' contents, shading and borders. */
-    private class LaidRow(val items: List<PageItem>, val height: Float)
+    /** One line of a cell, its top and bottom measured from the top of the row. */
+    private class LineSlot(val layout: StaticLayout, val line: Int, val x: Float, val top: Float, val bottom: Float)
+
+    /** A cell of a laid-out row: where it is, its lines, and where its content ends (with spacing after). */
+    private class CellLines(val x: Float, val width: Float, val shading: Int?, val mergedAbove: Boolean, val lines: List<LineSlot>, val end: Float)
+
+    /** A piece of a row on one page. */
+    private class Segment(val items: List<PageItem>, val height: Float, val done: Boolean)
+
+    /** A table row laid out from y = 0, which can be placed whole or in pieces across pages. */
+    private inner class LaidRow(
+        val cells: List<CellLines>, val height: Float, val minHeight: Float,
+        val exact: Boolean, val cantSplit: Boolean, private val borders: Boolean, private val inset: Float,
+    ) {
+        /**
+         * The next piece of the row that fits in [avail]: each cell goes on from line [next] (updated).
+         * Null when not one line fits and [forceOne] is false (the caller starts a new page).
+         */
+        fun segment(next: IntArray, avail: Float, used: Float, forceOne: Boolean): Segment? {
+            val out = ArrayList<PageItem>()
+            var segHeight = 0f
+            var placedAny = false
+            var done = true
+            for ((c, cell) in cells.withIndex()) {
+                val lines = cell.lines
+                var i = next[c]
+                if (i >= lines.size) continue
+                // This cell's lines on this page start just under the top border
+                val base = lines[i].top - inset
+                val start = i
+                while (i < lines.size && (lines[i].bottom - base <= avail || (forceOne && i == start))) {
+                    val l = lines[i]
+                    out += PageItem.Text(l.layout, l.line, l.line, l.x, l.top - base)
+                    i++
+                }
+                if (i > start) {
+                    placedAny = true
+                    val last = lines[i - 1]
+                    // The cell's spacing after its last paragraph counts only where its content ends
+                    val bottomEdge = if (i == lines.size) maxOf(last.bottom, cell.end) else last.bottom
+                    segHeight = maxOf(segHeight, bottomEdge - base)
+                }
+                next[c] = i
+                if (i < lines.size) done = false
+            }
+            if (!placedAny && cells.any { it.lines.isNotEmpty() } && !forceOne && !done) return null
+            if (done) segHeight = maxOf(segHeight, minHeight - used, if (used == 0f) height else 0f).coerceAtLeast(segHeight)
+            if (exact) segHeight = height
+            val h = segHeight
+            // Shading behind and borders around every cell, for this piece's height
+            val drawn = ArrayList<PageItem>()
+            for (cell in cells) cell.shading?.let { drawn += PageItem.Fill(RectF(cell.x, 0f, cell.x + cell.width, h), it) }
+            drawn += merge(out)
+            if (borders) for (cell in cells) {
+                if (!cell.mergedAbove || used > 0f) drawn += PageItem.Rule(cell.x, 0f, cell.x + cell.width, 0f, U * 0.5f)
+                drawn += PageItem.Rule(cell.x, h, cell.x + cell.width, h, U * 0.5f)
+                drawn += PageItem.Rule(cell.x, 0f, cell.x, h, U * 0.5f)
+                drawn += PageItem.Rule(cell.x + cell.width, 0f, cell.x + cell.width, h, U * 0.5f)
+            }
+            return Segment(drawn, h, done)
+        }
+
+        /** Consecutive lines of the same paragraph become one item. */
+        private fun merge(lines: List<PageItem>): List<PageItem> {
+            val out = ArrayList<PageItem>()
+            for (item in lines) {
+                val t = item as PageItem.Text
+                val prev = out.lastOrNull() as? PageItem.Text
+                if (prev != null && prev.layout === t.layout && prev.last + 1 == t.first && prev.x == t.x) {
+                    out[out.size - 1] = PageItem.Text(prev.layout, prev.first, t.last, prev.x, prev.y)
+                } else out += t
+            }
+            return out
+        }
+    }
 
     private fun PageItem.moved(dx: Float, dy: Float): PageItem = when (this) {
         is PageItem.Text -> PageItem.Text(layout, first, last, x + dx, y + dy)
@@ -303,18 +388,16 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val rule = U * 0.5f
         val inset = if (t.borders) rule else 0f
         return t.rows.map { row ->
-            val items = ArrayList<PageItem>()
             var col = 0
-            val cellBoxes = ArrayList<Triple<Float, Float, Cell>>()
             var height = 0f
-            val contents = ArrayList<Pair<Float, List<PageItem>>>()
+            val cells = ArrayList<CellLines>()
             for (cell in row.cells) {
                 if (col >= cols.size) break
                 val end = minOf(col + cell.span, cols.size)
                 val cx = x0 + edges[col]
                 val cw = edges[end] - edges[col]
                 col = end
-                val inner = ArrayList<PageItem>()
+                val lines = ArrayList<LineSlot>()
                 // Borders take room inside the row
                 var y = inset
                 if (!cell.mergedAbove) {
@@ -326,7 +409,10 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                         val nextP = paras.getOrNull(k + 1)
                         val same = { o: Block.Para? -> o != null && o.props.styleId == p.props.styleId && (o.props.contextual == true || p.props.contextual == true) }
                         y += gap(cellAfter, if (same(prevP)) 0f else laid.before)
-                        inner += PageItem.Text(laid.layout, 0, laid.lines - 1, cx + margin + laid.x, y)
+                        val l = laid.layout
+                        for (line in 0 until l.lineCount) {
+                            lines += LineSlot(l, line, cx + margin + laid.x, y + l.getLineTop(line), y + l.getLineBottom(line))
+                        }
                         y += laid.height
                         cellAfter = if (same(nextP)) 0f else laid.after
                     }
@@ -334,19 +420,11 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                     y += cellAfter
                 }
                 height = max(height, y)
-                cellBoxes += Triple(cx, cw, cell)
-                contents += y to inner
+                cells += CellLines(cx, cw, cell.shading, cell.mergedAbove, lines, y)
             }
-            row.height?.let { h -> height = if (row.exact) tw(h) else max(height, tw(h)) }
-            for ((cx, cw, cell) in cellBoxes) cell.shading?.let { items += PageItem.Fill(RectF(cx, 0f, cx + cw, height), it) }
-            contents.forEach { items += it.second }
-            if (t.borders) for ((cx, cw, cell) in cellBoxes) {
-                if (!cell.mergedAbove) items += PageItem.Rule(cx, 0f, cx + cw, 0f, rule)
-                items += PageItem.Rule(cx, height, cx + cw, height, rule)
-                items += PageItem.Rule(cx, 0f, cx, height, rule)
-                items += PageItem.Rule(cx + cw, 0f, cx + cw, height, rule)
-            }
-            LaidRow(items, height)
+            val min = row.height?.let { tw(it) } ?: 0f
+            if (row.exact) height = min else height = max(height, min)
+            LaidRow(cells, height, min, row.exact, row.cantSplit, t.borders, inset)
         }
     }
 

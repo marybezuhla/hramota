@@ -92,4 +92,5 @@
     <string name="copy">Copy</string>
     <string name="share">Share</string>
     <string name="clear_selection">Clear selection</string>
+    <string name="page_failed">This page could not be shown</string>
 </resources>
