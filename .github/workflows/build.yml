@@ -125,6 +125,7 @@ jobs:
           cp -r render-report-doc log/render-doc 2>/dev/null || cp -r app/build/render-doc log/render-doc 2>/dev/null || true
           cp app/build/render-doc/*.txt log/render-doc/ 2>/dev/null || true
           cp render-report-doc-vs-docx/report.md log/render-doc/vs-docx.md 2>/dev/null || true
+          cp -r app/build/render-doc-word log/render-doc-word 2>/dev/null || true
           cp app/build/render/*.txt log/render/ 2>/dev/null || true
           cp app/build/big/report.txt log/big-report.txt 2>/dev/null || true
           # The first errors as annotations, so they show on the pull request without opening the log.
