@@ -286,17 +286,36 @@ class ScreensTest {
     }
 
     private val shelfEntries = listOf(
-        ua.hramota.data.LibraryEntry("a1", "Порівняльна таблиця до проєкту закону.docx", "DOCX", null, position = 36, total = 148, bookmarks = setOf(3, 80), onShelf = true),
-        ua.hramota.data.LibraryEntry("a2", "Звіт за жовтень.pdf", "PDF", null, position = 2, total = 12, onShelf = true),
-        ua.hramota.data.LibraryEntry("a3", "Сімейний бюджет.xlsx", "XLSX", null, onShelf = true),
-        ua.hramota.data.LibraryEntry("a4", "Кобзар.epub", "EPUB", null, position = 120, total = 600, onShelf = true),
-        ua.hramota.data.LibraryEntry("a5", "Презентація проєкту.pptx", "PPTX", null, position = 3, total = 14, onShelf = true),
+        ua.hramota.data.LibraryEntry("a1", "Порівняльна таблиця до проєкту закону.docx", "DOCX", null, position = 36, total = 148, bookmarks = setOf(3, 80), copy = "x", shelves = setOf("work")),
+        ua.hramota.data.LibraryEntry("a2", "Звіт за жовтень.pdf", "PDF", null, position = 2, total = 12, copy = "x", shelves = setOf("work")),
+        ua.hramota.data.LibraryEntry("a3", "Сімейний бюджет.xlsx", "XLSX", null, copy = "x", shelves = setOf("fam")),
+        ua.hramota.data.LibraryEntry("a4", "Кобзар.epub", "EPUB", null, position = 120, total = 600, copy = "x", shelves = setOf("read")),
+        ua.hramota.data.LibraryEntry("a5", "Презентація проєкту.pptx", "PPTX", null, position = 3, total = 14, copy = "x", shelves = setOf("work")),
     )
     @Test fun homeShelf() = shot("12-home-shelf") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)
     }
     @Test fun homeShelfWood() = shot("12-home-shelf-wood") {
-        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, woodShelf = true, startOnShelf = true, now = now)
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, shelves = shelfDefs(allStyle = "wood"), startOnShelf = true, now = now)
+    }
+    private fun shelfDefs(allStyle: String = "modern") = listOf(
+        ua.hramota.data.ShelfDef(ua.hramota.data.ShelfDef.ALL, "", allStyle),
+        ua.hramota.data.ShelfDef("work", "Робота", "list", 210f, 1),
+        ua.hramota.data.ShelfDef("read", "Читаю", "wood", 0f, 2),
+        ua.hramota.data.ShelfDef("fam", "Сім'я", "modern", 120f, 3),
+    )
+    @Test fun homeShelves() = shot("12-home-shelves") {
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, shelves = shelfDefs(), startOnShelf = true, now = now)
+    }
+    @Test fun homeShelfList() = shot("12-home-shelf-list") {
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, shelves = shelfDefs(), startOnShelf = true, startShelf = "work", now = now)
+    }
+    @Config(qualifiers = "+night")
+    @Test fun homeShelfRedWoodDark() = shot("12-home-shelf-wood-red-dark") {
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries.map { it.copy(shelves = setOf("read")) }, shelves = shelfDefs(), startOnShelf = true, startShelf = "read", now = now)
+    }
+    @Test fun shelfEditor() = shot("12-shelf-editor") {
+        ua.hramota.ui.ShelfEditor(ua.hramota.data.ShelfDef("read", "Читаю", "wood", 0f, 2), isNew = false, onSave = {}, onDelete = {}, onDismiss = {})
     }
 
     // A made-up book: chapters, an epigraph, styles and a poem

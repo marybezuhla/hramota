@@ -65,9 +65,13 @@ fun HomeScreen(
     onClear: () -> Unit,
     onSettings: () -> Unit = {},
     shelf: List<ua.hramota.data.LibraryEntry> = emptyList(),
-    woodShelf: Boolean = false,
+    shelves: List<ua.hramota.data.ShelfDef> = listOf(ua.hramota.data.ShelfDef(ua.hramota.data.ShelfDef.ALL, "")),
     onOpenShelf: (ua.hramota.data.LibraryEntry) -> Unit = {},
     onShelfAction: (ua.hramota.data.LibraryEntry, ShelfAction) -> Unit = { _, _ -> },
+    onPutShelf: (ua.hramota.data.ShelfDef) -> Unit = {},
+    onRemoveShelf: (String) -> Unit = {},
+    onSetShelves: (ua.hramota.data.LibraryEntry, Set<String>) -> Unit = { _, _ -> },
+    startShelf: String = ua.hramota.data.ShelfDef.ALL,
     startOnShelf: Boolean = false,
     now: Long = System.currentTimeMillis(),
 ) {
@@ -96,7 +100,7 @@ fun HomeScreen(
             if (tab == 0 && recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (tab == 1) {
-            Shelf(shelf, woodShelf, onOpenShelf, onShelfAction, Modifier.weight(1f).fillMaxWidth())
+            Shelf(shelf, shelves, onOpenShelf, onShelfAction, onPutShelf, onRemoveShelf, onSetShelves, Modifier.weight(1f).fillMaxWidth(), startShelf)
         } else if (recents.isEmpty()) {
             Text(
                 stringResource(R.string.recent_empty),

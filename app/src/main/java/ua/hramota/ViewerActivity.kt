@@ -144,7 +144,6 @@ class ViewerActivity : ComponentActivity() {
                         val id = docId ?: return@LaunchedEffect
                         val e = library.get(id) ?: return@LaunchedEffect
                         withContext(Dispatchers.IO) {
-                            if (!e.onShelf) library.update(id) { it?.copy(onShelf = true) }
                             if (e.copy == null && !ownCopy) library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) }
                             if (!java.io.File(Library.coversDir(applicationContext), "$id.png").exists()) {
                                 val bytes = book.cover?.let { book.images[it] } ?: book.blocks.firstNotNullOfOrNull { (it as? ua.hramota.doc.book.BookBlock.Image)?.key?.let(book.images::get) }
@@ -173,8 +172,6 @@ class ViewerActivity : ComponentActivity() {
                             docId?.let { id ->
                                 if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
                                 library.toggleBookmark(id, page)
-                                // A document with bookmarks goes on the shelf
-                                if (library.get(id)?.bookmarks?.isNotEmpty() == true) library.update(id) { it?.copy(onShelf = true) }
                             }
                         },
                         startPosition = startPosition,
@@ -182,19 +179,15 @@ class ViewerActivity : ComponentActivity() {
                         menu = docId?.let { id ->
                             val e = entries[id]
                             listOfNotNull<Pair<String, () -> Unit>>(
-                                if (e?.onShelf == true) getString(R.string.shelf_remove) to { library.update(id) { it?.copy(onShelf = false) }; Unit }
-                                else getString(R.string.shelf_add) to {
-                                    library.update(id) { it?.copy(onShelf = true) ?: LibraryEntry(id, name, format.label, uri.toString(), onShelf = true, openedAt = System.currentTimeMillis()) }
-                                    Unit
-                                },
-                                if (e?.copy == null) getString(R.string.shelf_keep_copy) to {
+                                // On the shelf = kept inside Hramota; taking it off keeps bookmarks and notes
+                                if (e?.copy == null) getString(R.string.shelf_save) to {
                                     if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
                                     lifecycleScope.launch {
                                         val ok = withContext(Dispatchers.IO) { library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) } == true }
                                         android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.shelf_copy_kept else R.string.shelf_copy_failed), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                     Unit
-                                } else null,
+                                } else if (!ownCopy) getString(R.string.shelf_drop_copy) to { library.dropCopy(id); Unit } else null,
                                 // Notes as text, sent where the person chooses
                                 (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
                                     getString(R.string.notes_export) to {
