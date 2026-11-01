@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.doc.CsvReader
+import ua.hramota.doc.docx.WordBinaryReader
 import ua.hramota.doc.EncryptedDocumentException
 import ua.hramota.doc.Format
 import ua.hramota.doc.PdfSource
@@ -65,6 +66,7 @@ class ViewerActivity : ComponentActivity() {
                                         val pages = DocxPages(doc, appFonts(applicationContext), background = true).also { opened = it }
                                         ViewerState.Paged(pages, reading, doc.inspection)
                                     }
+                                    format == Format.DOC -> openDoc(uri) { opened = it }
                                     format == Format.CSV -> ViewerState.Table(
                                         contentResolver.openInputStream(uri)?.use { CsvReader.read(it) } ?: return@withContext ViewerState.Failed,
                                     )
@@ -103,6 +105,21 @@ class ViewerActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Old Word pages laid out like DOCX. A file whose formatting cannot be read (Word 6/95, damaged
+     * tables of formatting) still shows its text.
+     */
+    private fun openDoc(uri: android.net.Uri, onOpen: (java.io.Closeable) -> Unit): ViewerState = try {
+        val doc = contentResolver.openInputStream(uri)?.use { WordBinaryReader.read(it) } ?: return ViewerState.Failed
+        val reading = doc.readingText()
+        val pages = DocxPages(doc, appFonts(applicationContext), background = true).also(onOpen)
+        ViewerState.Paged(pages, reading, doc.inspection)
+    } catch (e: EncryptedDocumentException) {
+        throw e
+    } catch (e: Exception) {
+        ViewerState.Text(readText(this, uri, Format.DOC), Format.DOC)
     }
 
     /**
