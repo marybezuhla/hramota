@@ -17,6 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.hramota.data.Bookmarks
 import ua.hramota.data.Library
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.asAndroidBitmap
 import ua.hramota.data.LibraryEntry
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -126,6 +130,13 @@ class ViewerActivity : ComponentActivity() {
                             throw e
                         }
                     }
+                    // The first page becomes the document's cover on the shelf
+                    LaunchedEffect(state, docId) {
+                        val pages = (state as? ViewerState.Paged)?.pages ?: return@LaunchedEffect
+                        val id = docId ?: return@LaunchedEffect
+                        if (java.io.File(Library.coversDir(applicationContext), "$id.png").exists()) return@LaunchedEffect
+                        pages.render(0, 360)?.let { img -> withContext(Dispatchers.IO) { ua.hramota.data.Shelf.saveCover(applicationContext, id, img.asAndroidBitmap()) } }
+                    }
                     // The PDF engine holds the open file: release it when the window goes
                     DisposableEffect(state) {
                         onDispose { ((state as? ViewerState.Paged)?.pages as? java.io.Closeable)?.close() }
@@ -139,10 +150,28 @@ class ViewerActivity : ComponentActivity() {
                             docId?.let { id ->
                                 if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
                                 library.toggleBookmark(id, page)
+                                // A document with bookmarks goes on the shelf
+                                if (library.get(id)?.bookmarks?.isNotEmpty() == true) library.update(id) { it?.copy(onShelf = true) }
                             }
                         },
                         startPosition = startPosition,
                         onPosition = { position, total -> docId?.let { id -> library.setPosition(id, position, total) } },
+                        menu = docId?.let { id ->
+                            val e = entries[id]
+                            listOfNotNull(
+                                if (e?.onShelf == true) getString(R.string.shelf_remove) to { library.update(id) { it?.copy(onShelf = false) } }
+                                else getString(R.string.shelf_add) to {
+                                    library.update(id) { it?.copy(onShelf = true) ?: LibraryEntry(id, name, format.label, uri.toString(), onShelf = true, openedAt = System.currentTimeMillis()) }
+                                },
+                                if (e?.copy == null) getString(R.string.shelf_keep_copy) to {
+                                    if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
+                                    lifecycleScope.launch {
+                                        val ok = withContext(Dispatchers.IO) { library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) } == true }
+                                        android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.shelf_copy_kept else R.string.shelf_copy_failed), android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else null,
+                            )
+                        }.orEmpty(),
                     )
                 }
             }

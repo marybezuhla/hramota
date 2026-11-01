@@ -19,6 +19,8 @@ data class AppSettings(
     val secureScreen: Boolean = false,
     /** Colours from the wallpaper (Material You) instead of Hramota's own. */
     val dynamicColor: Boolean = false,
+    /** The old wooden bookshelf instead of the modern one. */
+    val woodShelf: Boolean = false,
 )
 
 /** One instance per process; screens observe [state] and change it with [update]. */
@@ -36,6 +38,7 @@ class Settings private constructor(context: Context) {
             .putBoolean("rememberRecent", s.rememberRecent)
             .putBoolean("secureScreen", s.secureScreen)
             .putBoolean("dynamicColor", s.dynamicColor)
+            .putBoolean("woodShelf", s.woodShelf)
             .apply()
         flow.value = s
     }
@@ -47,6 +50,7 @@ class Settings private constructor(context: Context) {
         rememberRecent = prefs.getBoolean("rememberRecent", true),
         secureScreen = prefs.getBoolean("secureScreen", false),
         dynamicColor = prefs.getBoolean("dynamicColor", false),
+        woodShelf = prefs.getBoolean("woodShelf", false),
     )
 
     companion object {

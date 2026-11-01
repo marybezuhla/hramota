@@ -4,6 +4,8 @@ import android.text.format.DateUtils
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.getValue
@@ -62,6 +64,11 @@ fun HomeScreen(
     onRemove: (RecentFile) -> Unit,
     onClear: () -> Unit,
     onSettings: () -> Unit = {},
+    shelf: List<ua.hramota.data.LibraryEntry> = emptyList(),
+    woodShelf: Boolean = false,
+    onOpenShelf: (ua.hramota.data.LibraryEntry) -> Unit = {},
+    onShelfAction: (ua.hramota.data.LibraryEntry, ShelfAction) -> Unit = { _, _ -> },
+    startOnShelf: Boolean = false,
     now: Long = System.currentTimeMillis(),
 ) {
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -74,11 +81,23 @@ fun HomeScreen(
                 Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.recent), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            if (recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        // Two tabs: recent files, and the shelf of kept documents
+        var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (startOnShelf) 1 else 0) }
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            for ((i, label) in listOf(stringResource(R.string.recent), stringResource(R.string.shelf, shelf.size)).withIndex()) {
+                val on = tab == i
+                Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = if (on) FontWeight.SemiBold else null,
+                    color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 6.dp).clip(RoundedCornerShape(10.dp))
+                        .background(if (on) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { tab = i }.padding(horizontal = 14.dp, vertical = 8.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            if (tab == 0 && recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        if (recents.isEmpty()) {
+        if (tab == 1) {
+            Shelf(shelf, woodShelf, onOpenShelf, onShelfAction, Modifier.weight(1f).fillMaxWidth())
+        } else if (recents.isEmpty()) {
             Text(
                 stringResource(R.string.recent_empty),
                 style = MaterialTheme.typography.bodyMedium,

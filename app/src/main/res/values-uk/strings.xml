@@ -133,4 +133,18 @@
     <string name="settings_dynamic">Кольори зі шпалер</string>
     <string name="settings_dynamic_hint">Material You: застосунок бере кольори акцентів із ваших шпалер</string>
     <string name="recent_no_access">«%1$s» відкрили з іншого застосунку лише один раз, тож зі списку його вже не відкрити. Відкрийте його знову з того застосунку або через «Відкрити файл».</string>
+    <string name="shelf">Полиця (%1$d)</string>
+    <string name="shelf_empty">Тут лишаються документи, у яких ви поставили закладку або які додали через ⋮ → «Додати на полицю», разом із місцем, де ви зупинилися. Очищення нещодавніх полиці не торкається.</string>
+    <string name="shelf_add">Додати на полицю</string>
+    <string name="shelf_remove">Прибрати з полиці</string>
+    <string name="shelf_keep_copy">Тримати копію в Грамоті</string>
+    <string name="shelf_drop_copy">Видалити копію з Грамоти</string>
+    <string name="shelf_forget">Забути документ</string>
+    <string name="shelf_copy_kept">Копію збережено в Грамоті</string>
+    <string name="shelf_copy_failed">Не вдалося скопіювати файл</string>
+    <string name="shelf_progress">стор. %1$d з %2$d</string>
+    <string name="shelf_bookmarks">закладок: %1$d</string>
+    <string name="more">Більше</string>
+    <string name="settings_wood">Дерев\'яна книжкова полиця</string>
+    <string name="settings_wood_hint">Обкладинки на дерев\'яних полицях, як у класичних книжкових застосунках</string>
 </resources>
