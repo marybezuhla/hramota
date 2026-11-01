@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A page with a folded corner, lines of text and a round seal -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:strokeColor="#24467A" android:strokeWidth="3"
+        android:strokeLineJoin="round"
+        android:pathData="M37,30 H62 L73,41 V78 H37 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#24467A" android:strokeWidth="3"
+        android:strokeLineJoin="round" android:pathData="M62,30 V41 H73" />
+    <path android:fillColor="#00000000" android:strokeColor="#24467A" android:strokeWidth="3"
+        android:strokeLineCap="round" android:pathData="M44,49 H66 M44,56 H66 M44,63 H56" />
+    <path android:fillColor="#B4472E" android:pathData="M64,70 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+</vector>

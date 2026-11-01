@@ -1,0 +1,224 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, next]
+    # Only documents changed: nothing to build or release.
+    paths-ignore: ["**.md", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE"]
+  workflow_dispatch:
+
+# Nothing gets write access unless a job asks for it below
+permissions:
+  contents: read
+
+jobs:
+  # Builds and tests. Runs third-party build code, so it gets no secrets and no write access.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Check version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="$(tr -d '[:space:]' < version.txt)"
+          echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::version.txt must be major.minor.patch, got '$V'"; exit 1; }
+          # A push to main becomes a release: stop here, before any approval, if this version is already out.
+          if [ "${{ github.event_name }}" = push ] && [ "${{ github.ref }}" = refs/heads/main ] \
+             && gh api "repos/${{ github.repository }}/releases/tags/v$V" >/dev/null 2>&1; then
+            echo "::error::v$V is already released; raise version.txt first."; exit 1
+          fi
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Test and build (unsigned)
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        shell: bash
+        run: |
+          set -o pipefail
+          # Every library is checked against gradle/verification-metadata.xml (refreshed only by deps.yml);
+          # the build fails on any changed library, and without the file.
+          test -f gradle/verification-metadata.xml || { echo "gradle/verification-metadata.xml is missing" | tee build.log; exit 1; }
+          gradle --no-daemon testReleaseUnitTest assembleRelease 2>&1 | tee build.log
+
+      - name: Check permissions (no internet, only what is expected)
+        shell: bash
+        run: bash .github/check-permissions.sh app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Prepare build log
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p log
+          { echo "run ${{ github.run_number }} ${{ job.status }}"; grep -E "^e: |error:|FAILED|What went wrong|Dependency verification" -A3 build.log | head -300; echo ----; tail -150 build.log; cat permissions.txt 2>/dev/null; } > log/build.log || true
+          find app/build/test-results -name "*.xml" -exec cp {} log/ \; 2>/dev/null || true
+          cp gradle/verification-metadata.xml log/ 2>/dev/null || true
+          # Pictures of the screens drawn with made-up documents, for review
+          cp -r app/build/screens log/screens 2>/dev/null || true
+          # The first errors as annotations, so they show on the pull request without opening the log.
+          { grep -E "^e: |What went wrong|FAILED|AssertionError|expected:|PROBLEM:" -A2 build.log 2>/dev/null | grep -v "^--$" | head -15 \
+            | sed -E 's/%/%25/g' | while IFS= read -r l; do echo "::warning title=build::$l"; done; } || true
+          grep -h -o -E '<failure message="[^"]{0,300}' app/build/test-results/*/*.xml 2>/dev/null | head -5 \
+            | while IFS= read -r l; do echo "::warning title=test::${l#<failure message=\"}"; done || true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: build-log
+          path: log/
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hramota-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+
+  # Saves the build log to the ci-logs branch. Runs no project code.
+  logs:
+    needs: build
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: build-log
+          path: log
+      - name: Push the log
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd log
+          git init -q && git checkout -q -b ci-logs && git add . && git -c user.name=ci -c user.email=ci@localhost commit -qm "build log ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}" ci-logs
+
+  # Signs. Only for main, only in the "release" environment (needs the owner's approval), and with
+  # no Gradle or other third-party build code: just the Android SDK's own zipalign and apksigner.
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.secrets.outputs.ready }}
+    steps:
+      - name: Check that signing secrets exist
+        id: secrets
+        env:
+          PASS: ${{ secrets.HRAMOTA_SIGNING_PASS }}
+          STORE: ${{ secrets.HRAMOTA_STORE_PASS }}
+        run: |
+          if [ -n "$PASS" ] && [ -n "$STORE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Signing secrets are not set in the release environment; nothing is published."
+            exit 1
+          fi
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            signing
+            .github
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          name: hramota-unsigned
+          path: unsigned
+
+      # The build job ran third-party code: check the APK's permissions again here, before signing,
+      # in a step that has no secrets.
+      - name: Check permissions again
+        if: steps.secrets.outputs.ready == 'true'
+        shell: bash
+        run: bash .github/check-permissions.sh unsigned/app-release-unsigned.apk
+
+      - name: Sign
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          PASS: ${{ secrets.HRAMOTA_SIGNING_PASS }}
+          STORE: ${{ secrets.HRAMOTA_STORE_PASS }}
+        shell: bash
+        run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          printf %s "$PASS" > "$RUNNER_TEMP/p"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing/hramota.jks.enc -out "$RUNNER_TEMP/hramota.jks" -pass file:"$RUNNER_TEMP/p"
+          rm "$RUNNER_TEMP/p"
+          mkdir -p out
+          "$BT/zipalign" -P 16 -f 4 unsigned/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          OUT="out/hramota-$(tr -d '[:space:]' < version.txt).apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/hramota.jks" --ks-key-alias hramota \
+            --ks-pass env:STORE --key-pass env:STORE --out "$OUT" "$RUNNER_TEMP/aligned.apk"
+          rm -f "$RUNNER_TEMP/hramota.jks"
+          # The certificate must be exactly Hramota's own (signing/certificate-sha256.txt)
+          CERT="$(tr -d '[:space:]' < signing/certificate-sha256.txt)"
+          "$BT/apksigner" verify --print-certs "$OUT" | tee certs.txt
+          if ! tr -d ' ' < certs.txt | grep -qi "SHA-256digest:$CERT"; then
+            echo "::error::Unexpected signing certificate"; exit 1
+          fi
+
+      - name: Remove the decrypted key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/hramota.jks" "$RUNNER_TEMP/p"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          name: hramota-signed
+          path: out/*.apk
+
+  # Publishes the signed APK. Never sees the signing key; uses only GitHub's own gh tool.
+  publish:
+    needs: release
+    if: needs.release.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          sparse-checkout: |
+            .github/release-notes.md
+            version.txt
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hramota-signed
+          path: out
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The same version can be released only once: the tag already exists otherwise.
+          V="$(tr -d '[:space:]' < version.txt)"
+          gh release create "v$V" out/*.apk \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "Hramota $V" --notes-file .github/release-notes.md --latest
