@@ -9,10 +9,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.doc.Format
 import ua.hramota.doc.PdfSource
@@ -34,6 +37,8 @@ class ViewerActivity : ComponentActivity() {
         // Files opened from other apps ("Open with") also appear in the recent list
         if (savedInstanceState == null) Recents(applicationContext).add(uri, name)
         val format = formatOf(this, uri, name)
+        val bookmarkStore = Bookmarks(applicationContext)
+        var bookmarks by mutableStateOf(bookmarkStore.pages(uri.toString()))
 
         setContent {
             HramotaTheme {
@@ -74,7 +79,11 @@ class ViewerActivity : ComponentActivity() {
                     DisposableEffect(state) {
                         onDispose { ((state as? ViewerState.Paged)?.pages as? PdfSource)?.close() }
                     }
-                    ViewerScreen(name, state, onBack = { finishAndRemoveTask() })
+                    ViewerScreen(
+                        name, state, onBack = { finishAndRemoveTask() },
+                        bookmarks = bookmarks,
+                        onToggleBookmark = { page -> bookmarks = bookmarkStore.toggle(uri.toString(), page) },
+                    )
                 }
             }
         }
