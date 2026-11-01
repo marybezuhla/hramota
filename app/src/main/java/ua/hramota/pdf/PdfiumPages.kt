@@ -42,7 +42,11 @@ class PdfiumPages private constructor(
     private val binder: IBinder,
     private val sizes: FloatArray,
     val inspection: Inspection,
+    /** Opens the file again for the phone's own PDF engine, used for a page the isolated engine cannot draw. */
+    private val reopen: (() -> ParcelFileDescriptor?)?,
 ) : TextPages, Closeable {
+    private var system: ua.hramota.doc.PdfSource? = null
+    private var systemFailed = false
     private val lock = Mutex()
     private val cache = LinkedHashMap<Long, ImageBitmap>(16, 0.75f, true)
     private var cacheBytes = 0L
@@ -57,7 +61,8 @@ class PdfiumPages private constructor(
 
     /** True once shared memory failed for this document; pages then come in parts over Binder. */
     @Volatile private var inParts = false
-    @Volatile override var problem: String? = null
+    /** Why a page could not be drawn; shown on the page (screen state, so it appears as soon as it is known). */
+    override var problem: String? by androidx.compose.runtime.mutableStateOf(null)
         private set
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
@@ -68,9 +73,21 @@ class PdfiumPages private constructor(
             val key = index.toLong() shl 32 or w.toLong()
             cache[key]?.let { return@withLock it }
             val h = (w * aspect(index)).toInt().coerceIn(1, MAX_WIDTH * 2)
-            val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: if (inParts) viaParts(index, w, h) else null
-            bitmap?.asImageBitmap()?.also { remember(key, it, w, h) }
+            val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: viaParts(index, w, h)
+            bitmap?.asImageBitmap()?.also { remember(key, it, w, h) } ?: viaSystem(index, w)?.also { remember(key, it, w, h) }
         }
+    }
+
+    /**
+     * The page from the phone's own PDF engine, when the isolated one cannot draw it on this phone.
+     * Search and text still come from the isolated engine.
+     */
+    private suspend fun viaSystem(index: Int, w: Int): ImageBitmap? {
+        if (systemFailed) return null
+        val s = system ?: try {
+            reopen?.invoke()?.let { ua.hramota.doc.PdfSource.open(it) }?.also { system = it }
+        } catch (e: Exception) { null } ?: run { systemFailed = true; return null }
+        return try { s.render(index, w) } catch (e: Exception) { problem = (problem ?: "") + " / system: $e"; null }
     }
 
     private fun viaSharedMemory(index: Int, w: Int, h: Int): Bitmap? {
@@ -107,7 +124,7 @@ class PdfiumPages private constructor(
     /** The page drawn in the engine's own memory and fetched in parts: slower, works everywhere. */
     private fun viaParts(index: Int, w: Int, h: Int): Bitmap? {
         val status = call(PdfEngineService.RENDER_KEEP, { d -> d.writeInt(index); d.writeInt(w); d.writeInt(h) }) { it.readInt() }
-        if (status != PdfEngineService.R_OK) { problem = "render ${status ?: "engine stopped"}"; return null }
+        if (status != PdfEngineService.R_OK) { problem = (problem?.let { "$it; " } ?: "") + "parts: ${status ?: "engine stopped"}"; return null }
         val total = w * h * 4
         val buffer = java.nio.ByteBuffer.allocate(total)
         while (buffer.position() < total) {
@@ -172,6 +189,7 @@ class PdfiumPages private constructor(
 
     /** Ends the document's engine process. Never waits for it: the process may be busy or stuck. */
     override fun close() {
+        try { system?.close() } catch (_: Exception) {}
         if (closed) return
         closed = true
         try { context.unbindService(connection) } catch (_: Exception) {}
@@ -187,7 +205,7 @@ class PdfiumPages private constructor(
          * Starts a fresh isolated engine process and opens the PDF there. Call off the main thread.
          * Throws [PdfPasswordException] for protected files, IOException if it cannot be opened.
          */
-        suspend fun open(context: Context, pfd: ParcelFileDescriptor): PdfiumPages {
+        suspend fun open(context: Context, pfd: ParcelFileDescriptor, reopen: (() -> ParcelFileDescriptor?)? = null): PdfiumPages {
             val app = context.applicationContext
             val connected = CompletableDeferred<IBinder>()
             val connection = object : ServiceConnection {
@@ -216,7 +234,7 @@ class PdfiumPages private constructor(
                 val sizes = call(binder, PdfEngineService.SIZES) { it.createFloatArray() } ?: FloatArray(0)
                 if (sizes.isEmpty()) throw IOException("No pages")
                 val info = call(binder, PdfEngineService.INSPECT) { it.createStringArray() }
-                return PdfiumPages(app, connection, binder, sizes, inspection(info))
+                return PdfiumPages(app, connection, binder, sizes, inspection(info), reopen)
             } catch (e: Throwable) {
                 try { app.unbindService(connection) } catch (_: Exception) {}
                 throw e

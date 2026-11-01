@@ -103,14 +103,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openViewer(uri: Uri, name: String) {
-        recents.add(uri, name)
         // Each file in its own window: the viewer is declared with documentLaunchMode="intoExisting"
-        startActivity(
-            Intent(this, ViewerActivity::class.java)
-                .setAction(Intent.ACTION_VIEW)
-                .setData(uri)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        )
+        val intent = Intent(this, ViewerActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(intent)
+            recents.add(uri, name)
+        } catch (e: SecurityException) {
+            // A file opened once from another app ("Open with") gives access only that time:
+            // from the list it cannot be opened again, so say so and take it off the list
+            recents.remove(uri.toString())
+            android.widget.Toast.makeText(this, getString(R.string.recent_no_access, name), android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun appVersion(): String = try {

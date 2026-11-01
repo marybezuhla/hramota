@@ -19,7 +19,7 @@
     <string name="unsupported_title">This format is not supported yet</string>
     <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, CSV, TXT and Markdown.</string>
     <string name="simplified_note">Simplified view: text only. Exact page layout is coming.</string>
-    <string name="mode_reading">Reading</string>
+    <string name="mode_reading">Text</string>
     <string name="mode_pages">Pages</string>
     <string name="overview">Page overview</string>
     <string name="overview_all">All pages (%1$d)</string>
@@ -102,7 +102,7 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="settings_documents">Documents</string>
-    <string name="settings_docx_open">Open Word documents as</string>
+    <string name="settings_docx_open">Open text documents as</string>
     <string name="settings_inspector">Show what a document contains</string>
     <string name="settings_inspector_hint">Macros, embedded files, links, author and comments, in a banner above the document</string>
     <string name="settings_editing">Open for editing straight away</string>
@@ -121,4 +121,8 @@
     <string name="licenses_text">Hramota — GPL-3.0.\n\nPDFium — BSD 3-Clause (Google, the PDFium authors).\npdfium-binaries — MIT (Benoît Blanchon).\n\nFonts Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX and Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
     <string name="pages_cut">not all pages: out of memory</string>
     <string name="slide_n">Slide %1$d</string>
+    <string name="settings_docx_open_hint">Pages: as printed, with the layout of the original. Text: flowing to the width of the screen, easier to read on a phone. You can switch in the document at any time (Pages / Text).</string>
+    <string name="settings_dynamic">Colours from the wallpaper</string>
+    <string name="settings_dynamic_hint">Material You: the app takes its accent colours from your wallpaper</string>
+    <string name="recent_no_access">“%1$s” was opened from another app just once, so it can no longer be opened from the list. Open it again from that app or with “Open a file”.</string>
 </resources>

@@ -74,9 +74,12 @@ fun SettingsScreen(
                 }
             }
 
+            Toggle(stringResource(R.string.settings_dynamic), stringResource(R.string.settings_dynamic_hint), settings.dynamicColor) { v -> onChange { it.copy(dynamicColor = v) } }
+
             Section(stringResource(R.string.settings_documents))
             Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Text(stringResource(R.string.settings_docx_open), style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.settings_docx_open_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     SegmentedButton(selected = !settings.docxReading, onClick = { onChange { it.copy(docxReading = false) } },
                         icon = {}, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(stringResource(R.string.mode_pages)) }
