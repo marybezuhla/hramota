@@ -15,7 +15,11 @@ sealed interface BookBlock {
 }
 
 /** A book read from EPUB or FB2: title, author, its blocks and pictures (by key). */
-class Book(val title: String, val author: String, val blocks: List<BookBlock>, val images: Map<String, ByteArray>, val cover: String?) {
+class Book(
+    val title: String, val author: String, val blocks: List<BookBlock>, val images: Map<String, ByteArray>, val cover: String?,
+    /** The book's language as written in it ("uk", "en-GB"…), for hyphenation; empty if not said. */
+    val language: String = "",
+) {
     /** The text, for comparing versions and the inspector-free reading of formats elsewhere. */
     fun paragraphs(): List<Paragraph> = blocks.filterIsInstance<BookBlock.Text>().map {
         Paragraph(it.text, when (it.kind) { BookBlock.Kind.HEADING1 -> 1; BookBlock.Kind.HEADING2 -> 2; BookBlock.Kind.HEADING3 -> 3; else -> 0 })

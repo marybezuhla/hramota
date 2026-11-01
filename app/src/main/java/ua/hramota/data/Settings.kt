@@ -21,6 +21,22 @@ data class AppSettings(
     val dynamicColor: Boolean = false,
     /** The old wooden bookshelf instead of the modern one. */
     val woodShelf: Boolean = false,
+    /** Books: paper colour ("auto" follows the app's theme: paper by day, night in the dark). */
+    val readPaper: String = "auto",
+    /** Books: "serif" (Literata) or "sans". */
+    val readFont: String = "serif",
+    /** Books: text size in sp, line height (times the size), side margin in dp. */
+    val readSize: Float = 19f,
+    val readSpacing: Float = 1.5f,
+    val readMargin: Float = 24f,
+    /** Books: justified with hyphens, or ragged right. */
+    val readJustify: Boolean = true,
+    /** Books: pages to turn, or one long scroll. */
+    val readPaged: Boolean = true,
+    /** Books: how a page turns: "slide", "curl" or "none". */
+    val readTurn: String = "slide",
+    /** Books: the volume keys turn pages. */
+    val readVolumeKeys: Boolean = true,
 )
 
 /** One instance per process; screens observe [state] and change it with [update]. */
@@ -39,6 +55,10 @@ class Settings private constructor(context: Context) {
             .putBoolean("secureScreen", s.secureScreen)
             .putBoolean("dynamicColor", s.dynamicColor)
             .putBoolean("woodShelf", s.woodShelf)
+            .putString("readPaper", s.readPaper).putString("readFont", s.readFont)
+            .putFloat("readSize", s.readSize).putFloat("readSpacing", s.readSpacing).putFloat("readMargin", s.readMargin)
+            .putBoolean("readJustify", s.readJustify).putBoolean("readPaged", s.readPaged)
+            .putString("readTurn", s.readTurn).putBoolean("readVolumeKeys", s.readVolumeKeys)
             .apply()
         flow.value = s
     }
@@ -51,9 +71,19 @@ class Settings private constructor(context: Context) {
         secureScreen = prefs.getBoolean("secureScreen", false),
         dynamicColor = prefs.getBoolean("dynamicColor", false),
         woodShelf = prefs.getBoolean("woodShelf", false),
+        readPaper = prefs.getString("readPaper", "auto").takeIf { it in PAPERS } ?: "auto",
+        readFont = if (prefs.getString("readFont", "serif") == "sans") "sans" else "serif",
+        readSize = prefs.getFloat("readSize", 19f).coerceIn(12f, 40f),
+        readSpacing = prefs.getFloat("readSpacing", 1.5f).coerceIn(1.1f, 2.2f),
+        readMargin = prefs.getFloat("readMargin", 24f).coerceIn(8f, 64f),
+        readJustify = prefs.getBoolean("readJustify", true),
+        readPaged = prefs.getBoolean("readPaged", true),
+        readTurn = prefs.getString("readTurn", "slide").takeIf { it in setOf("slide", "curl", "none") } ?: "slide",
+        readVolumeKeys = prefs.getBoolean("readVolumeKeys", true),
     )
 
     companion object {
+        val PAPERS = setOf("auto", "paper", "sepia", "gray", "night")
         @Volatile private var instance: Settings? = null
         fun get(context: Context): Settings = instance ?: synchronized(this) { instance ?: Settings(context).also { instance = it } }
     }

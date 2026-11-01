@@ -149,4 +149,24 @@
     <string name="settings_wood_hint">Обкладинки на дерев\'яних полицях, як у класичних книжкових застосунках</string>
     <string name="book_contents">Зміст</string>
     <string name="book_bookmarks">Закладки</string>
+    <string name="read_look">Текст і сторінка</string>
+    <string name="paper_auto">Авто</string>
+    <string name="paper_paper">Папір</string>
+    <string name="paper_sepia">Сепія</string>
+    <string name="paper_gray">Сірий</string>
+    <string name="paper_night">Ніч</string>
+    <string name="read_font_serif">Literata</string>
+    <string name="read_font_sans">Без засічок</string>
+    <string name="read_size">Розмір тексту</string>
+    <string name="read_spacing">Міжрядковий інтервал</string>
+    <string name="read_margin">Поля</string>
+    <string name="read_justify">За шириною з переносами</string>
+    <string name="read_justify_hint">Кожен абзац — за правилами своєї мови</string>
+    <string name="read_pages">Сторінками</string>
+    <string name="read_scroll">Стрічкою</string>
+    <string name="read_turn">Гортання</string>
+    <string name="read_turn_slide">Ковзання</string>
+    <string name="read_turn_curl">Загин паперу</string>
+    <string name="read_turn_none">Без анімації</string>
+    <string name="read_volume_keys">Гортати кнопками гучності</string>
 </resources>

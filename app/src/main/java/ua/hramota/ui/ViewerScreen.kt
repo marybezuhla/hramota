@@ -122,6 +122,9 @@ fun ViewerScreen(
     onPosition: (Int, Int) -> Unit = { _, _ -> },
     /** Extra actions in the ⋮ menu: label and what it does. */
     menu: List<Pair<String, () -> Unit>> = emptyList(),
+    /** How books look (paper, type, pages), and how to change it. */
+    readSettings: ua.hramota.data.AppSettings = ua.hramota.data.AppSettings(),
+    onReadSettings: ((ua.hramota.data.AppSettings) -> ua.hramota.data.AppSettings) -> Unit = {},
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
@@ -167,14 +170,18 @@ fun ViewerScreen(
     // Where reading is, saved a moment after scrolling stops; a text (a book) also opens where it stopped
     val position by remember(inPages) { derivedStateOf { if (inPages) list.firstVisibleItemIndex else textList.firstVisibleItemIndex } }
     var textRestored by rememberSaveable { mutableStateOf(false) }
+    // A place in a book to show (from the contents or a bookmark)
+    var bookTarget by remember { mutableStateOf<BookTarget?>(null) }
+    var lookSheet by remember { mutableStateOf(false) }
+    if (lookSheet) ReadingSheet(readSettings, onReadSettings) { lookSheet = false }
     val flowing = state is ViewerState.Text || state is ViewerState.Reader
     LaunchedEffect(flowing, startPosition) {
-        if (flowing && !textRestored && startPosition > 0) { textList.scrollToItem(startPosition); textRestored = true }
+        if (flowing && !textRestored && startPosition > 0) { textList.requestScrollToItem(startPosition); textRestored = true }
     }
     LaunchedEffect(position, restored) {
         if (state is ViewerState.Loading || (inPages && !restored)) return@LaunchedEffect
         delay(800)
-        val total = if (inPages) laidPages?.pageCount ?: 0 else textList.layoutInfo.totalItemsCount
+        val total = when { inPages -> laidPages?.pageCount ?: 0; state is ViewerState.Reader -> state.book.blocks.size; else -> textList.layoutInfo.totalItemsCount }
         onPosition(position, total)
     }
 
@@ -230,6 +237,8 @@ fun ViewerScreen(
                 for (k in row.cols.indices) { val len = currentSheet.text(row, k).length; if (hit.start <= at + len) { col = row.cols[k]; break }; at += len + 1 }
                 sheetState.scrollTo(row.index, col)
             }
+            // A book in pages goes to the page with the match itself
+            state is ViewerState.Reader && readSettings.readPaged -> Unit
             else -> textList.animateScrollToItem(hit.page + if (state is ViewerState.Text && hasNote(state)) 1 else 0)
         }
     }
@@ -257,6 +266,9 @@ fun ViewerScreen(
                         for ((label, action) in menu) androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
                     }
                 }
+            }
+            if (state is ViewerState.Reader && !overview) TextButton(onClick = { lookSheet = true }) {
+                Text("Aa", style = MaterialTheme.typography.titleMedium, fontFamily = Literata)
             }
             if (source != null) IconButton(onClick = { searching = true; selection = null }) {
                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_open))
@@ -298,8 +310,14 @@ fun ViewerScreen(
                 is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Reader -> if (overview) BookContents(state.book, bookmarks, textList.firstVisibleItemIndex) { i ->
                     overview = false
-                    scope.launch { textList.scrollToItem(i) }
-                } else BookDocument(state.book, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                    textList.requestScrollToItem(i)
+                    bookTarget = BookTarget(i)
+                } else {
+                    val paper = paperFor(readSettings.readPaper)
+                    val language = remember(state.book) { BookLook.languageOf(state.book) }
+                    val look = remember(readSettings, paper, language) { BookLook(readSettings, paper, language) }
+                    BookDocument(state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks)
+                }
                 is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Sheets -> WorkbookDocument(
                     state.workbook, sheetIndex, { sheetIndex = it }, sheetState,

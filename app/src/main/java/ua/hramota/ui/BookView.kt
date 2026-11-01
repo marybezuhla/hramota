@@ -1,76 +1,150 @@
 package ua.hramota.ui
 
 import android.graphics.BitmapFactory
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.BaselineShift
-import androidx.compose.ui.text.style.Hyphens
-import androidx.compose.ui.text.style.LineBreak
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ua.hramota.R
 import ua.hramota.doc.SearchHit
 import ua.hramota.doc.book.Book
 import ua.hramota.doc.book.BookBlock
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
 
 /** The text of a block for search (a picture has none). */
 internal fun blockText(b: BookBlock): String = (b as? BookBlock.Text)?.text ?: ""
 
+/** A place in a book to go to: a block and a character in it; [nonce] makes the same place a new request. */
+data class BookTarget(val block: Int, val char: Int = 0, val nonce: Long = System.nanoTime())
+
+/** Volume keys while a book is shown in pages: +1 next page, −1 previous. */
+object PageKeys {
+    @Volatile var handler: ((Int) -> Boolean)? = null
+}
+
+private fun flush(book: Book, i: Int): Boolean {
+    val prev = book.blocks.getOrNull(i - 1) ?: return true
+    return prev !is BookBlock.Text || prev.kind != BookBlock.Kind.PARAGRAPH
+}
+
 /**
- * A book to read: serif type set justified with hyphens, chapters and quotes as in print, pictures
- * fitted to the width. Only the blocks on screen are laid out; pictures are decoded off the main thread.
+ * A book to read, in pages to turn or as one scroll. [list] holds where reading is (its first visible
+ * item is the block); in pages it is updated as pages turn.
  */
 @Composable
-internal fun BookDocument(book: Book, list: LazyListState, hits: Map<Int, List<SearchHit>>, current: SearchHit?) {
+internal fun BookDocument(
+    book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?,
+    target: BookTarget?, bookmarks: Set<Int>,
+) {
+    Box(Modifier.fillMaxSize().background(look.paper.background)) {
+        if (look.settings.readPaged) BookPages(book, list, look, hits, current, target, bookmarks)
+        else BookScroll(book, list, look, hits, current)
+    }
+}
+
+@Composable
+private fun BookScroll(book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?) {
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
         SelectionContainer {
-            // A comfortable line on a tablet too: about 70 characters at most
-            LazyColumn(Modifier.fillMaxSize().widthIn(max = 680.dp), state = list, contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 48.dp)) {
+            // A comfortable line on a tablet too: about 60–70 characters at most
+            LazyColumn(Modifier.fillMaxSize().widthIn(max = 640.dp + look.margin * 2), state = list, contentPadding = PaddingValues(start = look.margin, end = look.margin, top = 12.dp, bottom = 64.dp)) {
                 itemsIndexed(book.blocks, contentType = { _, b -> if (b is BookBlock.Image) 1 else (b as BookBlock.Text).kind.ordinal + 2 }) { i, b ->
                     when (b) {
-                        is BookBlock.Image -> BookImage(book, b.key, widthPx)
-                        is BookBlock.Text -> BookText(b, hits[i], current, first = i == 0 || book.blocks[i - 1] !is BookBlock.Text || (book.blocks[i - 1] as BookBlock.Text).kind != BookBlock.Kind.PARAGRAPH)
+                        is BookBlock.Image -> Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) { BookImage(book, b.key, widthPx, 560.dp) }
+                        is BookBlock.Text -> {
+                            val (top, bottom, indent) = look.space(b.kind)
+                            if (b.kind == BookBlock.Kind.BREAK) Box(Modifier.height(top))
+                            else Text(look.text(b, hits[i], current), style = look.style(b, flush(book, i)), modifier = Modifier.fillMaxWidth().padding(top = top, bottom = bottom, start = indent))
+                        }
                     }
                 }
             }
@@ -78,64 +152,424 @@ internal fun BookDocument(book: Book, list: LazyListState, hits: Map<Int, List<S
     }
 }
 
-private val bookBody = TextStyle(
-    fontFamily = FontFamily.Serif, fontSize = 18.sp, lineHeight = 1.5.em,
-    textAlign = TextAlign.Justify, hyphens = Hyphens.Auto, lineBreak = LineBreak.Paragraph,
-)
+/** One part of a block on a page: [top] and [height] within the block's own layout, in pixels. */
+private class Slice(val block: Int, val top: Int, val height: Int, val padTop: Int)
+private class Page(val slices: List<Slice>, val firstBlock: Int, val firstChar: Int, val chapter: String)
 
-@Composable
-private fun BookText(b: BookBlock.Text, hits: List<SearchHit>?, current: SearchHit?, first: Boolean) {
-    val type = MaterialTheme.typography
-    val color = MaterialTheme.colorScheme
-    if (b.kind == BookBlock.Kind.BREAK) { Box(Modifier.padding(vertical = 10.dp)); return }
-    val (style, modifier) = when (b.kind) {
-        BookBlock.Kind.HEADING1 -> type.headlineSmall.copy(fontFamily = FontFamily.Serif, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold) to Modifier.padding(top = 40.dp, bottom = 20.dp)
-        BookBlock.Kind.HEADING2 -> type.titleLarge.copy(fontFamily = FontFamily.Serif, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold) to Modifier.padding(top = 28.dp, bottom = 12.dp)
-        BookBlock.Kind.HEADING3 -> type.titleMedium.copy(fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold) to Modifier.padding(top = 20.dp, bottom = 8.dp)
-        BookBlock.Kind.SUBTITLE -> bookBody.copy(textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold) to Modifier.padding(vertical = 12.dp)
-        BookBlock.Kind.QUOTE -> bookBody.copy(fontSize = 16.sp, fontStyle = FontStyle.Italic, color = color.onSurfaceVariant) to Modifier.padding(start = 32.dp, top = 2.dp, bottom = 2.dp)
-        BookBlock.Kind.POEM -> bookBody.copy(textAlign = TextAlign.Start, hyphens = Hyphens.None) to Modifier.padding(start = 36.dp)
-        // A paragraph after a heading, a picture or a quote starts flush, as in print
-        else -> bookBody.copy(textIndent = if (first) null else TextIndent(firstLine = 1.5.em)) to Modifier.padding(vertical = 1.dp)
+/**
+ * Lays a book out in pages the size of the screen. Chapters start on a new page, a heading stays
+ * with the text after it, a paragraph leaves no single line alone at the foot or head of a page.
+ * Chapters are independent, so they are laid out in parallel, the one being read first.
+ */
+private suspend fun paginate(
+    book: Book, look: BookLook, resolver: FontFamily.Resolver, density: Density, width: Int, height: Int,
+    startBlock: Int, publish: (List<Page>, Boolean) -> Unit,
+) = coroutineScope {
+    val starts = ArrayList<Int>().apply {
+        add(0)
+        for (i in 1 until book.blocks.size) if ((book.blocks[i] as? BookBlock.Text)?.kind == BookBlock.Kind.HEADING1) add(i)
     }
-    Text(styled(b, hits, current), style = style.copy(color = if (style.color.isUnspecifiedColor()) color.onSurface else style.color), modifier = modifier.fillMaxWidth())
+    val chapters = starts.indices.map { k -> starts[k] until (starts.getOrNull(k + 1) ?: book.blocks.size) }
+    val target = chapters.indexOfFirst { startBlock in it }.coerceAtLeast(0)
+    val done = arrayOfNulls<List<Page>>(chapters.size)
+    val threads = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 6)
+    val order = (0..target).toList() + (target + 1 until chapters.size)
+    var published = -1
+    fun prefix(): Int { var k = 0; while (k < done.size && done[k] != null) k++; return k }
+    for (batch in order.chunked(threads * 2)) {
+        batch.map { k ->
+            async(Dispatchers.Default) {
+                val measurer = TextMeasurer(resolver, density, LayoutDirection.Ltr, cacheSize = 0)
+                done[k] = chapterPages(book, look, measurer, density, chapters[k], width, height)
+            }
+        }.awaitAll()
+        val have = prefix()
+        if (have > target && have > published) {
+            published = have
+            publish(done.take(have).flatMap { it!! }, have == done.size)
+        }
+    }
+    if (published < done.size) publish(done.flatMap { it.orEmpty() }, true)
 }
 
-private fun androidx.compose.ui.graphics.Color.isUnspecifiedColor() = this == androidx.compose.ui.graphics.Color.Unspecified
-
-private fun styled(b: BookBlock.Text, hits: List<SearchHit>?, current: SearchHit?): AnnotatedString {
-    if (b.spans.isEmpty() && hits.isNullOrEmpty()) return AnnotatedString(b.text)
-    return buildAnnotatedString {
-        append(b.text)
-        for (s in b.spans) {
-            val a = s.start.coerceIn(0, b.text.length); val e = s.end.coerceIn(a, b.text.length)
-            if (a < e) addStyle(SpanStyle(
-                fontWeight = if (s.bold) FontWeight.Bold else null,
-                fontStyle = if (s.italic) FontStyle.Italic else null,
-                baselineShift = if (s.raised) BaselineShift.Superscript else null,
-                fontSize = if (s.raised) 0.7.em else androidx.compose.ui.unit.TextUnit.Unspecified,
-            ), a, e)
-        }
-        hits?.forEach { h ->
-            val a = h.start.coerceIn(0, b.text.length); val e = h.end.coerceIn(a, b.text.length)
-            if (a < e) addStyle(SpanStyle(background = if (h == current) androidx.compose.ui.graphics.Color(0xCCFF9800) else androidx.compose.ui.graphics.Color(0x80FFD54F)), a, e)
+private fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int): List<Page> {
+    val pages = ArrayList<Page>()
+    var slices = ArrayList<Slice>()
+    var y = 0
+    var firstBlock = range.first; var firstChar = 0
+    var chapter = ""
+    fun px(d: androidx.compose.ui.unit.Dp) = with(density) { d.roundToPx() }
+    val line = with(density) { (look.settings.readSize * look.settings.readSpacing).sp.roundToPx() }
+    fun newPage(block: Int, char: Int) {
+        if (slices.isNotEmpty()) pages += Page(slices, firstBlock, firstChar, chapter)
+        slices = ArrayList(); y = 0; firstBlock = block; firstChar = char
+    }
+    for (i in range) {
+        when (val b = book.blocks[i]) {
+            is BookBlock.Image -> {
+                val bounds = imageSize(book.images[b.key]) ?: continue
+                val h = min(height, (width.toLong() * bounds.second / max(1, bounds.first)).toInt().coerceAtLeast(1)).let { min(it, bounds.second * 3) }
+                val pad = if (y == 0) 0 else px(12.dp)
+                if (y + pad + h > height) newPage(i, 0)
+                val p = if (y == 0) 0 else pad
+                slices += Slice(i, 0, h, p); y += p + h + px(12.dp)
+            }
+            is BookBlock.Text -> {
+                val (topDp, bottomDp, indentDp) = look.space(b.kind)
+                if (b.kind == BookBlock.Kind.BREAK) { if (y > 0) y += px(topDp); continue }
+                if (b.kind == BookBlock.Kind.HEADING1 && chapter.isEmpty()) chapter = b.text.replace('\n', ' ')
+                val layout = measurer.measure(look.text(b, null, null), look.style(b, flush(book, i)), constraints = Constraints(maxWidth = max(1, width - px(indentDp))), skipCache = true)
+                val heading = b.kind == BookBlock.Kind.HEADING1 || b.kind == BookBlock.Kind.HEADING2 || b.kind == BookBlock.Kind.HEADING3
+                var pad = if (y == 0) 0 else px(topDp)
+                // A heading keeps two lines of the text after it on its page
+                if (heading && y > 0 && y + pad + layout.size.height + line * 2 > height) { newPage(i, 0); pad = 0 }
+                val lines = layout.lineCount
+                var from = 0
+                while (from < lines) {
+                    val top = layout.getLineTop(from).toInt()
+                    val room = height - y - pad
+                    var to = from
+                    while (to < lines && layout.getLineBottom(to).toInt() - top <= room) to++
+                    if (to == from && y == 0) to = from + 1  // a line taller than the page
+                    if (to < lines && to > from) {
+                        // No widow or orphan: never one line left alone, if the paragraph can give one
+                        if (to - from == 1 && from == 0 && lines > 1 && y > 0) to = from
+                        else if (lines - to == 1 && to - from >= 3) to--
+                    }
+                    if (to == from) { newPage(i, layout.getLineStart(from)); pad = 0; continue }
+                    val h = layout.getLineBottom(to - 1).toInt() - top
+                    slices += Slice(i, top, h, pad)
+                    y += pad + h
+                    pad = 0
+                    from = to
+                    if (from < lines) newPage(i, layout.getLineStart(from))
+                }
+                y += px(bottomDp)
+            }
         }
     }
+    newPage(range.last + 1, 0)
+    return pages
+}
+
+private fun imageSize(bytes: ByteArray?): Pair<Int, Int>? {
+    bytes ?: return null
+    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+    return if (o.outWidth > 0 && o.outHeight > 0) o.outWidth to o.outHeight else null
+}
+
+/** The page a place in the book is on. */
+private fun pageOf(pages: List<Page>, block: Int, char: Int): Int {
+    var lo = 0; var hi = pages.size - 1; var ans = 0
+    while (lo <= hi) {
+        val mid = (lo + hi) / 2
+        val p = pages[mid]
+        if (p.firstBlock < block || (p.firstBlock == block && p.firstChar <= char)) { ans = mid; lo = mid + 1 } else hi = mid - 1
+    }
+    return ans
+}
+
+@Composable
+private fun BookPages(
+    book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?,
+    target: BookTarget?, bookmarks: Set<Int>,
+) {
+    val density = LocalDensity.current
+    val resolver = LocalFontFamilyResolver.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val margin = with(density) { look.margin.roundToPx() }
+        val header = with(density) { 36.dp.roundToPx() }
+        val footer = with(density) { 36.dp.roundToPx() }
+        // A comfortable line on a tablet: the text block is no wider than about 70 characters
+        val maxText = with(density) { (640.dp).roundToPx() }
+        val textWidth = min(constraints.maxWidth - margin * 2, maxText).coerceAtLeast(1)
+        val textHeight = (constraints.maxHeight - header - footer).coerceAtLeast(1)
+        var pages by remember { mutableStateOf<List<Page>>(emptyList()) }
+        var complete by remember { mutableStateOf(false) }
+        // Where reading was before the pages were laid out again (another size, font or screen turned)
+        val anchor = remember { mutableStateOf(BookTarget(list.firstVisibleItemIndex)) }
+        val pager = rememberPagerState { pages.size }
+        val settings = look.settings
+        var shown by remember { mutableStateOf(false) }
+        LaunchedEffect(book, textWidth, textHeight, settings.readSize, settings.readSpacing, settings.readMargin, settings.readFont, settings.readJustify) {
+            // A new layout (another size, font, or the screen turned) keeps the place being read
+            if (shown) pages.getOrNull(pager.currentPage)?.let { anchor.value = BookTarget(it.firstBlock, it.firstChar) }
+            else if (pages.isEmpty()) anchor.value = BookTarget(list.firstVisibleItemIndex)
+            shown = false
+            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all -> pages = laid; complete = all }
+        }
+        // Once the page being read is laid out, go there
+        LaunchedEffect(pages) {
+            if (pages.isEmpty()) return@LaunchedEffect
+            if (!shown) { pager.requestScrollToPage(pageOf(pages, anchor.value.block, anchor.value.char)); shown = true }
+        }
+        LaunchedEffect(pager, pages) {
+            snapshotFlow { pager.currentPage }.collect { p ->
+                val page = pages.getOrNull(p) ?: return@collect
+                if (shown) { anchor.value = BookTarget(page.firstBlock, page.firstChar); list.requestScrollToItem(page.firstBlock) }
+            }
+        }
+        LaunchedEffect(target, pages.isNotEmpty()) {
+            val t = target ?: return@LaunchedEffect
+            if (pages.isEmpty()) return@LaunchedEffect
+            anchor.value = t
+            pager.requestScrollToPage(pageOf(pages, t.block, t.char))
+        }
+        LaunchedEffect(current, pages.isNotEmpty()) {
+            val h = current ?: return@LaunchedEffect
+            if (pages.isNotEmpty()) pager.requestScrollToPage(pageOf(pages, h.page, h.start))
+        }
+        if (pages.isEmpty()) { CircularProgressIndicator(Modifier.align(Alignment.Center)); return@BoxWithConstraints }
+
+        val scope = rememberCoroutineScope()
+        val turnStyle = settings.readTurn
+        val curl = remember { CurlState() }
+        val turn: (Int) -> Boolean = { dir ->
+            val to = pager.currentPage + dir
+            if (to in pages.indices) {
+                scope.launch {
+                    when (turnStyle) {
+                        "curl" -> curl.turn(dir) { pager.requestScrollToPage(to) }
+                        "none" -> pager.requestScrollToPage(to)
+                        else -> pager.animateScrollToPage(to)
+                    }
+                }
+                true
+            } else false
+        }
+        val turnNow by rememberUpdatedState(turn)
+        if (settings.readVolumeKeys) DisposableEffect(Unit) {
+            val h: (Int) -> Boolean = { turnNow(it) }
+            PageKeys.handler = h
+            onDispose { if (PageKeys.handler === h) PageKeys.handler = null }
+        }
+        val page: @Composable (Int) -> Unit = { p ->
+            pages.getOrNull(p)?.let { BookPage(book, look, it, p, pages.size, complete, hits, current, bookmarks, pages.getOrNull(p + 1)?.firstBlock ?: Int.MAX_VALUE, textWidth, header, footer) }
+        }
+        val taps = Modifier.pointerInput(Unit) {
+            // The edges of the page turn it, as in a paper book
+            detectTapGestures { o -> if (o.x < size.width * 0.3f) turnNow(-1) else if (o.x > size.width * 0.7f) turnNow(1) }
+        }
+        if (turnStyle == "curl") CurlPages(curl, pager, pages.size, look.paper, taps, page)
+        else HorizontalPager(pager, Modifier.fillMaxSize().then(taps), beyondViewportPageCount = 1) { p -> page(p) }
+    }
+}
+
+@Composable
+private fun BookPage(
+    book: Book, look: BookLook, page: Page, index: Int, count: Int, complete: Boolean,
+    hits: Map<Int, List<SearchHit>>, current: SearchHit?, bookmarks: Set<Int>, nextFirst: Int,
+    textWidth: Int, header: Int, footer: Int,
+) {
+    val density = LocalDensity.current
+    val marked = bookmarks.any { it >= page.firstBlock && it < nextFirst } || page.firstBlock in bookmarks
+    Box(Modifier.fillMaxSize().background(look.paper.background)) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.height(with(density) { header.toDp() }).fillMaxWidth().padding(horizontal = look.margin), contentAlignment = Alignment.Center) {
+                Text(page.chapter.ifEmpty { book.title }, style = MaterialTheme.typography.labelMedium.copy(fontFamily = look.family), color = look.paper.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            SelectionContainer(Modifier.weight(1f)) {
+                // Exactly the width the pages were laid out for, so every line breaks where it was measured
+                Column(Modifier.layout { m, c -> val p = m.measure(c.copy(minWidth = textWidth, maxWidth = textWidth)); layout(p.width, p.height) { p.place(0, 0) } }) {
+                    for (s in page.slices) {
+                        val b = book.blocks[s.block]
+                        val h = with(density) { s.height.toDp() }
+                        val padTop = with(density) { s.padTop.toDp() }
+                        when (b) {
+                            is BookBlock.Image -> Box(Modifier.padding(top = padTop).fillMaxWidth().height(h), contentAlignment = Alignment.Center) { BookImage(book, b.key, textWidth, h) }
+                            is BookBlock.Text -> {
+                                val indent = look.space(b.kind).third
+                                Box(Modifier.padding(top = padTop, start = indent).fillMaxWidth().height(h).clipToBounds()) {
+                                    Text(
+                                        look.text(b, hits[s.block], current), style = look.style(b, flush(book, s.block)),
+                                        modifier = Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true).offset { IntOffset(0, -s.top) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Box(Modifier.height(with(density) { footer.toDp() }).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(if (complete) "${index + 1} / $count" else "${index + 1}", style = MaterialTheme.typography.labelMedium, color = look.paper.muted)
+            }
+        }
+        if (marked) Icon(AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.align(Alignment.TopEnd).padding(end = 12.dp).size(24.dp))
+    }
+}
+
+/** The page being turned by its corner: where the corner is now, and whether it turns forward or back. */
+private class CurlState {
+    val corner = Animatable(Offset.Zero, Offset.VectorConverter)
+    var dir by mutableIntStateOf(0)
+    var top by mutableStateOf(false)
+    var size = androidx.compose.ui.geometry.Size.Zero
+
+    /** A turn by tap or key: the corner sweeps across with a little lift. */
+    suspend fun turn(d: Int, done: suspend () -> Unit) {
+        if (dir != 0 || size.width <= 0f) { done(); return }
+        val w = size.width; val h = size.height
+        top = false
+        dir = d
+        val from = if (d > 0) Offset(w, h) else Offset(-w, h)
+        val to = if (d > 0) Offset(-w, h) else Offset(w, h)
+        corner.snapTo(from)
+        corner.animateTo(to, keyframes { durationMillis = 420; Offset(0f, h * 0.82f) at 210 })
+        done()
+        dir = 0
+    }
+}
+
+/**
+ * Pages turned like paper, as in the old Apple Books: the corner follows the finger, the page folds
+ * along the line between, its back shows faintly through, and a shadow falls along the fold.
+ */
+@Composable
+private fun CurlPages(
+    curl: CurlState, pager: androidx.compose.foundation.pager.PagerState, count: Int, paper: Paper, taps: Modifier,
+    page: @Composable (Int) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val index = pager.currentPage
+    val indexNow by rememberUpdatedState(index)
+    val goTo: (Int) -> Unit = { pager.requestScrollToPage(it) }
+    val layer = rememberGraphicsLayer()
+    Box(
+        Modifier.fillMaxSize().onSizeChanged { curl.size = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }.then(taps).pointerInput(count) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var started = false
+                val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                    val d = if (over < 0) 1 else -1
+                    val to = indexNow + d
+                    if (to in 0 until count && curl.dir == 0) {
+                        change.consume(); started = true
+                        val w = size.width.toFloat(); val h = size.height.toFloat()
+                        curl.size = androidx.compose.ui.geometry.Size(w, h)
+                        curl.top = down.position.y < h / 2
+                        curl.dir = d
+                        val cy = if (curl.top) 0f else h
+                        scope.launch { curl.corner.snapTo(if (d > 0) Offset(w, cy) else Offset(-w, cy)) }
+                    }
+                } ?: return@awaitEachGesture
+                if (!started) return@awaitEachGesture
+                val w = size.width.toFloat(); val h = size.height.toFloat()
+                val cy = if (curl.top) 0f else h
+                val origin = if (curl.dir > 0) Offset(w, cy) else Offset(-w, cy)
+                var last = drag.position
+                horizontalDrag(drag.id) { c ->
+                    c.consume()
+                    last = c.position
+                    val delta = c.position - down.position
+                    scope.launch { curl.corner.snapTo(clampCorner(origin + Offset(delta.x * 1.6f, delta.y * 0.6f), w, cy)) }
+                }
+                val d = curl.dir
+                scope.launch {
+                    val turned = if (d > 0) curl.corner.value.x < w * 0.5f else curl.corner.value.x > -w * 0.5f
+                    val end = if (turned == (d > 0)) Offset(-w, cy) else Offset(w, cy)
+                    curl.corner.animateTo(end, tween(260))
+                    if (turned) goTo(indexNow + d)
+                    curl.dir = 0
+                }
+            }
+        },
+    ) {
+        // The pages at rest; a page being turned is drawn over them
+        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = false) { p -> page(p) }
+        val d = curl.dir
+        if (d != 0) {
+            // Beneath: the page that is revealed; above: the page being turned
+            val under = if (d > 0) index + 1 else index
+            val over = if (d < 0) index - 1 else index
+            if (under in 0 until count) Box(Modifier.fillMaxSize()) { page(under) }
+            Box(
+                Modifier.fillMaxSize().drawWithContent {
+                    layer.record { this@drawWithContent.drawContent() }
+                    drawCurl(layer, curl.corner.value, if (curl.top) 0f else size.height, paper)
+                },
+            ) { page(over.coerceIn(0, count - 1)) }
+        }
+    }
+}
+
+/** The corner cannot go further from the spine than the page is wide (paper does not stretch). */
+private fun clampCorner(t: Offset, w: Float, cy: Float): Offset {
+    val spine = Offset(0f, cy)
+    val v = t - spine
+    val len = hypot(v.x, v.y)
+    return if (len > w) spine + v * (w / len) else t
+}
+
+private fun DrawScope.drawCurl(layer: GraphicsLayer, t: Offset, cy: Float, paper: Paper) {
+    val w = size.width; val h = size.height
+    val c = Offset(w, cy)
+    val v = c - t
+    val len = hypot(v.x, v.y)
+    if (len < 1f) { drawLayer(layer); return }
+    val n = Offset(v.x / len, v.y / len)
+    val m = (c + t) / 2f
+    val rect = listOf(Offset(0f, 0f), Offset(w, 0f), Offset(w, h), Offset(0f, h))
+    fun side(p: Offset) = (p.x - m.x) * n.x + (p.y - m.y) * n.y
+    val kept = clip(rect) { side(it) <= 0f }
+    val folded = clip(rect) { side(it) >= 0f }
+    fun reflect(p: Offset): Offset { val s = 2f * side(p); return Offset(p.x - s * n.x, p.y - s * n.y) }
+    fun path(pts: List<Offset>) = Path().apply { if (pts.isNotEmpty()) { moveTo(pts[0].x, pts[0].y); for (p in pts.drop(1)) lineTo(p.x, p.y); close() } }
+    // A shadow on the revealed page along the fold
+    clipPath(path(folded)) {
+        drawRect(Brush.linearGradient(listOf(Color.Black.copy(alpha = 0.28f), Color.Transparent), start = m, end = m + n * min(60f, len)))
+    }
+    // The page itself, without the part lifted
+    clipPath(path(kept)) { drawLayer(layer) }
+    // The lifted part: its back, the text showing faintly through the paper
+    val flap = folded.map(::reflect)
+    if (flap.size >= 3) {
+        val flapPath = path(flap)
+        clipPath(flapPath) {
+            // Reflection across the fold line: I − 2nnᵀ, moved so the line stays in place
+            val mx = Matrix(floatArrayOf(
+                1 - 2 * n.x * n.x, -2 * n.x * n.y, 0f, 0f,
+                -2 * n.x * n.y, 1 - 2 * n.y * n.y, 0f, 0f,
+                0f, 0f, 1f, 0f,
+                2 * (m.x * n.x + m.y * n.y) * n.x, 2 * (m.x * n.x + m.y * n.y) * n.y, 0f, 1f,
+            ))
+            withTransform({ transform(mx) }) { drawLayer(layer) }
+            drawRect(paper.background.copy(alpha = 0.86f))
+            drawRect(Brush.linearGradient(listOf(Color.Black.copy(alpha = 0.16f), Color.White.copy(alpha = 0.10f), Color.Black.copy(alpha = 0.04f)), start = m, end = m - n * max(1f, len / 2f)))
+        }
+        // The lifted part casts a soft shadow on the page beneath it
+        drawPath(flapPath, Color.Black.copy(alpha = 0.06f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f))
+    }
+}
+
+/** A polygon cut by a half-plane (Sutherland–Hodgman, one edge). */
+private fun clip(poly: List<Offset>, inside: (Offset) -> Boolean): List<Offset> {
+    val out = ArrayList<Offset>()
+    for (i in poly.indices) {
+        val a = poly[i]; val b = poly[(i + 1) % poly.size]
+        val ia = inside(a); val ib = inside(b)
+        if (ia) out += a
+        if (ia != ib) {
+            // Where the edge crosses: found by halving, exact enough for drawing
+            var lo = a; var hi = b
+            repeat(24) { val mid = (lo + hi) / 2f; if (inside(mid) == ia) lo = mid else hi = mid }
+            out += (lo + hi) / 2f
+        }
+    }
+    return out
 }
 
 /** A picture decoded no larger than the screen needs, off the main thread. */
 @Composable
-private fun BookImage(book: Book, key: String, widthPx: Int) {
+private fun BookImage(book: Book, key: String, widthPx: Int, maxHeight: androidx.compose.ui.unit.Dp) {
     val bitmap by produceState<ImageBitmap?>(null, key, widthPx) {
         value = withContext(Dispatchers.Default) { decodeFitting(book.images[key], widthPx) }
     }
     val img = bitmap
-    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-        if (img != null) Image(
-            img, contentDescription = null, contentScale = ContentScale.Fit,
-            modifier = Modifier.heightIn(max = 560.dp).let { if (img.width * 2 >= widthPx) it.fillMaxWidth() else it },
-        ) else Box(Modifier.heightIn(min = 120.dp))
-    }
+    if (img != null) Image(
+        img, contentDescription = null, contentScale = ContentScale.Fit,
+        modifier = Modifier.heightIn(max = maxHeight).let { if (img.width * 2 >= widthPx) it.fillMaxWidth() else it },
+    ) else Box(Modifier.heightIn(min = 120.dp))
 }
 
 internal fun decodeFitting(bytes: ByteArray?, widthPx: Int): ImageBitmap? {
@@ -168,8 +602,8 @@ internal fun BookContents(book: Book, bookmarks: Set<Int>, current: Int, onGo: (
     val chapterNow = heads.lastOrNull { it.first <= current }?.first
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
         if (book.title.isNotEmpty() || book.author.isNotEmpty()) item {
-            androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                if (book.title.isNotEmpty()) Text(book.title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                if (book.title.isNotEmpty()) Text(book.title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Literata))
                 if (book.author.isNotEmpty()) Text(book.author, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

@@ -60,7 +60,7 @@ object EpubReader {
             for (s in parts) when (s) { ".." -> if (out.isNotEmpty()) out.removeAt(out.size - 1); ".", "" -> Unit; else -> out += s }
             return out.joinToString("/")
         }
-        var title = ""; var author = ""; var coverId: String? = null
+        var title = ""; var author = ""; var language = ""; var coverId: String? = null
         val manifest = HashMap<String, Pair<String, String>>()  // id → (path, media type)
         val properties = HashMap<String, String>()
         val spine = ArrayList<String>()
@@ -70,6 +70,7 @@ object EpubReader {
             when (p.name) {
                 "title" -> if (title.isEmpty()) title = p.nextText().trim()
                 "creator" -> if (author.isEmpty()) author = p.nextText().trim()
+                "language" -> if (language.isEmpty()) language = p.nextText().trim()
                 "meta" -> if (p.getAttributeValue(null, "name") == "cover") coverId = p.getAttributeValue(null, "content")
                 "item" -> {
                     val id = p.getAttributeValue(null, "id") ?: continue
@@ -98,7 +99,7 @@ object EpubReader {
         }
         if (b.blocks.isEmpty()) throw IOException("Empty book")
         val coverPath = cover?.takeIf { withImages && files.containsKey(it) }?.also { c -> files[c]?.let { if (c !in images) images[c] = it } }
-        return Book(title, author, b.blocks, images, coverPath)
+        return Book(title, author, b.blocks, images, coverPath, language)
     }
 
     /** One chapter: block elements end blocks, inline ones change the style, pictures become their own blocks. */
@@ -161,7 +162,7 @@ object Fb2Reader {
         val b = BlockBuilder()
         val images = HashMap<String, ByteArray>()
         var imageBytes = 0L
-        var title = ""; var first = ""; var last = ""
+        var title = ""; var first = ""; var last = ""; var language = ""
         var coverId: String? = null
         val path = ArrayList<String>()
         var sectionDepth = 0
@@ -174,6 +175,7 @@ object Fb2Reader {
                     val inDescription = "description" in path
                     when {
                         inDescription && n == "book-title" && title.isEmpty() -> { title = p.nextText().trim(); path.removeAt(path.size - 1) }
+                        inDescription && n == "lang" && language.isEmpty() && "title-info" in path -> { language = p.nextText().trim(); path.removeAt(path.size - 1) }
                         inDescription && n == "first-name" && first.isEmpty() && "author" in path && "title-info" in path -> { first = p.nextText().trim(); path.removeAt(path.size - 1) }
                         inDescription && n == "last-name" && last.isEmpty() && "author" in path && "title-info" in path -> { last = p.nextText().trim(); path.removeAt(path.size - 1) }
                         inDescription && n == "image" && "coverpage" in path -> coverId = p.getAttributeValue(XLINK, "href")?.removePrefix("#")
@@ -225,6 +227,6 @@ object Fb2Reader {
         // Pictures referred to but missing are dropped
         val blocks = b.blocks.filter { it !is BookBlock.Image || it.key in images }.ifEmpty { b.blocks.filter { it !is BookBlock.Image } }
         if (blocks.isEmpty()) throw IOException("Empty book")
-        return Book(title, listOf(first, last).filter { it.isNotEmpty() }.joinToString(" "), blocks, images, coverId?.takeIf { it in images })
+        return Book(title, listOf(first, last).filter { it.isNotEmpty() }.joinToString(" "), blocks, images, coverId?.takeIf { it in images }, language)
     }
 }
