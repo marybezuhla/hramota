@@ -326,7 +326,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                     // Space after the last paragraph of a cell still counts, as in Word
                     y += cellAfter
                 }
-                height = max(height, y + inset)
+                height = max(height, y)
                 cellBoxes += Triple(cx, cw, cell)
                 contents += y to inner
             }
