@@ -97,6 +97,8 @@ sealed interface ViewerState {
     data class Text(val paragraphs: List<Paragraph>, val format: Format) : ViewerState
     /** A table of plain cells (CSV); the first row is shown as the header. */
     data class Table(val table: ua.hramota.doc.CsvTable) : ViewerState
+    /** A spreadsheet (XLSX, XLS). */
+    data class Sheets(val workbook: ua.hramota.doc.sheet.Workbook) : ViewerState
     /** Pages as they print; [reading] is the same text for the reading view, when there is one. */
     data class Paged(val pages: Pages, val reading: List<Paragraph>? = null, val inspection: Inspection? = null) : ViewerState
 }
@@ -135,6 +137,9 @@ fun ViewerScreen(
     val textPages = (state as? ViewerState.Paged)?.pages as? TextPages
     // The reading view, plain text and tables scroll in their own list
     val textList = rememberLazyListState()
+    var sheetIndex by rememberSaveable { mutableIntStateOf(0) }
+    val sheetState = remember { SheetViewState() }
+    val currentSheet = (state as? ViewerState.Sheets)?.workbook?.sheets?.getOrNull(sheetIndex)
     val readingParagraphs = (state as? ViewerState.Paged)?.reading?.takeIf { reading }
     // What search looks through: pages, paragraphs or table rows
     val source: Searchable? = when {
@@ -143,6 +148,7 @@ fun ViewerScreen(
         textPages != null -> remember(textPages) { Searchable({ textPages.pageCount }, { textPages.pageText(it) }, { textPages.complete }) }
         state is ViewerState.Text -> remember(state) { Searchable(state.paragraphs.size) { state.paragraphs[it].text } }
         state is ViewerState.Table -> remember(state) { Searchable(state.table.rows.size) { rowText(state.table.rows[it]) } }
+        currentSheet != null -> remember(currentSheet) { Searchable(currentSheet.rows.size) { sheetRowText(currentSheet, currentSheet.rows[it]) } }
         else -> null
     }
     val inPages = readingParagraphs == null && textPages != null
@@ -193,6 +199,12 @@ fun ViewerScreen(
             inPages -> list.animateScrollToItem(hit.page)
             // The first table row stays on top: show the found row just below it
             state is ViewerState.Table -> textList.animateScrollToItem(maxOf(0, hit.page - 1))
+            currentSheet != null -> currentSheet.rows.getOrNull(hit.page)?.let { row ->
+                // The cell the match is in: count the cells before it in the row's search text
+                var at = 0; var col = row.cols.firstOrNull() ?: 0
+                for (k in row.cols.indices) { val len = currentSheet.text(row, k).length; if (hit.start <= at + len) { col = row.cols[k]; break }; at += len + 1 }
+                sheetState.scrollTo(row.index, col)
+            }
             else -> textList.animateScrollToItem(hit.page + if (state is ViewerState.Text && hasNote(state)) 1 else 0)
         }
     }
@@ -234,7 +246,7 @@ fun ViewerScreen(
                 }
             }
         }
-        val inspection = (state as? ViewerState.Paged)?.inspection
+        val inspection = (state as? ViewerState.Paged)?.inspection ?: (state as? ViewerState.Sheets)?.workbook?.inspection
         if (showInspector && inspection != null && inspection.notable && !overview) InspectorBanner(inspection)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (state) {
@@ -250,6 +262,10 @@ fun ViewerScreen(
                 )
                 is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                is ViewerState.Sheets -> WorkbookDocument(
+                    state.workbook, sheetIndex, { sheetIndex = it }, sheetState,
+                    if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null,
+                )
                 is ViewerState.Paged -> when {
                     reading && state.reading != null -> TextDocument(
                         ViewerState.Text(state.reading, Format.DOCX), textList,

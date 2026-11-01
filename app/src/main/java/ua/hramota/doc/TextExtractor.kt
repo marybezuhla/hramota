@@ -17,7 +17,7 @@ enum class Format(val label: String) {
     PPTX("PPTX"), PPT("PPT"), ODP("ODP"), RTF("RTF"), UNKNOWN("");
 
     /** Formats whose text can be read and compared now. */
-    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV
+    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV || this == XLSX || this == XLS
 
     companion object {
         fun detect(name: String?, mime: String?): Format {
@@ -97,7 +97,14 @@ object TextExtractor {
         Format.DOC -> DocReader.read(input)
         // A table compared row by row
         Format.CSV -> CsvReader.read(input).rows.map { Paragraph(it.joinToString(" | ")) }
+        // Sheets compared row by row, each sheet under its name
+        Format.XLSX -> sheetText(ua.hramota.doc.sheet.XlsxReader.read(input))
+        Format.XLS -> sheetText(ua.hramota.doc.sheet.XlsReader.read(input))
         else -> throw IOException("No text reader for $format")
+    }
+
+    private fun sheetText(w: ua.hramota.doc.sheet.Workbook): List<Paragraph> = w.sheets.flatMap { s ->
+        listOf(Paragraph(s.name, 2)) + s.rows.map { r -> Paragraph(r.cols.indices.joinToString(" | ") { s.text(r, it) }) }
     }
 
     private fun fromZip(input: InputStream, part: String, parse: (InputStream) -> List<Paragraph>): List<Paragraph> {

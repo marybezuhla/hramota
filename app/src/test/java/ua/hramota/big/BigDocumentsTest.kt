@@ -71,6 +71,15 @@ class BigDocumentsTest {
         assertEquals(BigDocs.changesExpected(ROWS), c.changes.size)
     }
 
+    @Test fun bigWorkbook() {
+        val bytes = BigDocs.xlsx(200_000)
+        val (w, ms, mb) = measure { ua.hramota.doc.sheet.XlsxReader.read(ByteArrayInputStream(bytes)) }
+        val s = w.sheets[0]
+        val (hit, searchMs, _) = measure { s.rows.indexOfLast { r -> r.cols.indices.any { s.text(r, it) == BigDocs.NEEDLE } } }
+        report("XLSX ${s.rows.size} rows × 12, ${bytes.size / 1024} KB zipped: read $ms ms (+$mb MB), find last row by text $searchMs ms")
+        assertEquals(s.rows.size - 1, hit)
+    }
+
     @Test fun bigCsv() {
         val text = BigDocs.csv(CsvReader.MAX_ROWS - 1)
         val (t, ms, mb) = measure { CsvReader.parse(text) }

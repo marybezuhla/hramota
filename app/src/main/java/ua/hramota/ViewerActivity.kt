@@ -19,6 +19,8 @@ import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.doc.CsvReader
 import ua.hramota.doc.docx.WordBinaryReader
+import ua.hramota.doc.sheet.XlsReader
+import ua.hramota.doc.sheet.XlsxReader
 import ua.hramota.doc.EncryptedDocumentException
 import ua.hramota.doc.Format
 import ua.hramota.doc.PdfSource
@@ -67,6 +69,8 @@ class ViewerActivity : ComponentActivity() {
                                         ViewerState.Paged(pages, reading, doc.inspection)
                                     }
                                     format == Format.DOC -> openDoc(uri) { opened = it }
+                                    format == Format.XLSX -> ViewerState.Sheets(contentResolver.openInputStream(uri)?.use { XlsxReader.read(it) } ?: return@withContext ViewerState.Failed)
+                                    format == Format.XLS -> ViewerState.Sheets(contentResolver.openInputStream(uri)?.use { XlsReader.read(it) } ?: return@withContext ViewerState.Failed)
                                     format == Format.CSV -> ViewerState.Table(
                                         contentResolver.openInputStream(uri)?.use { CsvReader.read(it) } ?: return@withContext ViewerState.Failed,
                                     )

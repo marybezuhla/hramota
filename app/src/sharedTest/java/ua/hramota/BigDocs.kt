@@ -77,6 +77,38 @@ object BigDocs {
         return docx(body)
     }
 
+    /** A workbook of [rows] rows by 12 columns: numbers, dates and text, written as Excel does (shared strings). */
+    fun xlsx(rows: Int): ByteArray {
+        val r = Random(5)
+        val sheet = StringBuilder("""<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>""")
+        for (i in 1..rows) {
+            sheet.append("<row r=\"").append(i).append("\">")
+            for (c in 0 until 12) {
+                val ref = ('A' + c).toString() + i
+                when {
+                    c == 0 -> sheet.append("<c r=\"").append(ref).append("\" t=\"s\"><v>").append(if (i == rows) words.size else r.nextInt(words.size)).append("</v></c>")
+                    c == 1 -> sheet.append("<c r=\"").append(ref).append("\" s=\"1\"><v>").append(45000 + i % 900).append("</v></c>")
+                    else -> sheet.append("<c r=\"").append(ref).append("\" s=\"2\"><v>").append(r.nextInt(1_000_000) / 100.0).append("</v></c>")
+                }
+            }
+            sheet.append("</row>")
+        }
+        sheet.append("</sheetData></worksheet>")
+        val strings = StringBuilder("""<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">""")
+        for (w in words + NEEDLE) strings.append("<si><t>").append(w).append("</t></si>")
+        strings.append("</sst>")
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { z ->
+            fun put(name: String, text: CharSequence) { z.putNextEntry(ZipEntry(name)); z.write(text.toString().toByteArray()); z.closeEntry() }
+            put("xl/workbook.xml", """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Дані" sheetId="1" r:id="rId1"/></sheets></workbook>""")
+            put("xl/_rels/workbook.xml.rels", """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>""")
+            put("xl/styles.xml", """<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts><font><sz val="11"/></font></fonts><fills><fill><patternFill patternType="none"/></fill></fills><borders><border/></borders><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="4"/></cellXfs></styleSheet>""")
+            put("xl/sharedStrings.xml", strings)
+            put("xl/worksheets/sheet1.xml", sheet)
+        }
+        return out.toByteArray()
+    }
+
     fun csv(rows: Int): String {
         val r = Random(3)
         val sb = StringBuilder("Дата;Стаття;Сума;Примітка\n")
