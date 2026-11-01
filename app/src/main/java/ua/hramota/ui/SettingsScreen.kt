@@ -58,7 +58,7 @@ fun SettingsScreen(
                         SegmentedButton(
                             selected = settings.theme == key,
                             onClick = { onChange { it.copy(theme = key) } },
-                            shape = SegmentedButtonDefaults.itemShape(i, themes.size),
+                            icon = {}, shape = SegmentedButtonDefaults.itemShape(i, themes.size),
                         ) { Text(stringResource(label), maxLines = 1) }
                     }
                 }
@@ -69,9 +69,9 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_docx_open), style = MaterialTheme.typography.bodyLarge)
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     SegmentedButton(selected = !settings.docxReading, onClick = { onChange { it.copy(docxReading = false) } },
-                        shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(stringResource(R.string.mode_pages)) }
+                        icon = {}, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(stringResource(R.string.mode_pages)) }
                     SegmentedButton(selected = settings.docxReading, onClick = { onChange { it.copy(docxReading = true) } },
-                        shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(stringResource(R.string.mode_reading)) }
+                        icon = {}, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(stringResource(R.string.mode_reading)) }
                 }
             }
             Toggle(stringResource(R.string.settings_inspector), stringResource(R.string.settings_inspector_hint), settings.inspector) { v -> onChange { it.copy(inspector = v) } }
