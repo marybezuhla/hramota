@@ -17,7 +17,7 @@
     <string name="back">Back</string>
     <string name="open_failed">This file could not be opened. It may be damaged, or access to it has expired.</string>
     <string name="unsupported_title">This format is not supported yet</string>
-    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, PPTX, ODT, CSV, TXT and Markdown.</string>
+    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, CSV, TXT and Markdown.</string>
     <string name="simplified_note">Simplified view: text only. Exact page layout is coming.</string>
     <string name="mode_reading">Reading</string>
     <string name="mode_pages">Pages</string>
