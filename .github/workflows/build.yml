@@ -106,6 +106,8 @@ jobs:
             soffice --headless --convert-to pdf --outdir ref-doc app/src/test/resources/docs-doc/*.doc > /dev/null
             for f in ref-doc/*.pdf; do pdftoppm -r 150 -png "$f" "ref-doc/$(basename "$f" .pdf)"; done
             python3 scripts/compare_render.py app/build/render-doc ref-doc render-report-doc
+            # And against our own DOCX pages of the same documents: the reader, not the layout, is what differs
+            python3 scripts/compare_render.py app/build/render-doc app/build/render render-report-doc-vs-docx
           fi
 
       - name: Prepare build log
@@ -122,6 +124,7 @@ jobs:
           cp -r render-report log/render 2>/dev/null || cp -r app/build/render log/render 2>/dev/null || true
           cp -r render-report-doc log/render-doc 2>/dev/null || cp -r app/build/render-doc log/render-doc 2>/dev/null || true
           cp app/build/render-doc/*.txt log/render-doc/ 2>/dev/null || true
+          cp render-report-doc-vs-docx/report.md log/render-doc/vs-docx.md 2>/dev/null || true
           cp app/build/render/*.txt log/render/ 2>/dev/null || true
           cp app/build/big/report.txt log/big-report.txt 2>/dev/null || true
           # The first errors as annotations, so they show on the pull request without opening the log.
