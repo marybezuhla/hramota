@@ -71,6 +71,8 @@ class ScreensTest {
         // Let delays (search waits for typing to pause) and background work finish
         repeat(settle) {
             shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+            // Delays in effects (search waits 300 ms for typing to pause) run on the test clock
+            compose.mainClock.advanceTimeBy(200)
             Thread.sleep(40)
             compose.waitForIdle()
         }
