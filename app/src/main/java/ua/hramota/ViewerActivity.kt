@@ -143,7 +143,7 @@ class ViewerActivity : ComponentActivity() {
     private suspend fun openPdf(uri: android.net.Uri, onOpen: (java.io.Closeable) -> Unit): ViewerState {
         val fd = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
         return try {
-            val pages = PdfiumPages.open(this, fd).also(onOpen)
+            val pages = PdfiumPages.open(this, fd) { contentResolver.openFileDescriptor(uri, "r") }.also(onOpen)
             ViewerState.Paged(pages, inspection = pages.inspection)
         } catch (e: PdfEngineUnavailableException) {
             val again = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed

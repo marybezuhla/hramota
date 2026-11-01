@@ -17,6 +17,8 @@ data class AppSettings(
     val rememberRecent: Boolean = true,
     /** Hide the app's content from screenshots and the recent-apps preview. */
     val secureScreen: Boolean = false,
+    /** Colours from the wallpaper (Material You) instead of Hramota's own. */
+    val dynamicColor: Boolean = false,
 )
 
 /** One instance per process; screens observe [state] and change it with [update]. */
@@ -33,6 +35,7 @@ class Settings private constructor(context: Context) {
             .putBoolean("inspector", s.inspector)
             .putBoolean("rememberRecent", s.rememberRecent)
             .putBoolean("secureScreen", s.secureScreen)
+            .putBoolean("dynamicColor", s.dynamicColor)
             .apply()
         flow.value = s
     }
@@ -43,6 +46,7 @@ class Settings private constructor(context: Context) {
         inspector = prefs.getBoolean("inspector", true),
         rememberRecent = prefs.getBoolean("rememberRecent", true),
         secureScreen = prefs.getBoolean("secureScreen", false),
+        dynamicColor = prefs.getBoolean("dynamicColor", false),
     )
 
     companion object {

@@ -66,11 +66,19 @@ val LocalDiffColors = staticCompositionLocalOf {
 }
 
 @Composable
-fun HramotaTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun HramotaTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, content: @Composable () -> Unit) {
     val diff = if (dark) DiffColors(Color(0xFF173A24), Color(0xFFA6E3B5), Color(0xFF4A1E18), Color(0xFFF5B1A6))
     else DiffColors(Color(0xFFD7F0DC), Color(0xFF14532D), Color(0xFFFADBD6), Color(0xFF8A1C10))
     androidx.compose.runtime.CompositionLocalProvider(LocalDiffColors provides diff) {
-        MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
+        // Colours from the wallpaper (Material You), or Hramota's own
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val scheme = when {
+            dynamic && dark -> androidx.compose.material3.dynamicDarkColorScheme(context)
+            dynamic -> androidx.compose.material3.dynamicLightColorScheme(context)
+            dark -> Dark
+            else -> Light
+        }
+        MaterialTheme(colorScheme = scheme, content = content)
     }
 }
 

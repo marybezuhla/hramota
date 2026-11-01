@@ -26,5 +26,5 @@ fun ComponentActivity.AppTheme(content: @Composable (AppSettings) -> Unit) {
         "dark" -> true
         else -> isSystemInDarkTheme()
     }
-    HramotaTheme(dark = dark) { content(settings) }
+    HramotaTheme(dark = dark, dynamic = settings.dynamicColor) { content(settings) }
 }
