@@ -51,6 +51,14 @@
             </intent-filter>
         </activity>
 
+        <!-- PDFium in an isolated process: no permissions, no access to the app's files, one process
+             per open document. A file built to attack the PDF engine stays locked in there. -->
+        <service
+            android:name=".pdf.PdfEngineService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":pdf" />
+
         <!-- Two versions side by side in one list: what was added, removed or changed -->
         <activity
             android:name=".CompareActivity"

@@ -19,6 +19,9 @@ import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.doc.Format
 import ua.hramota.doc.PdfSource
+import ua.hramota.pdf.PdfEngineUnavailableException
+import ua.hramota.pdf.PdfPasswordException
+import ua.hramota.pdf.PdfiumPages
 import ua.hramota.doc.docx.DocxPages
 import ua.hramota.doc.docx.DocxReader
 import ua.hramota.ui.HramotaTheme
@@ -45,22 +48,21 @@ class ViewerActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val state by produceState<ViewerState>(ViewerState.Loading, uri) {
                         // An open PDF is closed if the window goes away before it is shown
-                        var opened: PdfSource? = null
+                        var opened: java.io.Closeable? = null
                         try {
                         value = withContext(Dispatchers.IO) {
                             try {
                                 when {
-                                    format == Format.PDF -> {
-                                        val fd = contentResolver.openFileDescriptor(uri, "r") ?: return@withContext ViewerState.Failed
-                                        ViewerState.Paged(PdfSource.open(fd).also { opened = it })
-                                    }
+                                    format == Format.PDF -> openPdf(uri) { opened = it }
                                     format == Format.DOCX -> {
                                         val doc = contentResolver.openInputStream(uri)?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
-                                        ViewerState.Paged(DocxPages(doc, appFonts(applicationContext)), doc.readingText())
+                                        ViewerState.Paged(DocxPages(doc, appFonts(applicationContext)), doc.readingText(), doc.inspection)
                                     }
                                     format.hasText -> ViewerState.Text(readText(this@ViewerActivity, uri, format), format)
                                     else -> ViewerState.Unsupported(format)
                                 }
+                            } catch (e: PdfPasswordException) {
+                                ViewerState.Password
                             } catch (e: Exception) {
                                 ViewerState.Failed
                             } catch (e: OutOfMemoryError) {
@@ -77,7 +79,7 @@ class ViewerActivity : ComponentActivity() {
                     }
                     // The PDF engine holds the open file: release it when the window goes
                     DisposableEffect(state) {
-                        onDispose { ((state as? ViewerState.Paged)?.pages as? PdfSource)?.close() }
+                        onDispose { ((state as? ViewerState.Paged)?.pages as? java.io.Closeable)?.close() }
                     }
                     ViewerScreen(
                         name, state, onBack = { finishAndRemoveTask() },
@@ -86,6 +88,21 @@ class ViewerActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * PDF through PDFium in an isolated process. Only if that process cannot start at all does it
+     * fall back to the phone's own PDF engine; a file that crashes the engine is never retried here.
+     */
+    private suspend fun openPdf(uri: android.net.Uri, onOpen: (java.io.Closeable) -> Unit): ViewerState {
+        val fd = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
+        return try {
+            val pages = PdfiumPages.open(this, fd).also(onOpen)
+            ViewerState.Paged(pages, inspection = pages.inspection)
+        } catch (e: PdfEngineUnavailableException) {
+            val again = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
+            ViewerState.Paged(PdfSource.open(again).also(onOpen))
         }
     }
 }

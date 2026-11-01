@@ -43,4 +43,43 @@
     <string name="legend_added">added</string>
     <string name="legend_removed">removed</string>
     <string name="compare_too_big">The documents differ too much to compare paragraph by paragraph; the changed part is shown as a whole.</string>
+    <string name="password_title">This document is password-protected</string>
+    <string name="password_body">Opening password-protected PDFs is coming later.</string>
+    <string name="insp_banner_risky">Caution: %1$s</string>
+    <string name="insp_banner">This document has: %1$s</string>
+    <string name="insp_more">Details</string>
+    <string name="insp_close">Got it</string>
+    <string name="insp_title">What this document contains</string>
+    <string name="insp_macros">macros</string>
+    <string name="insp_macros_detail">Programs inside the document (VBA). Hramota never runs them. Take care opening this file in other apps.</string>
+    <string name="insp_js">JavaScript</string>
+    <string name="insp_js_detail">Code in the PDF. It cannot run in Hramota: the PDF engine is built without JavaScript.</string>
+    <string name="insp_launch">program launch</string>
+    <string name="insp_launch_detail">Links that try to open another program or file. Hramota does not follow them.</string>
+    <string name="insp_embedded_detail">Files and objects inside the document: %1$s. Hramota does not open them by itself.</string>
+    <string name="insp_remote">internet downloads</string>
+    <string name="insp_remote_detail">The document wants to load a template or picture from the internet, sometimes used to track who opened it. Hramota has no internet access, so nothing is loaded.</string>
+    <string name="insp_dde">DDE fields</string>
+    <string name="insp_dde_detail">An old way to run commands from a document. Shown as text only.</string>
+    <string name="insp_links_detail">Links to websites. Hramota shows the real address before opening anything.</string>
+    <string name="insp_changes">tracked changes</string>
+    <string name="insp_changes_detail">The file keeps revisions (added and deleted text). Anyone you send it to will see them.</string>
+    <string name="insp_comments_detail">Comments in the document. Recipients will see them.</string>
+    <string name="insp_hidden">hidden text</string>
+    <string name="insp_hidden_detail">Some text is hidden on the page but still in the file.</string>
+    <string name="insp_author">author</string>
+    <string name="insp_author_detail">The file properties say: %1$s.</string>
+    <string name="insp_footer">Hramota runs nothing from documents and has no internet access. Cleaning before sending is coming later.</string>
+    <plurals name="insp_embedded">
+        <item quantity="one">%d embedded file</item>
+        <item quantity="other">%d embedded files</item>
+    </plurals>
+    <plurals name="insp_links">
+        <item quantity="one">%d link</item>
+        <item quantity="other">%d links</item>
+    </plurals>
+    <plurals name="insp_comments">
+        <item quantity="one">%d comment</item>
+        <item quantity="other">%d comments</item>
+    </plurals>
 </resources>

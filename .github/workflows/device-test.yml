@@ -1,0 +1,54 @@
+name: Device tests
+
+# Runs the on-device tests (the isolated PDF engine) on an Android emulator. Debug build only;
+# it gets no secrets and no write access.
+on:
+  push:
+    branches: [main, next]
+    paths-ignore: ["**.md", "LICENSE"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: "8.14.3"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@c9c93e6ba9c4194322e114c40970d5983d9a07cc # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: gradle --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee device.log
+      - name: Collect results
+        if: always()
+        run: |
+          mkdir -p out
+          cp device.log out/ 2>/dev/null || true
+          find app/build/outputs/androidTest-results -name "*.xml" -exec cp {} out/ \; 2>/dev/null || true
+          grep -h -o -E '<failure message="[^"]{0,300}' out/*.xml 2>/dev/null | head -5 | while IFS= read -r l; do echo "::warning title=device test::${l#<failure message=\"}"; done || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: device-test
+          path: out/

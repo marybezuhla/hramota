@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.hramota.R
 import ua.hramota.doc.Format
+import ua.hramota.doc.Inspection
 import ua.hramota.doc.Paragraph
 import ua.hramota.doc.Pages
 
@@ -57,10 +58,11 @@ import ua.hramota.doc.Pages
 sealed interface ViewerState {
     data object Loading : ViewerState
     data object Failed : ViewerState
+    data object Password : ViewerState
     data class Unsupported(val format: Format) : ViewerState
     data class Text(val paragraphs: List<Paragraph>, val format: Format) : ViewerState
     /** Pages as they print; [reading] is the same text for the reading view, when there is one. */
-    data class Paged(val pages: Pages, val reading: List<Paragraph>? = null) : ViewerState
+    data class Paged(val pages: Pages, val reading: List<Paragraph>? = null, val inspection: Inspection? = null) : ViewerState
 }
 
 @Composable
@@ -100,6 +102,8 @@ fun ViewerScreen(
                 }
             }
         }
+        val inspection = (state as? ViewerState.Paged)?.inspection
+        if (inspection != null && inspection.notable && !overview) InspectorBanner(inspection)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (state) {
                 ViewerState.Loading -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -107,6 +111,7 @@ fun ViewerScreen(
                     Text(stringResource(R.string.loading), modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 ViewerState.Failed -> Message(stringResource(R.string.open_failed), null)
+                ViewerState.Password -> Message(stringResource(R.string.password_title), stringResource(R.string.password_body))
                 is ViewerState.Unsupported -> Message(
                     stringResource(R.string.unsupported_title),
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
