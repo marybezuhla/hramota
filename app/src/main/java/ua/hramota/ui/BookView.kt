@@ -70,6 +70,9 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import kotlinx.coroutines.ensureActive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
@@ -118,7 +121,7 @@ object PageKeys {
 
 private fun flush(book: Book, i: Int): Boolean {
     val prev = book.blocks.getOrNull(i - 1) ?: return true
-    return prev !is BookBlock.Text || prev.kind != BookBlock.Kind.PARAGRAPH
+    return prev !is BookBlock.Text || (prev.kind != BookBlock.Kind.PARAGRAPH && prev.kind != BookBlock.Kind.CONTINUED)
 }
 
 /**
@@ -130,6 +133,7 @@ internal fun BookDocument(
     book: Book, list: LazyListState, look: BookLook, hits: Map<Int, List<SearchHit>>, current: SearchHit?,
     target: BookTarget?, bookmarks: Set<Int>,
     notes: List<Note> = emptyList(), onNote: (Note) -> Unit = {}, onRemoveNote: (Long) -> Unit = {},
+    onTargetUsed: () -> Unit = {},
 ) {
     val selection = remember { BookSelection() }
     val real = LocalClipboard.current
@@ -137,14 +141,16 @@ internal fun BookDocument(
     // The blocks on screen, where selected text is looked for
     val visible = remember { Visible() }
     var editing by remember { mutableStateOf<Pair<Note, Boolean>?>(null) }
-    val view = BookView(look, hits, current, notes, selection.reset, visible)
-    Box(Modifier.fillMaxSize().background(look.paper.background)) {
+    val view = BookView(look, hits, current, notes, selection.reset, visible, selection)
+    // Where this view sits in the window: the selection's place comes in window coordinates
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    Box(Modifier.fillMaxSize().background(look.paper.background).onGloballyPositioned { origin = it.positionInWindow() }) {
         CompositionLocalProvider(LocalTextToolbar provides selection, LocalClipboard provides taking) {
-            if (look.settings.readPaged) BookPages(book, list, view, target, bookmarks)
+            if (look.settings.readPaged) BookPages(book, list, view, target, bookmarks, onTargetUsed)
             else BookScroll(book, list, view)
         }
         SelectionMenu(
-            selection, taking,
+            selection, taking, origin,
             onMark = { t, c -> locate(book, visible.blocks(), t)?.let { onNote(it.copy(color = c)) } },
             onNote = { t -> locate(book, visible.blocks(), t)?.let { editing = it to true } },
         )
@@ -154,11 +160,16 @@ internal fun BookDocument(
     }
 }
 
-internal class Visible { var blocks: () -> List<Int> = { emptyList() } }
+/** The parts of blocks on screen (block, first and last character shown), where selected text is looked for. */
+internal class Visible {
+    data class Part(val block: Int, val from: Int, val to: Int)
+    var blocks: () -> List<Part> = { emptyList() }
+}
 
 /** What every block on screen is drawn with. */
 private class BookView(
     val look: BookLook, val hits: Map<Int, List<SearchHit>>, val current: SearchHit?, val notes: List<Note>, val reset: Int, val visible: Visible,
+    val selection: BookSelection,
 ) {
     fun text(b: BookBlock.Text, i: Int) = look.text(b, hits[i], current, marksIn(notes, i, b.text.length, look.paper.dark))
 }
@@ -166,7 +177,7 @@ private class BookView(
 @Composable
 private fun BookScroll(book: Book, list: LazyListState, v: BookView) {
     val look = v.look
-    v.visible.blocks = { list.layoutInfo.visibleItemsInfo.map { it.index } }
+    v.visible.blocks = { list.layoutInfo.visibleItemsInfo.map { Visible.Part(it.index, 0, Int.MAX_VALUE) } }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
         key(v.reset) { SelectionContainer {
@@ -188,7 +199,7 @@ private fun BookScroll(book: Book, list: LazyListState, v: BookView) {
 }
 
 /** One part of a block on a page: [top] and [height] within the block's own layout, in pixels. */
-private class Slice(val block: Int, val top: Int, val height: Int, val padTop: Int)
+private class Slice(val block: Int, val top: Int, val height: Int, val padTop: Int, val from: Int = 0, val to: Int = Int.MAX_VALUE)
 private class Page(val slices: List<Slice>, val firstBlock: Int, val firstChar: Int, val chapter: String)
 
 /**
@@ -204,7 +215,21 @@ private suspend fun paginate(
         add(0)
         for (i in 1 until book.blocks.size) if ((book.blocks[i] as? BookBlock.Text)?.kind == BookBlock.Kind.HEADING1) add(i)
     }
-    val chapters = starts.indices.map { k -> starts[k] until (starts.getOrNull(k + 1) ?: book.blocks.size) }
+    var chapters = starts.indices.map { k -> starts[k] until (starts.getOrNull(k + 1) ?: book.blocks.size) }
+    // A book without chapters would be laid out in one piece: cut it at lower headings, else in long runs
+    // (each piece starts a page, so runs are long enough for that to pass unnoticed)
+    if (chapters.size == 1 && book.blocks.size > 2000) {
+        val cuts = (1 until book.blocks.size).filter { (book.blocks[it] as? BookBlock.Text)?.kind == BookBlock.Kind.HEADING2 }
+        val at = (listOf(0) + cuts).toMutableList()
+        val runs = ArrayList<Int>()
+        for (k in at.indices) {
+            val end = at.getOrNull(k + 1) ?: book.blocks.size
+            var a = at[k]
+            runs += a
+            while (end - a > 3000) { a += 1500; runs += a }
+        }
+        chapters = runs.indices.map { k -> runs[k] until (runs.getOrNull(k + 1) ?: book.blocks.size) }
+    }
     val target = chapters.indexOfFirst { startBlock in it }.coerceAtLeast(0)
     val done = arrayOfNulls<List<Page>>(chapters.size)
     val threads = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 6)
@@ -227,35 +252,38 @@ private suspend fun paginate(
     if (published < done.size) publish(done.flatMap { it.orEmpty() }, true)
 }
 
-private fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int): List<Page> {
+private suspend fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int): List<Page> {
     val pages = ArrayList<Page>()
     var slices = ArrayList<Slice>()
     var y = 0
     var firstBlock = range.first; var firstChar = 0
     var chapter = ""
+    // Space owed below the last thing placed, given to the next one (dropped at a page top)
+    var owed = 0
     fun px(d: androidx.compose.ui.unit.Dp) = with(density) { d.roundToPx() }
     val line = with(density) { (look.settings.readSize * look.settings.readSpacing).sp.roundToPx() }
     fun newPage(block: Int, char: Int) {
         if (slices.isNotEmpty()) pages += Page(slices, firstBlock, firstChar, chapter)
-        slices = ArrayList(); y = 0; firstBlock = block; firstChar = char
+        slices = ArrayList(); y = 0; firstBlock = block; firstChar = char; owed = 0
     }
     for (i in range) {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         when (val b = book.blocks[i]) {
             is BookBlock.Image -> {
                 val bounds = imageSize(book.images[b.key]) ?: continue
                 val h = min(height, (width.toLong() * bounds.second / max(1, bounds.first)).toInt().coerceAtLeast(1)).let { min(it, bounds.second * 3) }
-                val pad = if (y == 0) 0 else px(12.dp)
+                val pad = if (y == 0) 0 else max(owed, px(12.dp))
                 if (y + pad + h > height) newPage(i, 0)
                 val p = if (y == 0) 0 else pad
-                slices += Slice(i, 0, h, p); y += p + h + px(12.dp)
+                slices += Slice(i, 0, h, p); y += p + h; owed = px(12.dp)
             }
             is BookBlock.Text -> {
                 val (topDp, bottomDp, indentDp) = look.space(b.kind)
-                if (b.kind == BookBlock.Kind.BREAK) { if (y > 0) y += px(topDp); continue }
+                if (b.kind == BookBlock.Kind.BREAK) { if (y > 0) owed += px(topDp); continue }
                 if (b.kind == BookBlock.Kind.HEADING1 && chapter.isEmpty()) chapter = b.text.replace('\n', ' ')
                 val layout = measurer.measure(look.text(b, null, null), look.style(b, flush(book, i)), constraints = Constraints(maxWidth = max(1, width - px(indentDp))), skipCache = true)
                 val heading = b.kind == BookBlock.Kind.HEADING1 || b.kind == BookBlock.Kind.HEADING2 || b.kind == BookBlock.Kind.HEADING3
-                var pad = if (y == 0) 0 else px(topDp)
+                var pad = if (y == 0) 0 else owed + px(topDp)
                 // A heading keeps two lines of the text after it on its page
                 if (heading && y > 0 && y + pad + layout.size.height + line * 2 > height) { newPage(i, 0); pad = 0 }
                 val lines = layout.lineCount
@@ -273,13 +301,13 @@ private fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, den
                     }
                     if (to == from) { newPage(i, layout.getLineStart(from)); pad = 0; continue }
                     val h = layout.getLineBottom(to - 1).toInt() - top
-                    slices += Slice(i, top, h, pad)
+                    slices += Slice(i, top, h, pad, layout.getLineStart(from), layout.getLineEnd(to - 1))
                     y += pad + h
                     pad = 0
                     from = to
                     if (from < lines) newPage(i, layout.getLineStart(from))
                 }
-                y += px(bottomDp)
+                owed = px(bottomDp)
             }
         }
     }
@@ -306,7 +334,7 @@ private fun pageOf(pages: List<Page>, block: Int, char: Int): Int {
 }
 
 @Composable
-private fun BookPages(book: Book, list: LazyListState, v: BookView, target: BookTarget?, bookmarks: Set<Int>) {
+private fun BookPages(book: Book, list: LazyListState, v: BookView, target: BookTarget?, bookmarks: Set<Int>, onTargetUsed: () -> Unit) {
     val look = v.look
     val current = v.current
     val density = LocalDensity.current
@@ -321,27 +349,35 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
         val textHeight = (constraints.maxHeight - header - footer).coerceAtLeast(1)
         var pages by remember { mutableStateOf<List<Page>>(emptyList()) }
         var complete by remember { mutableStateOf(false) }
+        // What the pages were laid out for: pages of another size or type are not shown
+        val layoutKey = listOf(book, textWidth, textHeight, look.settings.readSize, look.settings.readSpacing, look.settings.readMargin, look.settings.readFont, look.settings.readJustify)
+        var laidFor by remember { mutableStateOf<List<Any>?>(null) }
         // Where reading was before the pages were laid out again (another size, font or screen turned)
         val anchor = remember { mutableStateOf(BookTarget(list.firstVisibleItemIndex)) }
         val pager = rememberPagerState { pages.size }
         val settings = look.settings
         var shown by remember { mutableStateOf(false) }
-        LaunchedEffect(book, textWidth, textHeight, settings.readSize, settings.readSpacing, settings.readMargin, settings.readFont, settings.readJustify) {
+        LaunchedEffect(layoutKey) {
             // A new layout (another size, font, or the screen turned) keeps the place being read
             if (shown) pages.getOrNull(pager.currentPage)?.let { anchor.value = BookTarget(it.firstBlock, it.firstChar) }
             else if (pages.isEmpty()) anchor.value = BookTarget(list.firstVisibleItemIndex)
+            val again = pages.isNotEmpty()
             shown = false
-            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all -> pages = laid; complete = all }
+            // While a slider moves, wait until it rests
+            if (again) kotlinx.coroutines.delay(250)
+            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all -> pages = laid; complete = all; laidFor = layoutKey }
         }
         // Once the page being read is laid out, go there
         LaunchedEffect(pages) {
-            if (pages.isEmpty()) return@LaunchedEffect
-            if (!shown) { pager.requestScrollToPage(pageOf(pages, anchor.value.block, anchor.value.char)); shown = true }
+            if (pages.isEmpty() || shown) return@LaunchedEffect
+            pager.scrollToPage(pageOf(pages, anchor.value.block, anchor.value.char))
+            shown = true
         }
         LaunchedEffect(pager, pages) {
-            snapshotFlow { pager.currentPage }.collect { p ->
+            snapshotFlow { pager.currentPage to shown }.collect { (p, ready) ->
                 val page = pages.getOrNull(p) ?: return@collect
-                if (shown) { anchor.value = BookTarget(page.firstBlock, page.firstChar); list.requestScrollToItem(page.firstBlock) }
+                v.selection.hide()
+                if (ready) { anchor.value = BookTarget(page.firstBlock, page.firstChar); list.requestScrollToItem(page.firstBlock) }
             }
         }
         LaunchedEffect(target, pages.isNotEmpty()) {
@@ -349,19 +385,23 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
             if (pages.isEmpty()) return@LaunchedEffect
             anchor.value = t
             pager.requestScrollToPage(pageOf(pages, t.block, t.char))
+            // Used once: coming back from the contents later must not jump here again
+            onTargetUsed()
         }
         LaunchedEffect(current, pages.isNotEmpty()) {
             val h = current ?: return@LaunchedEffect
             if (pages.isNotEmpty()) pager.requestScrollToPage(pageOf(pages, h.page, h.start))
         }
-        if (pages.isEmpty()) { CircularProgressIndicator(Modifier.align(Alignment.Center)); return@BoxWithConstraints }
+        if (pages.isEmpty() || laidFor != layoutKey) { CircularProgressIndicator(Modifier.align(Alignment.Center)); return@BoxWithConstraints }
 
         val scope = rememberCoroutineScope()
         val turnStyle = settings.readTurn
         val curl = remember { CurlState() }
         val turn: (Int) -> Boolean = { dir ->
-            val to = pager.currentPage + dir
-            if (to in pages.indices) {
+            // From where a turn already under way is going, so quick taps go one page each
+            val to = (if (pager.isScrollInProgress) pager.targetPage else pager.currentPage) + dir
+            if (curl.dir != 0) true
+            else if (to in pages.indices) {
                 scope.launch {
                     when (turnStyle) {
                         "curl" -> curl.turn(dir) { pager.requestScrollToPage(to) }
@@ -373,12 +413,21 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
             } else false
         }
         val turnNow by rememberUpdatedState(turn)
-        if (settings.readVolumeKeys) DisposableEffect(Unit) {
+        // The volume keys turn pages only while this window is in front
+        val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+        if (settings.readVolumeKeys) DisposableEffect(lifecycle) {
             val h: (Int) -> Boolean = { turnNow(it) }
-            PageKeys.handler = h
-            onDispose { if (PageKeys.handler === h) PageKeys.handler = null }
+            val watch = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                when (e) {
+                    androidx.lifecycle.Lifecycle.Event.ON_RESUME -> PageKeys.handler = h
+                    androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> if (PageKeys.handler === h) PageKeys.handler = null
+                    else -> Unit
+                }
+            }
+            lifecycle.addObserver(watch)
+            onDispose { lifecycle.removeObserver(watch); if (PageKeys.handler === h) PageKeys.handler = null }
         }
-        v.visible.blocks = { pages.getOrNull(pager.currentPage)?.slices?.map { it.block }?.distinct().orEmpty() }
+        v.visible.blocks = { pages.getOrNull(pager.currentPage)?.slices?.map { Visible.Part(it.block, it.from, it.to) }.orEmpty() }
         val page: @Composable (Int) -> Unit = { p ->
             pages.getOrNull(p)?.let { BookPage(book, v, it, p, pages.size, complete, bookmarks, pages.getOrNull(p + 1)?.firstBlock ?: Int.MAX_VALUE, textWidth, header, footer) }
         }
@@ -443,16 +492,18 @@ private class CurlState {
 
     /** A turn by tap or key: the corner sweeps across with a little lift. */
     suspend fun turn(d: Int, done: suspend () -> Unit) {
-        if (dir != 0 || size.width <= 0f) { done(); return }
+        if (dir != 0) return
+        if (size.width <= 0f) { done(); return }
         val w = size.width; val h = size.height
         top = false
         dir = d
         val from = if (d > 0) Offset(w, h) else Offset(-w, h)
         val to = if (d > 0) Offset(-w, h) else Offset(w, h)
-        corner.snapTo(from)
-        corner.animateTo(to, keyframes { durationMillis = 420; Offset(0f, h * 0.82f) at 210 })
-        done()
-        dir = 0
+        try {
+            corner.snapTo(from)
+            corner.animateTo(to, keyframes { durationMillis = 420; Offset(0f, h * 0.82f) at 210 })
+            done()
+        } finally { dir = 0 }
     }
 }
 
@@ -469,16 +520,17 @@ private fun CurlPages(
     val index = pager.currentPage
     val indexNow by rememberUpdatedState(index)
     val goTo: (Int) -> Unit = { pager.requestScrollToPage(it) }
+    val countNow by rememberUpdatedState(count)
     val layer = rememberGraphicsLayer()
     Box(
-        Modifier.fillMaxSize().onSizeChanged { curl.size = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }.then(taps).pointerInput(count) {
+        Modifier.fillMaxSize().onSizeChanged { curl.size = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }.then(taps).pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 var started = false
                 val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
                     val d = if (over < 0) 1 else -1
                     val to = indexNow + d
-                    if (to in 0 until count && curl.dir == 0) {
+                    if (to in 0 until countNow && curl.dir == 0) {
                         change.consume(); started = true
                         val w = size.width.toFloat(); val h = size.height.toFloat()
                         curl.size = androidx.compose.ui.geometry.Size(w, h)
@@ -501,11 +553,12 @@ private fun CurlPages(
                 }
                 val d = curl.dir
                 scope.launch {
-                    val turned = if (d > 0) curl.corner.value.x < w * 0.5f else curl.corner.value.x > -w * 0.5f
-                    val end = if (turned == (d > 0)) Offset(-w, cy) else Offset(w, cy)
-                    curl.corner.animateTo(end, tween(260))
-                    if (turned) goTo(indexNow + d)
-                    curl.dir = 0
+                    try {
+                        val turned = if (d > 0) curl.corner.value.x < w * 0.5f else curl.corner.value.x > -w * 0.5f
+                        val end = if (turned == (d > 0)) Offset(-w, cy) else Offset(w, cy)
+                        curl.corner.animateTo(end, tween(260))
+                        if (turned) goTo(indexNow + d)
+                    } finally { curl.dir = 0 }
                 }
             }
         },
@@ -628,9 +681,12 @@ internal fun BookContents(
 ) {
     var editing by remember { mutableStateOf<Note?>(null) }
     editing?.let { n -> NoteDialog(excerpt(book, n), n, onSave = { onNote(it); editing = null }, onDelete = { onRemoveNote(n.at); editing = null }, onDismiss = { editing = null }) }
-    val heads = remember(book) {
-        book.blocks.withIndex().filter { (_, b) -> b is BookBlock.Text && (b.kind == BookBlock.Kind.HEADING1 || b.kind == BookBlock.Kind.HEADING2) }
-            .map { (i, b) -> Triple(i, (b as BookBlock.Text).text.replace('\n', ' ').take(120), b.kind == BookBlock.Kind.HEADING2) }
+    // The chapters, found off the main thread (a big book has hundreds of thousands of blocks)
+    val heads by produceState(emptyList<Triple<Int, String, Boolean>>(), book) {
+        value = withContext(Dispatchers.Default) {
+            book.blocks.withIndex().filter { (_, b) -> b is BookBlock.Text && (b.kind == BookBlock.Kind.HEADING1 || b.kind == BookBlock.Kind.HEADING2) }
+                .take(5000).map { (i, b) -> Triple(i, (b as BookBlock.Text).text.replace('\n', ' ').take(120), b.kind == BookBlock.Kind.HEADING2) }
+        }
     }
     val marks = remember(book, bookmarks) {
         bookmarks.sorted().filter { it in book.blocks.indices }.map { i ->
@@ -658,7 +714,7 @@ internal fun BookContents(
         }
         if (notes.isNotEmpty()) {
             item { Section(stringResource(R.string.book_notes)) }
-            for (n in notes) item(key = "n${n.at}") {
+            for ((k, n) in notes.withIndex()) item(key = "n$k") {
                 Row(Modifier.fillMaxWidth().clickable { onGo(n.block) }.padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(width = 4.dp, height = 40.dp).background(NOTE_COLORS[n.color.coerceIn(0, NOTE_COLORS.size - 1)]))
                     Column(Modifier.weight(1f).padding(start = 12.dp)) {

@@ -2,6 +2,8 @@ package ua.hramota.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -340,15 +342,23 @@ private fun ViewerContent(
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
                 is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
-                is ViewerState.Reader -> if (overview) BookContents(state.book, bookmarks, textList.firstVisibleItemIndex, { i ->
-                    overview = false
-                    textList.requestScrollToItem(i)
-                    bookTarget = BookTarget(i)
-                }, notes, onNote, onRemoveNote) else {
+                is ViewerState.Reader -> Box(Modifier.fillMaxSize()) {
+                    // The book stays laid out under the contents, so coming back is instant
                     val paper = paperFor(readSettings.readPaper)
                     val language = remember(state.book) { BookLook.languageOf(state.book) }
                     val look = remember(readSettings, paper, language) { BookLook(readSettings, paper, language) }
-                    BookDocument(state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks, notes, onNote, onRemoveNote)
+                    BookDocument(
+                        state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks,
+                        notes, onNote, onRemoveNote, onTargetUsed = { bookTarget = null },
+                    )
+                    // Over the book: touches stop here and do not turn its pages
+                    if (overview) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { detectTapGestures { } }) {
+                        BookContents(state.book, bookmarks, textList.firstVisibleItemIndex, { i ->
+                            overview = false
+                            textList.requestScrollToItem(i)
+                            bookTarget = BookTarget(i)
+                        }, notes, onNote, onRemoveNote)
+                    }
                 }
                 is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Sheets -> WorkbookDocument(

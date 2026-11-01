@@ -145,29 +145,53 @@ class Library private constructor(private val context: Context) {
         synchronized(this) { shelfState.value = shelfState.value.filter { it.id == ShelfDef.ALL }; saveShelves(shelfState.value) }
     }
 
-    private fun load(): Map<String, LibraryEntry> = try {
-        val json = JSONArray(String(file.readFully()))
-        (0 until json.length()).associate { i ->
-            val o = json.getJSONObject(i)
-            val e = LibraryEntry(
-                id = o.getString("id"), title = o.optString("title"), format = o.optString("format"),
-                uri = o.optString("uri").ifEmpty { null }, copy = o.optString("copy").ifEmpty { null },
-                position = o.optInt("position"), total = o.optInt("total"),
-                bookmarks = o.optJSONArray("bookmarks")?.let { a -> (0 until a.length()).map { a.getInt(it) }.toSet() } ?: emptySet(),
-                onShelf = o.optBoolean("shelf"), openedAt = o.optLong("opened"),
-                notes = o.optJSONArray("notes")?.let { a ->
-                    (0 until minOf(a.length(), MAX_NOTES)).mapNotNull { k ->
-                        val n = a.optJSONObject(k) ?: return@mapNotNull null
-                        Note(n.optInt("b"), n.optInt("s"), n.optInt("eb"), n.optInt("e"), n.optInt("c"), n.optString("t").take(MAX_NOTE_TEXT), n.optLong("at"))
-                    }
-                } ?: emptyList(),
-                shelves = o.optJSONArray("shelves")?.let { a -> (0 until minOf(a.length(), MAX_SHELVES)).map { a.optString(it) }.filter { it.isNotEmpty() }.toSet() } ?: emptySet(),
-            )
-            e.id to e
+    private fun load(): Map<String, LibraryEntry> {
+        val text = try { String(file.readFully()) } catch (e: java.io.FileNotFoundException) { return emptyMap() } catch (e: Exception) { null }
+        val json = try { text?.let(::JSONArray) } catch (e: Exception) { null }
+        if (json == null) {
+            // Unreadable: kept aside rather than overwritten, so nothing is lost for good
+            try { file.baseFile.copyTo(File(context.filesDir, "library.broken-${System.currentTimeMillis()}.json")) } catch (_: Exception) {}
+            return emptyMap()
         }
-    } catch (e: Exception) { emptyMap() }
+        val out = HashMap<String, LibraryEntry>()
+        for (i in 0 until json.length()) {
+            // One damaged entry is skipped, not the whole memory
+            val e = try { entry(json.getJSONObject(i)) } catch (ex: Exception) { null } ?: continue
+            out[e.id] = e
+        }
+        return out
+    }
+
+    private fun entry(o: JSONObject): LibraryEntry? {
+        val id = o.optString("id").takeIf { it.isNotEmpty() } ?: return null
+        return LibraryEntry(
+            id = id, title = o.optString("title"), format = o.optString("format"),
+            uri = o.optString("uri").ifEmpty { null }, copy = o.optString("copy").ifEmpty { null },
+            position = o.optInt("position").coerceAtLeast(0), total = o.optInt("total").coerceAtLeast(0),
+            bookmarks = o.optJSONArray("bookmarks")?.let { a -> (0 until minOf(a.length(), MAX_BOOKMARKS)).map { a.optInt(it) }.filter { it >= 0 }.toSet() } ?: emptySet(),
+            onShelf = o.optBoolean("shelf"), openedAt = o.optLong("opened"),
+            notes = o.optJSONArray("notes")?.let { a ->
+                (0 until minOf(a.length(), MAX_NOTES)).mapNotNull { k ->
+                    val n = a.optJSONObject(k) ?: return@mapNotNull null
+                    val b = n.optInt("b"); val eb = n.optInt("eb"); val st = n.optInt("s"); val en = n.optInt("e")
+                    if (b < 0 || eb < b || st < 0 || en < 0 || (eb == b && en < st)) return@mapNotNull null
+                    Note(b, st, eb, en, n.optInt("c").coerceIn(0, 3), n.optString("t").take(MAX_NOTE_TEXT), n.optLong("at"))
+                }.distinctBy { it.at }
+            } ?: emptyList(),
+            shelves = o.optJSONArray("shelves")?.let { a -> (0 until minOf(a.length(), MAX_SHELVES)).map { a.optString(it) }.filter { it.isNotEmpty() }.toSet() } ?: emptySet(),
+        )
+    }
+
+    // Written on its own thread, the latest state only: reading position is saved often
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val pending = java.util.concurrent.atomic.AtomicReference<Map<String, LibraryEntry>?>()
 
     private fun save(map: Map<String, LibraryEntry>) {
+        if (pending.getAndSet(map) == null) writer.execute { pending.getAndSet(null)?.let(::write) }
+    }
+
+    private fun write(map: Map<String, LibraryEntry>) {
+
         val json = JSONArray()
         for (e in map.values) json.put(JSONObject().apply {
             put("id", e.id); put("title", e.title); put("format", e.format)
