@@ -85,9 +85,10 @@ object DocxReader {
                     name == "word/styles.xml" || name == "word/numbering.xml" || name == "word/theme/theme1.xml" ||
                         name == "word/_rels/document.xml.rels" || name == "word/settings.xml" || name == "word/_rels/settings.xml.rels" ||
                         name == "word/comments.xml" || name == "docProps/core.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
-                    name.endsWith("vbaProject.bin", ignoreCase = true) || name.startsWith("word/vba", ignoreCase = true) -> macros = true
-                    name.startsWith("word/embeddings/") && !name.endsWith("/") -> if (embedded.size < 100) embedded += name.substringAfterLast('/')
-                    name.startsWith("word/activeX/") && name.endsWith(".xml") -> if (embedded.size < 100) embedded += name.substringAfterLast('/')
+                    // Package paths are matched without regard to case: Word itself opens "Word/Embeddings/…"
+                    name.contains("vbaProject", ignoreCase = true) || name.contains("vbaData", ignoreCase = true) -> macros = true
+                    (name.contains("/embeddings/", ignoreCase = true) || name.contains("/activeX/", ignoreCase = true)) && !name.endsWith("/") ->
+                        if (embedded.size < 100) embedded += name.substringAfterLast('/')
                     name.startsWith("word/media/") -> {
                         val bytes = readLimited(zip, MAX_PART)
                         mediaTotal += bytes.size
@@ -147,15 +148,21 @@ object DocxReader {
         val docRels = rels("word/_rels/document.xml.rels")
         val external = (docRels + rels("word/_rels/settings.xml.rels")).filter { it.attr("TargetMode") == "External" }
         val links = external.count { it.attr("Type")?.endsWith("/hyperlink") == true }
+        // Objects the relationships name even if they sit outside the usual folders
+        val related = docRels.filter { r ->
+            r.attr("TargetMode") != "External" && r.attr("Type")?.substringAfterLast('/')?.lowercase() in setOf("oleobject", "package", "control", "activexcontrol")
+        }.mapNotNull { it.attr("Target")?.substringAfterLast('/') }
         val core = parts["docProps/core.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
         // Byte searches: the body can be tens of megabytes, too big to turn into one string
         fun has(vararg marks: String) = marks.any { indexOf(doc, it.toByteArray()) >= 0 }
+        // Field names are not case-sensitive in Word: "dde", "DdeAuto"
+        fun hasNoCase(vararg marks: String) = marks.any { indexOfNoCase(doc, it.lowercase().toByteArray()) >= 0 }
         return Inspection(
-            macros = macros,
-            embedded = embedded,
+            macros = macros || docRels.any { it.attr("Type")?.endsWith("/vbaProject", ignoreCase = true) == true },
+            embedded = (embedded + related).distinct().take(100),
             // Anything external that is not a link: a remote template, a linked picture or object
             remoteResources = external.size - links,
-            dde = has(">DDEAUTO", "> DDEAUTO", ">DDE ", "> DDE ", "w:instr=\"DDE", "w:instr=\" DDE"),
+            dde = hasNoCase(">ddeauto", "> ddeauto", ">dde ", "> dde ", "w:instr=\"dde", "w:instr=\" dde"),
             links = links,
             trackedChanges = has("<w:ins ", "<w:del "),
             comments = parts["word/comments.xml"]?.let { c -> count(c, "<w:comment ".toByteArray()) } ?: 0,
@@ -177,6 +184,19 @@ object DocxReader {
                 return i
             }
             i++
+        }
+        return -1
+    }
+
+    /** Like [indexOf] for an ASCII [mark] given in lower case, ignoring the case of the data. */
+    private fun indexOfNoCase(data: ByteArray, mark: ByteArray): Int {
+        if (mark.isEmpty()) return -1
+        fun lower(b: Byte): Byte = if (b in 'A'.code.toByte()..'Z'.code.toByte()) (b + 32).toByte() else b
+        var i = 0
+        val last = data.size - mark.size
+        outer@ while (i <= last) {
+            for (k in mark.indices) if (lower(data[i + k]) != mark[k]) { i++; continue@outer }
+            return i
         }
         return -1
     }

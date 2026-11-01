@@ -92,6 +92,7 @@ JNIEXPORT jfloatArray JNICALL Java_ua_hramota_pdf_PdfiumNative_pageSizes(JNIEnv*
     jfloatArray out = (*env)->NewFloatArray(env, n * 2);
     if (!out) return NULL;
     jfloat* v = (*env)->GetFloatArrayElements(env, out, NULL);
+    if (!v) return NULL;
     for (int i = 0; i < n; i++) {
         FS_SIZEF size = {0, 0};
         FPDF_GetPageSizeByIndexF(doc, i, &size);
@@ -108,7 +109,8 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_render(JNIEnv* env, 
     (void)cls;
     void* pixels = (*env)->GetDirectBufferAddress(env, buffer);
     jlong capacity = (*env)->GetDirectBufferCapacity(env, buffer);
-    if (!pixels || width <= 0 || height <= 0 || stride < width * 4 || capacity < (jlong)stride * height) return JNI_FALSE;
+    if (!pixels || width <= 0 || height <= 0 || width > 16384 || height > 16384) return JNI_FALSE;
+    if (stride < width * 4 || capacity < (jlong)stride * height) return JNI_FALSE;
     FPDF_DOCUMENT doc = ((Doc*)(intptr_t)handle)->doc;
     FPDF_PAGE page = FPDF_LoadPage(doc, index);
     if (!page) return JNI_FALSE;
@@ -166,6 +168,7 @@ JNIEXPORT jobjectArray JNICALL Java_ua_hramota_pdf_PdfiumNative_inspect(JNIEnv* 
         FPDF_ClosePage(page);
     }
     jclass str = (*env)->FindClass(env, "java/lang/String");
+    if (!str) return NULL;
     jobjectArray out = (*env)->NewObjectArray(env, 8 + shownAttachments, str, NULL);
     if (!out) return NULL;
     char num[32];

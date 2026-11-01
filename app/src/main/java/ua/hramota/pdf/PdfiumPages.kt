@@ -67,7 +67,9 @@ class PdfiumPages private constructor(
                     d.writeInt(index); d.writeInt(w); d.writeInt(h)
                     d.writeInt(1); memory.writeToParcel(d, 0)
                 }) { it.readInt() } == 1
-                if (!ok) return@withLock null
+                // The engine process is not trusted: the memory must still be exactly the page's size
+                if (!ok || memory.size != w * h * 4) return@withLock null
+                memory.setProtect(android.system.OsConstants.PROT_READ)
                 val buffer = memory.mapReadOnly()
                 val bitmap = try {
                     Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(buffer) }
@@ -99,10 +101,10 @@ class PdfiumPages private constructor(
 
     private fun <T> call(code: Int, write: (Parcel) -> Unit = {}, read: (Parcel) -> T): T? = Companion.call(binder, code, write, read)
 
+    /** Ends the document's engine process. Never waits for it: the process may be busy or stuck. */
     override fun close() {
         if (closed) return
         closed = true
-        try { call(PdfEngineService.CLOSE) { } } catch (_: Exception) {}
         try { context.unbindService(connection) } catch (_: Exception) {}
         cache.clear()
     }
@@ -132,12 +134,13 @@ class PdfiumPages private constructor(
             } catch (e: SecurityException) { false }
             if (!bound) { pfd.close(); throw PdfEngineUnavailableException("PDF engine unavailable") }
             try {
+                // A slow start is an error, not a reason to drop the isolation
                 val binder = try {
                     withTimeout(15_000) { connected.await() }
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                    throw PdfEngineUnavailableException("PDF engine did not start")
+                    throw IOException("PDF engine did not start in time")
                 }
-                val result = pfd.use { f -> call(binder, PdfEngineService.OPEN, { d -> d.writeFileDescriptor(f.fileDescriptor); d.writeString(null) }) { it.readLong() } }
+                val result = call(binder, PdfEngineService.OPEN, { d -> d.writeFileDescriptor(pfd.fileDescriptor); d.writeString(null) }) { it.readLong() }
                     ?: throw IOException("PDF engine stopped")
                 if (result == -4L) throw PdfPasswordException()
                 if (result <= 0L) throw IOException("Cannot open PDF ($result)")
@@ -148,6 +151,9 @@ class PdfiumPages private constructor(
             } catch (e: Throwable) {
                 try { app.unbindService(connection) } catch (_: Exception) {}
                 throw e
+            } finally {
+                // Our copy of the file is not needed once the engine has its own (or on any failure)
+                try { pfd.close() } catch (_: Exception) {}
             }
         }
 
@@ -159,9 +165,11 @@ class PdfiumPages private constructor(
                 data.writeInterfaceToken(PdfEngineService.DESCRIPTOR)
                 write(data)
                 if (!binder.transact(code, data, reply, 0)) return null
-                reply.readException()
+                // Only "no error" is accepted; anything else from the engine is treated as a failure,
+                // never turned into an exception here (a compromised engine must not crash the app)
+                if (reply.readInt() != 0) return null
                 read(reply)
-            } catch (e: android.os.RemoteException) {
+            } catch (e: Exception) {
                 null
             } finally {
                 data.recycle(); reply.recycle()

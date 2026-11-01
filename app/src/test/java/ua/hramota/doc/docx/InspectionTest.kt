@@ -56,6 +56,18 @@ class InspectionTest {
         assertTrue(i.risky)
     }
 
+    @Test fun findsHiddenVariants() {
+        val doc = docx(
+            "word/document.xml" to "<w:document $w><w:body><w:p><w:fldSimple w:instr=\"ddeauto c:\\\\x.exe\"/></w:p></w:body></w:document>",
+            "Word/Embeddings/Object 1.BIN" to "ole",
+            "word/vbaData.xml" to "<x/>",
+        )
+        val i = DocxReader.read(doc).inspection
+        assertTrue(i.dde)
+        assertTrue(i.macros)
+        assertEquals(listOf("Object 1.BIN"), i.embedded)
+    }
+
     @Test fun plainDocumentIsQuiet() {
         val i = DocxReader.read(docx("word/document.xml" to "<w:document $w><w:body><w:p><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>")).inspection
         assertFalse(i.risky)
