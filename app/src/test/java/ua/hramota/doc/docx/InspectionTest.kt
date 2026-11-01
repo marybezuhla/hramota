@@ -56,6 +56,15 @@ class InspectionTest {
         assertTrue(i.risky)
     }
 
+    // The word in ordinary text is not a field; the field in any case and spacing is
+    @Test fun ddeOnlyAsAField() {
+        fun dde(body: String) = DocxReader.read(docx("word/document.xml" to "<w:document $w><w:body>$body</w:body></w:document>")).inspection.dde
+        assertFalse(dde("<w:p><w:r><w:t>Модель dde і ddeauto в тексті, Ddemo</w:t></w:r></w:p>"))
+        assertTrue(dde("<w:p><w:r><w:instrText> DdeAuto c:\\x.exe</w:instrText></w:r></w:p>"))
+        assertTrue(dde("<w:p><w:r><w:instrText>DDE x y</w:instrText></w:r></w:p>"))
+        assertTrue(dde("<w:p><w:fldSimple w:instr=\" dde x\"/></w:p>"))
+    }
+
     @Test fun findsHiddenVariants() {
         val doc = docx(
             "word/document.xml" to "<w:document $w><w:body><w:p><w:fldSimple w:instr=\"ddeauto c:\\\\x.exe\"/></w:p></w:body></w:document>",

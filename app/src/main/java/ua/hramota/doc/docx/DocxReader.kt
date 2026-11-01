@@ -160,14 +160,12 @@ object DocxReader {
         val core = parts["docProps/core.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
         // Byte searches: the body can be tens of megabytes, too big to turn into one string
         fun has(vararg marks: String) = marks.any { indexOf(doc, it.toByteArray()) >= 0 }
-        // Field names are not case-sensitive in Word: "dde", "DdeAuto"
-        fun hasNoCase(vararg marks: String) = marks.any { indexOfNoCase(doc, it.lowercase().toByteArray()) >= 0 }
         return Inspection(
             macros = macros || docRels.any { it.attr("Type")?.endsWith("/vbaProject", ignoreCase = true) == true },
             embedded = (embedded + related).distinct().take(100),
             // Anything external that is not a link: a remote template, a linked picture or object
             remoteResources = external.size - links,
-            dde = hasNoCase(">ddeauto", "> ddeauto", ">dde ", "> dde ", "w:instr=\"dde", "w:instr=\" dde"),
+            dde = hasDde(doc),
             links = links,
             trackedChanges = has("<w:ins ", "<w:del "),
             comments = parts["word/comments.xml"]?.let { c -> count(c, "<w:comment ".toByteArray()) } ?: 0,
@@ -193,17 +191,27 @@ object DocxReader {
         return -1
     }
 
-    /** Like [indexOf] for an ASCII [mark] given in lower case, ignoring the case of the data. */
-    private fun indexOfNoCase(data: ByteArray, mark: ByteArray): Int {
-        if (mark.isEmpty()) return -1
-        fun lower(b: Byte): Byte = if (b in 'A'.code.toByte()..'Z'.code.toByte()) (b + 32).toByte() else b
+    /**
+     * A DDE field, in one pass over the body: "DDE " or "DDEAUTO" (any case, as Word reads field names)
+     * right after a tag (">", "> ") or at the start of a simple field's instruction (w:instr=").
+     */
+    private fun hasDde(data: ByteArray): Boolean {
+        fun lower(i: Int): Int = data[i].toInt().let { if (it in 'A'.code..'Z'.code) it + 32 else it }
+        fun at(i: Int, mark: String): Boolean = i >= 0 && i + mark.length <= data.size && mark.indices.all { lower(i + it) == mark[it].code }
         var i = 0
-        val last = data.size - mark.size
-        outer@ while (i <= last) {
-            for (k in mark.indices) if (lower(data[i + k]) != mark[k]) { i++; continue@outer }
-            return i
+        val last = data.size - 3
+        while (i <= last) {
+            val b = data[i].toInt()
+            if ((b == 'd'.code || b == 'D'.code) && lower(i + 1) == 'd'.code && lower(i + 2) == 'e'.code) {
+                // Skip one space before the name
+                val j = if (i > 0 && data[i - 1] == ' '.code.toByte()) i - 1 else i
+                val afterTag = j > 0 && data[j - 1] == '>'.code.toByte() && (at(i + 3, "auto") || at(i + 3, " "))
+                val inInstr = at(j - 9, "w:instr=\"")
+                if (afterTag || inInstr) return true
+            }
+            i++
         }
-        return -1
+        return false
     }
 
     private fun count(data: ByteArray, mark: ByteArray): Int {
