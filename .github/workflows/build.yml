@@ -100,6 +100,13 @@ jobs:
           soffice --headless --convert-to pdf --outdir ref app/src/test/resources/docs/*.docx > /dev/null
           for f in ref/*.pdf; do pdftoppm -r 150 -png "$f" "ref/$(basename "$f" .pdf)"; done
           python3 scripts/compare_render.py app/build/render ref render-report
+          # Old Word files (the same test documents saved as .doc) against LibreOffice too
+          if [ -d app/build/render-doc ]; then
+            mkdir -p ref-doc
+            soffice --headless --convert-to pdf --outdir ref-doc app/src/test/resources/docs-doc/*.doc > /dev/null
+            for f in ref-doc/*.pdf; do pdftoppm -r 150 -png "$f" "ref-doc/$(basename "$f" .pdf)"; done
+            python3 scripts/compare_render.py app/build/render-doc ref-doc render-report-doc
+          fi
 
       - name: Prepare build log
         if: always()
@@ -113,6 +120,8 @@ jobs:
           cp -r app/build/screens log/screens 2>/dev/null || true
           # Page renders of the test documents and the comparison with LibreOffice
           cp -r render-report log/render 2>/dev/null || cp -r app/build/render log/render 2>/dev/null || true
+          cp -r render-report-doc log/render-doc 2>/dev/null || cp -r app/build/render-doc log/render-doc 2>/dev/null || true
+          cp app/build/render-doc/*.txt log/render-doc/ 2>/dev/null || true
           cp app/build/render/*.txt log/render/ 2>/dev/null || true
           cp app/build/big/report.txt log/big-report.txt 2>/dev/null || true
           # The first errors as annotations, so they show on the pull request without opening the log.
