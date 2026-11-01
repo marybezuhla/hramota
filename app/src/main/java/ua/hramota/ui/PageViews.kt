@@ -178,7 +178,8 @@ fun ZoomablePages(
             modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
         ) {
             Text(
-                stringResource(R.string.page_of, current, pages.pageCount),
+                // "…" while a long document is still being laid out
+                stringResource(R.string.page_of, current, pages.pageCount) + if (pages.complete) "" else "…",
                 color = MaterialTheme.colorScheme.inverseOnSurface,
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),

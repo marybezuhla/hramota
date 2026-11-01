@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import ua.hramota.BigDocs
 import ua.hramota.diff.Diff
 import ua.hramota.doc.CsvReader
@@ -29,17 +30,24 @@ import java.io.File
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class BigDocumentsTest {
     private val fonts by lazy { Fonts(ApplicationProvider.getApplicationContext<Context>().assets) }
 
     @Test fun thousandPageTable() = runBlocking {
         val bytes = BigDocs.docxTable(ROWS, 1)
         val (doc, readMs, readMb) = measure { DocxReader.read(ByteArrayInputStream(bytes)) }
-        val (pages, layoutMs, layoutMb) = measure { DocxPages(doc, fonts) }
+        // As the viewer opens it: the first page at once, the rest on other threads
+        val (pages, firstMs, _) = measure { DocxPages(doc, fonts, background = true) }
+        val (_, layoutMs, layoutMb) = measure { while (!pages.complete) Thread.sleep(5) }
         val (hit, searchMs, _) = measure { runBlocking { (0 until pages.pageCount).lastOrNull { Search.find(pages.pageText(it), BigDocs.NEEDLE.lowercase()).isNotEmpty() } } }
         val (_, drawMs, _) = measure { pages.draw(pages.pageCount - 1, 1080) }
         report("DOCX table, ${ROWS} rows, ${bytes.size / 1024} KB zipped: ${pages.pageCount} pages; read $readMs ms (+$readMb MB), " +
-            "layout $layoutMs ms (+$layoutMb MB), search all pages $searchMs ms, draw last page $drawMs ms")
+            "first page $firstMs ms, all pages +$layoutMs ms (+$layoutMb MB), search all pages $searchMs ms, draw last page $drawMs ms")
+        // Laid out on several threads, the pages are exactly those of the one-thread layout
+        val sequential = DocxPages(doc, fonts)
+        assertEquals(sequential.pageCount, pages.pageCount)
+        assertEquals(runBlocking { sequential.pageText(pages.pageCount / 2) }, runBlocking { pages.pageText(pages.pageCount / 2) })
         assertTrue("pages: ${pages.pageCount}", pages.pageCount >= 900)
         // The last row can break across the last two pages
         assertTrue("found on $hit", hit != null && hit >= pages.pageCount - 2)

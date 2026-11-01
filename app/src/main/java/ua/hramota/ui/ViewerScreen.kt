@@ -127,7 +127,7 @@ fun ViewerScreen(
     val source: Searchable? = when {
         overview -> null
         readingParagraphs != null -> remember(readingParagraphs) { Searchable(readingParagraphs.size) { readingParagraphs[it].text } }
-        textPages != null -> remember(textPages) { Searchable(textPages.pageCount) { textPages.pageText(it) } }
+        textPages != null -> remember(textPages) { Searchable({ textPages.pageCount }, { textPages.pageText(it) }, { textPages.complete }) }
         state is ViewerState.Text -> remember(state) { Searchable(state.paragraphs.size) { state.paragraphs[it].text } }
         state is ViewerState.Table -> remember(state) { Searchable(state.table.rows.size) { rowText(state.table.rows[it]) } }
         else -> null
@@ -151,14 +151,16 @@ fun ViewerScreen(
         // Pages are fetched one by one (a PDF page comes from the engine); paragraphs and rows in batches
         val batch = if (inPages) 1 else 2000
         var p = 0
-        while (p < source.count && found.size < MAX_HITS) {
+        while (found.size < MAX_HITS) {
+            // A document still being laid out: wait for its next pages
+            if (p >= source.count) { if (source.complete && p >= source.count) break; delay(150); continue }
             val end = minOf(source.count, p + batch)
             val texts = (p until end).map { source.text(it) }
             withContext(Dispatchers.Default) {
                 for ((k, t) in texts.withIndex()) for (r in Search.find(t, query)) found += SearchHit(p + k, r.first, r.last + 1)
             }
             p = end
-            if (!inPages || p % 8 == 0 || p == source.count || found.size >= MAX_HITS) hits = found.toList()
+            if (!inPages || p % 8 == 0 || p >= source.count || found.size >= MAX_HITS) hits = found.toList()
         }
         hits = found.toList()
         scanning = false
@@ -271,7 +273,11 @@ fun ViewerScreen(
 private const val MAX_HITS = 5000
 
 /** Something search can look through, item by item (a page, a paragraph or a table row). */
-private class Searchable(val count: Int, val text: suspend (Int) -> String)
+private class Searchable(private val size: () -> Int, val text: suspend (Int) -> String, private val done: () -> Boolean = { true }) {
+    constructor(count: Int, text: suspend (Int) -> String) : this({ count }, text)
+    val count: Int get() = size()
+    val complete: Boolean get() = done()
+}
 
 private fun hasNote(state: ViewerState.Text) = state.format == Format.ODT || state.format == Format.DOC
 
