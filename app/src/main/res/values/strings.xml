@@ -125,4 +125,18 @@
     <string name="settings_dynamic">Colours from the wallpaper</string>
     <string name="settings_dynamic_hint">Material You: the app takes its accent colours from your wallpaper</string>
     <string name="recent_no_access">“%1$s” was opened from another app just once, so it can no longer be opened from the list. Open it again from that app or with “Open a file”.</string>
+    <string name="shelf">Shelf (%1$d)</string>
+    <string name="shelf_empty">Documents you bookmark or add with ⋮ → “Add to shelf” stay here, with where you stopped reading. Clearing the recent list does not touch the shelf.</string>
+    <string name="shelf_add">Add to shelf</string>
+    <string name="shelf_remove">Remove from shelf</string>
+    <string name="shelf_keep_copy">Keep a copy in Hramota</string>
+    <string name="shelf_drop_copy">Delete the copy in Hramota</string>
+    <string name="shelf_forget">Forget this document</string>
+    <string name="shelf_copy_kept">A copy is kept in Hramota</string>
+    <string name="shelf_copy_failed">Could not copy the file</string>
+    <string name="shelf_progress">p. %1$d of %2$d</string>
+    <string name="shelf_bookmarks">%1$d bookmarks</string>
+    <string name="more">More</string>
+    <string name="settings_wood">Wooden bookshelf</string>
+    <string name="settings_wood_hint">Covers on wooden shelves, like the classic book app</string>
 </resources>

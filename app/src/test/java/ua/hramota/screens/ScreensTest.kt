@@ -283,4 +283,18 @@ class ScreensTest {
         val dir = File("build/screens").apply { mkdirs() }
         File(dir, "00-icon.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
+
+    private val shelfEntries = listOf(
+        ua.hramota.data.LibraryEntry("a1", "Порівняльна таблиця до проєкту закону.docx", "DOCX", null, position = 36, total = 148, bookmarks = setOf(3, 80), onShelf = true),
+        ua.hramota.data.LibraryEntry("a2", "Звіт за жовтень.pdf", "PDF", null, position = 2, total = 12, onShelf = true),
+        ua.hramota.data.LibraryEntry("a3", "Сімейний бюджет.xlsx", "XLSX", null, onShelf = true),
+        ua.hramota.data.LibraryEntry("a4", "Кобзар.epub", "EPUB", null, position = 120, total = 600, onShelf = true),
+        ua.hramota.data.LibraryEntry("a5", "Презентація проєкту.pptx", "PPTX", null, position = 3, total = 14, onShelf = true),
+    )
+    @Test fun homeShelf() = shot("12-home-shelf") {
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)
+    }
+    @Test fun homeShelfWood() = shot("12-home-shelf-wood") {
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, woodShelf = true, startOnShelf = true, now = now)
+    }
 }

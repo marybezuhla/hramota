@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -117,6 +118,8 @@ fun ViewerScreen(
     /** Where reading stopped last time (page, or position in the text); reported back as it changes. */
     startPosition: Int = 0,
     onPosition: (Int, Int) -> Unit = { _, _ -> },
+    /** Extra actions in the ⋮ menu: label and what it does. */
+    menu: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
@@ -242,6 +245,15 @@ fun ViewerScreen(
             onNext = { if (hits.isNotEmpty()) hitIndex = (hitIndex + 1) % hits.size },
             onClose = { searching = false },
         ) else TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
+            if (menu.isNotEmpty() && !overview) {
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { open = true }) { Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more)) }
+                    androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        for ((label, action) in menu) androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
+                    }
+                }
+            }
             if (source != null) IconButton(onClick = { searching = true; selection = null }) {
                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_open))
             }

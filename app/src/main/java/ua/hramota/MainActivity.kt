@@ -19,6 +19,8 @@ import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.ui.HomeScreen
 import androidx.activity.compose.BackHandler
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import ua.hramota.data.Settings
 import ua.hramota.ui.AppTheme
 import ua.hramota.ui.SettingsScreen
@@ -48,6 +50,9 @@ class MainActivity : ComponentActivity() {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val files by recents.files.collectAsStateWithLifecycle()
+                    val library = ua.hramota.data.Library.get(applicationContext)
+                    val known by library.entries.collectAsStateWithLifecycle()
+                    val shelf = known.values.filter { it.onShelf }.sortedByDescending { it.openedAt }
                     BackHandler(showSettings) { showSettings = false }
                     if (showSettings) SettingsScreen(
                         settings = settings,
@@ -69,6 +74,10 @@ class MainActivity : ComponentActivity() {
                         onRemove = { recents.remove(it.uri) },
                         onClear = { recents.clear() },
                         onSettings = { showSettings = true },
+                        shelf = shelf,
+                        woodShelf = settings.woodShelf,
+                        onOpenShelf = { e -> openShelf(e) },
+                        onShelfAction = { e, a -> shelfAction(e, a) },
                     )
                 }
             }
@@ -113,6 +122,25 @@ class MainActivity : ComponentActivity() {
             // from the list it cannot be opened again, so say so and take it off the list
             recents.remove(uri.toString())
             android.widget.Toast.makeText(this, getString(R.string.recent_no_access, name), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** A shelf document: its copy inside Hramota if there is one, else where it was opened from. */
+    private fun openShelf(e: ua.hramota.data.LibraryEntry) {
+        val uri = e.copy?.let { ua.hramota.data.Shelf.copyUri(this, it) } ?: e.uri?.let(Uri::parse) ?: return
+        openViewer(uri, e.title)
+    }
+
+    private fun shelfAction(e: ua.hramota.data.LibraryEntry, a: ua.hramota.ui.ShelfAction) {
+        val library = ua.hramota.data.Library.get(applicationContext)
+        when (a) {
+            ua.hramota.ui.ShelfAction.REMOVE -> library.update(e.id) { it?.copy(onShelf = false) }
+            ua.hramota.ui.ShelfAction.FORGET -> library.forget(e.id)
+            ua.hramota.ui.ShelfAction.DROP_COPY -> { e.copy?.let { java.io.File(it).delete() }; library.update(e.id) { it?.copy(copy = null) } }
+            ua.hramota.ui.ShelfAction.KEEP_COPY -> lifecycleScope.launch {
+                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Shelf.keepCopy(this@MainActivity, e) }
+                if (!ok) android.widget.Toast.makeText(this@MainActivity, getString(R.string.shelf_copy_failed), android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 
