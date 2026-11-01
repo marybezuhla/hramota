@@ -10,6 +10,8 @@
     <string name="recent_empty">Files you open will appear here. Hramota only sees files you choose.</string>
     <string name="recent_clear">Clear</string>
     <string name="recent_remove">Remove from recent</string>
+    <string name="today_at">Today, %1$s</string>
+    <string name="yesterday_at">Yesterday, %1$s</string>
     <string name="privacy_note">No internet access: nothing leaves your phone.</string>
     <string name="loading">Opening…</string>
     <string name="back">Back</string>
@@ -31,6 +33,7 @@
         <item quantity="one">%d change</item>
         <item quantity="other">%d changes</item>
     </plurals>
+    <string name="legend_edited">edited</string>
     <string name="legend_added">added</string>
     <string name="legend_removed">removed</string>
     <string name="compare_too_big">The documents differ too much to compare paragraph by paragraph; the changed part is shown as a whole.</string>

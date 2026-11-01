@@ -1,12 +1,12 @@
 """Compares Hramota's page renders with LibreOffice's (both 150 dpi PNG) and writes a report.
 
 python3 scripts/compare_render.py <ours dir> <libreoffice dir> <out dir>
-Pages are matched by document name and page number. For each page: share of "ink" pixels that
-differ (lower is better) and a picture: ours | LibreOffice | overlay (red = only ours, blue = only
+Pages are matched by document name and page number. For each page: share of "ink" pixels with no
+ink of the other render within 2 px (lower is better; tiny anti-aliasing shifts do not count) and a picture: ours | LibreOffice | overlay (red = only ours, blue = only
 LibreOffice, black = both).
 """
 import os, re, sys
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 ours_dir, ref_dir, out_dir = sys.argv[1:4]
 os.makedirs(out_dir, exist_ok=True)
@@ -31,10 +31,14 @@ for doc in sorted(set(ours) | set(ref)):
         if n not in a or n not in b:
             rows.append(f"| {doc} | {len(a)} / {len(b)} | {n} | немає пари |"); continue
         ia = ink(a[n]); ib = ink(b[n], ia.size)
-        diff = ImageChops.logical_xor(ia.convert("1"), ib.convert("1"))
+        # Ink of one render that has no ink of the other nearby
+        near_a = ia.filter(ImageFilter.MaxFilter(5)).convert("1")
+        near_b = ib.filter(ImageFilter.MaxFilter(5)).convert("1")
+        miss_a = ImageChops.logical_and(ia.convert("1"), ImageChops.invert(near_b))
+        miss_b = ImageChops.logical_and(ib.convert("1"), ImageChops.invert(near_a))
         union = ImageChops.logical_or(ia.convert("1"), ib.convert("1"))
         u = union.histogram()[-1]
-        dv = diff.histogram()[-1]
+        dv = miss_a.histogram()[-1] + miss_b.histogram()[-1]
         score = dv / u if u else 0.0
         rows.append(f"| {doc} | {len(a)} / {len(b)} | {n} | {score:.1%} |")
         w, h = ia.size

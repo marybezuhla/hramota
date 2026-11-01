@@ -1,6 +1,17 @@
 package ua.hramota.ui
 
-import androidx.compose.foundation.clickable
+import android.text.format.DateUtils
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,12 +30,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -39,8 +46,6 @@ import androidx.compose.ui.unit.dp
 import ua.hramota.R
 import ua.hramota.data.RecentFile
 import ua.hramota.doc.Format
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * Home: the two main actions at the bottom, within reach of the thumb, and the recent files above.
@@ -55,6 +60,7 @@ fun HomeScreen(
     onOpenRecent: (RecentFile) -> Unit,
     onRemove: (RecentFile) -> Unit,
     onClear: () -> Unit,
+    now: Long = System.currentTimeMillis(),
 ) {
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 8.dp)) {
@@ -63,7 +69,7 @@ fun HomeScreen(
         }
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.recent), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            if (recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear)) }
+            if (recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (recents.isEmpty()) {
             Text(
@@ -73,8 +79,8 @@ fun HomeScreen(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).weight(1f),
             )
         } else {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(recents, key = { it.uri }) { file -> RecentRow(file, { onOpenRecent(file) }, { onRemove(file) }) }
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items(recents, key = { it.uri }) { file -> RecentRow(file, now, { onOpenRecent(file) }, { onRemove(file) }) }
             }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -101,26 +107,42 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecentRow(file: RecentFile, onOpen: () -> Unit, onRemove: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
-    ) {
-        Row(Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            FormatBadge(Format.detect(file.name, null))
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(file.openedAt)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.recent_remove), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun RecentRow(file: RecentFile, now: Long, onOpen: () -> Unit, onRemove: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val format = Format.detect(file.name, null)
+    Box {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .combinedClickable(onClick = onOpen, onLongClick = { menu = true }, onLongClickLabel = stringResource(R.string.recent_remove))
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FormatBadge(format)
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Text(file.name.substringBeforeLast('.', file.name), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(whenOpened(file.openedAt, now), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.recent_remove)) }, onClick = { menu = false; onRemove() })
+        }
+    }
+}
+
+/** "Today, 14:26", "Yesterday, 09:10" or a short date. */
+@Composable
+private fun whenOpened(at: Long, now: Long): String {
+    val context = LocalContext.current
+    val time = DateUtils.formatDateTime(context, at, DateUtils.FORMAT_SHOW_TIME)
+    val day = 86_400_000L
+    val zone = java.util.TimeZone.getDefault()
+    fun dayIndex(t: Long) = (t + zone.getOffset(t)) / day
+    return when (dayIndex(now) - dayIndex(at)) {
+        0L -> stringResource(R.string.today_at, time)
+        1L -> stringResource(R.string.yesterday_at, time)
+        else -> DateUtils.formatDateTime(context, at, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH or
+            (if (dayIndex(now) - dayIndex(at) < 300) DateUtils.FORMAT_NO_YEAR else 0))
     }
 }

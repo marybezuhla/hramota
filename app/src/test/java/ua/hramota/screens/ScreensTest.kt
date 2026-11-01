@@ -26,7 +26,13 @@ import org.robolectric.annotation.GraphicsMode
 import ua.hramota.data.RecentFile
 import ua.hramota.diff.Diff
 import ua.hramota.doc.Format
+import ua.hramota.doc.Pages
 import ua.hramota.doc.Paragraph
+import ua.hramota.doc.docx.DocxPages
+import ua.hramota.doc.docx.DocxReader
+import ua.hramota.doc.docx.Fonts
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import ua.hramota.ui.CompareScreen
 import ua.hramota.ui.CompareState
 import ua.hramota.ui.HomeScreen
@@ -91,7 +97,7 @@ class ScreensTest {
 
     @Composable
     private fun home(list: List<RecentFile>, prompt: String? = null) =
-        HomeScreen(list, prompt, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {})
+        HomeScreen(list, prompt, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, now = now)
 
     private val contractV1 = listOf(
         "Договір поставки № 12",
@@ -152,9 +158,29 @@ class ScreensTest {
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun homeEnglish() = shot("02-home-en") { home(recentsEn) }
 
-    @Test fun viewerText() = shot("04-viewer-docx") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}) }
+    @Test fun viewerText() = shot("04-viewer-reading") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}) }
     @Config(qualifiers = "+night")
-    @Test fun viewerTextDark() = shot("04-viewer-docx-dark") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}) }
+    @Test fun viewerTextDark() = shot("04-viewer-reading-dark") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}) }
+    /** A test document's pages, drawn right away so the picture is ready when the screen is captured. */
+    private fun docxPages(name: String): Pages {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val file = File(javaClass.classLoader!!.getResource("docs/$name")!!.toURI())
+        val pages = DocxPages(file.inputStream().use { DocxReader.read(it) }, Fonts(app.assets))
+        return object : Pages {
+            override val pageCount = pages.pageCount
+            override fun aspect(index: Int) = pages.aspect(index)
+            override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = pages.draw(index, widthPx)?.asImageBitmap()
+        }
+    }
+
+    @Test fun viewerPages() = shot("04-viewer-docx-pages") {
+        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {})
+    }
+    @Config(qualifiers = "+night")
+    @Test fun viewerPagesDark() = shot("04-viewer-docx-pages-dark") {
+        ViewerScreen("Таблиці.docx", ViewerState.Paged(docxPages("04-tables.docx"), emptyList()), onBack = {})
+    }
+
     @Test fun viewerUnsupported() = shot("05-viewer-unsupported") { ViewerScreen("Бюджет родини 2026.xlsx", ViewerState.Unsupported(Format.XLSX), onBack = {}) }
     @Test fun viewerLoading() = shot("05-viewer-loading") { ViewerScreen("Звіт за жовтень.pdf", ViewerState.Loading, onBack = {}) }
 

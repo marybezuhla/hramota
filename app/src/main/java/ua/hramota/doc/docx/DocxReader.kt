@@ -148,9 +148,18 @@ object DocxReader {
             }
         }
 
+        /** Table styles of the tables being read, innermost last. */
+        private val tableStyles = ArrayList<String?>()
+
         fun para(p: XmlNode): Block.Para {
             val direct = ParaProps.parse(p.child("pPr"))
-            val (styleP, styleR) = styles.paragraph(direct?.styleId)
+            var (styleP, styleR) = styles.paragraph(direct?.styleId)
+            // In a table, the table style's paragraph formatting replaces that of the default style
+            // (Word's rule): e.g. "Table Grid" removes the space after paragraphs in its cells
+            if (tableStyles.isNotEmpty() && styles.paraStyleId(direct?.styleId) == styles.defaultParagraphStyle) {
+                val (tableP, tableR) = styles.table(tableStyles.last())
+                styleP = styleP.with(tableP); styleR = styleR.with(tableR)
+            }
             var props = styles.defaultPara.with(styleP).with(direct)
             val baseRun = styles.defaultRun.with(styleR)
             var label: String? = null
@@ -212,6 +221,11 @@ object DocxReader {
         fun table(t: XmlNode): Block.Table {
             val tblPr = t.child("tblPr")
             val styleId = tblPr?.child("tblStyle")?.attr("val")
+            tableStyles += styleId
+            try { return tableBody(t, tblPr, styleId) } finally { tableStyles.removeAt(tableStyles.size - 1) }
+        }
+
+        private fun tableBody(t: XmlNode, tblPr: XmlNode?, styleId: String?): Block.Table {
             val direct = tblPr?.child("tblBorders")?.children?.map { it.attr("val") }
             val borders = if (direct != null && direct.isNotEmpty()) direct.any { it != null && it != "nil" && it != "none" } else styles.tableHasBorders(styleId)
             val cols = t.child("tblGrid")?.all("gridCol")?.map { it.attr("w")?.toIntOrNull() ?: 0 }.orEmpty()

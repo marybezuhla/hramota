@@ -81,7 +81,12 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 is Block.Para -> {
                     if (block.props.pageBreakBefore == true && !atTop()) newPage()
                     val p = paragraph(block, contentWidth)
-                    val contextual = block.props.contextual == true && prev?.props?.styleId == block.props.styleId
+                    // "Don't add space between paragraphs of the same style" works on both sides of the gap
+                    val nextBlock = blocks.getOrNull(index + 1)?.first as? Block.Para
+                    val sameAsPrev = prev?.props?.styleId == block.props.styleId
+                    val sameAsNext = nextBlock?.props?.styleId == block.props.styleId
+                    val contextual = sameAsPrev && (block.props.contextual == true || prev?.props?.contextual == true)
+                    val dropAfter = sameAsNext && (block.props.contextual == true || nextBlock?.props?.contextual == true)
                     var before = if (contextual) 0f else p.before
                     // Word drops space before at the top of a page after the first
                     if (atTop() && !firstPage) before = 0f
@@ -112,7 +117,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                         line += fit
                         if (line < p.lines) newPage()
                     }
-                    y = min(y + p.after, bottom)
+                    y = min(y + if (dropAfter) 0f else p.after, bottom)
                     prev = block
                 }
                 is Block.Table -> {
@@ -290,11 +295,19 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 col += cell.span
                 val inner = ArrayList<PageItem>()
                 var y = 0f
-                if (!cell.mergedAbove) for (p in flatten(cell.blocks)) {
-                    val laid = paragraph(p, max(U, cw - 2 * margin))
-                    y += laid.before
-                    inner += PageItem.Text(laid.layout, 0, laid.lines - 1, cx + margin + laid.x, y)
-                    y += laid.height + laid.after
+                if (!cell.mergedAbove) {
+                    val paras = flatten(cell.blocks)
+                    for ((k, p) in paras.withIndex()) {
+                        val laid = paragraph(p, max(U, cw - 2 * margin))
+                        val prevP = paras.getOrNull(k - 1)
+                        val nextP = paras.getOrNull(k + 1)
+                        val same = { o: Block.Para? -> o != null && o.props.styleId == p.props.styleId && (o.props.contextual == true || p.props.contextual == true) }
+                        y += if (same(prevP)) 0f else laid.before
+                        inner += PageItem.Text(laid.layout, 0, laid.lines - 1, cx + margin + laid.x, y)
+                        y += laid.height
+                        // Space after the last paragraph of a cell still counts, as in Word
+                        if (!same(nextP)) y += laid.after
+                    }
                 }
                 height = max(height, y)
                 cellBoxes += Triple(cx, cw, cell)
@@ -342,9 +355,10 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 "atLeast" -> max(natural, line?.let { tw(it) } ?: 0f)
                 else -> natural * ((line ?: 240) / 240f)
             }
-            val k = target / natural
-            val a = (asc * k).roundToInt()
+            // Word and LibreOffice keep the text at the top of a taller line and add the space below it;
+            // an exact height smaller than the text cuts from the top instead
             val total = target.roundToInt()
+            val a = if (target >= natural) asc.roundToInt() else (asc - (natural - target)).roundToInt()
             fm.ascent = -a; fm.top = -a
             fm.descent = total - a; fm.bottom = total - a
         }

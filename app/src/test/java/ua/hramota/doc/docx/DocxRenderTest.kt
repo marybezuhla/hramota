@@ -57,9 +57,10 @@ class DocxRenderTest {
         val file = docs().first { it.name.startsWith("05-") }
         val doc = file.inputStream().use { DocxReader.read(it) }
         val pages = DocxPages(doc, fonts)
-        // The appendix after the page break must open the last page
-        val last = pages.pages.last().items.filterIsInstance<PageItem.Text>().first()
-        assertTrue(last.layout.text.toString().startsWith("Додаток 1"))
+        // The break comes after "Додаток 1": the specification text must be on the last page, the heading before it
+        fun texts(page: LaidOutPage) = page.items.filterIsInstance<PageItem.Text>().map { it.layout.text.toString() }
+        assertTrue(texts(pages.pages.last()).any { it.startsWith("Специфікація") })
+        assertTrue(texts(pages.pages[pages.pageCount - 2]).any { it.startsWith("Додаток 1") })
     }
 
     @Test fun numberingLabels() {
