@@ -1,0 +1,75 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 7 0 R /EmbeddedFiles 10 0 R >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> /Annots [11 0 R] >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] /Contents 12 0 R /Resources << /Font << /F1 6 0 R >> >> >>
+endobj
+5 0 obj
+<< /Length 76 >>
+stream
+BT /F1 36 Tf 72 700 Td (Hramota test page) Tj ET 0 0 1 rg 72 600 300 40 re f
+endstream
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+7 0 obj
+<< /Names [(hello) 8 0 R] >>
+endobj
+8 0 obj
+<< /S /JavaScript /JS (app.alert\('this must never run'\);) >>
+endobj
+9 0 obj
+<< /Title (Test) /Author (Test Author) /Creator (make_test_pdf.py) >>
+endobj
+10 0 obj
+<< /Names [(notes.txt) 13 0 R] >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 600 372 640] /Border [0 0 0] /A << /S /URI /URI (https://example.org/) >> >>
+endobj
+12 0 obj
+<< /Length 42 >>
+stream
+BT /F1 24 Tf 72 500 Td (Second page) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Filespec /F (notes.txt) /UF (notes.txt) /EF << /F 14 0 R >> >>
+endobj
+14 0 obj
+<< /Length 5 /Type /EmbeddedFile >>
+stream
+hello
+endstream
+endobj
+xref
+0 15
+0000000000 65535 f 
+0000000015 00000 n 
+0000000117 00000 n 
+0000000180 00000 n 
+0000000323 00000 n 
+0000000450 00000 n 
+0000000576 00000 n 
+0000000646 00000 n 
+0000000690 00000 n 
+0000000768 00000 n 
+0000000853 00000 n 
+0000000903 00000 n 
+0000001037 00000 n 
+0000001130 00000 n 
+0000001219 00000 n 
+trailer
+<< /Size 15 /Root 1 0 R /Info 9 0 R >>
+startxref
+1294
+%%EOF

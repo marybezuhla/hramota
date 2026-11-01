@@ -45,4 +45,49 @@
     <string name="legend_added">додано</string>
     <string name="legend_removed">видалено</string>
     <string name="compare_too_big">Документи відрізняються надто сильно для порівняння за абзацами; змінену частину показано цілком.</string>
+    <string name="password_title">Документ захищено паролем</string>
+    <string name="password_body">Відкриття PDF з паролем з\'явиться згодом.</string>
+    <string name="insp_banner_risky">Увага: %1$s</string>
+    <string name="insp_banner">У документі: %1$s</string>
+    <string name="insp_more">Докладніше</string>
+    <string name="insp_close">Зрозуміло</string>
+    <string name="insp_title">Що містить документ</string>
+    <string name="insp_macros">макроси</string>
+    <string name="insp_macros_detail">Програми всередині документа (VBA). Грамота їх ніколи не запускає. Будьте обережні, відкриваючи цей файл в інших програмах.</string>
+    <string name="insp_js">JavaScript</string>
+    <string name="insp_js_detail">Код у PDF. У Грамоті він не може виконатися: рушій PDF зібраний без JavaScript.</string>
+    <string name="insp_launch">запуск програм</string>
+    <string name="insp_launch_detail">Посилання, що намагаються відкрити іншу програму або файл. Грамота їх не виконує.</string>
+    <string name="insp_embedded_detail">Файли й об\'єкти всередині документа: %1$s. Грамота їх не відкриває сама.</string>
+    <string name="insp_remote">завантаження з інтернету</string>
+    <string name="insp_remote_detail">Документ хоче підвантажити шаблон чи малюнок з мережі; так іноді стежать, хто відкрив файл. У Грамоти немає доступу до інтернету, тож нічого не завантажується.</string>
+    <string name="insp_dde">поля DDE</string>
+    <string name="insp_dde_detail">Застарілий спосіб запускати команди з документа. Показуються лише як текст.</string>
+    <string name="insp_links_detail">Посилання на сайти. Грамота покаже справжню адресу, перш ніж щось відкрити.</string>
+    <string name="insp_changes">історія правок</string>
+    <string name="insp_changes_detail">У файлі збережено виправлення (додане й видалене). Їх побачить кожен, кому ви надішлете документ.</string>
+    <string name="insp_comments_detail">Коментарі в документі. Їх побачать отримувачі файлу.</string>
+    <string name="insp_hidden">прихований текст</string>
+    <string name="insp_hidden_detail">Частина тексту прихована й не видна на сторінці, але є у файлі.</string>
+    <string name="insp_author">автор</string>
+    <string name="insp_author_detail">У властивостях файлу записано: %1$s.</string>
+    <string name="insp_footer">Грамота нічого не запускає з документів і не має доступу до інтернету. Очищення перед надсиланням з\'явиться згодом.</string>
+    <plurals name="insp_embedded">
+        <item quantity="one">%d вбудований файл</item>
+        <item quantity="few">%d вбудовані файли</item>
+        <item quantity="many">%d вбудованих файлів</item>
+        <item quantity="other">%d вбудовані файли</item>
+    </plurals>
+    <plurals name="insp_links">
+        <item quantity="one">%d посилання</item>
+        <item quantity="few">%d посилання</item>
+        <item quantity="many">%d посилань</item>
+        <item quantity="other">%d посилання</item>
+    </plurals>
+    <plurals name="insp_comments">
+        <item quantity="one">%d коментар</item>
+        <item quantity="few">%d коментарі</item>
+        <item quantity="many">%d коментарів</item>
+        <item quantity="other">%d коментарі</item>
+    </plurals>
 </resources>
