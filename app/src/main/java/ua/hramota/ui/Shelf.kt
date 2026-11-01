@@ -138,7 +138,7 @@ private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, onAction: (Lib
         if (c != null) Image(c, contentDescription = e.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
         else Box(Modifier.fillMaxSize().background(coverColor(e.format)).padding(10.dp)) {
             Text(e.title.substringBeforeLast('.', e.title), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 16.sp,
-                maxLines = 6, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start, modifier = Modifier.align(Alignment.TopStart))
+                maxLines = 6, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start, modifier = Modifier.align(Alignment.TopStart).padding(end = 14.dp))
             Text(e.format, color = Color(0xCCFFFFFF), fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomStart))
         }
         if (e.bookmarks.isNotEmpty()) Icon(AppIcons.Bookmark, contentDescription = null, tint = Color(0xFFE5484D), modifier = Modifier.align(Alignment.TopEnd).padding(end = 6.dp).width(18.dp))
@@ -155,7 +155,7 @@ private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, onAction: (Lib
 private fun Progress(e: LibraryEntry) {
     if (e.total <= 1) return
     val page = (e.position + 1).coerceAtMost(e.total)
-    Text(stringResource(R.string.shelf_progress, page, e.total) + if (e.bookmarks.isNotEmpty()) " · " + stringResource(R.string.shelf_bookmarks, e.bookmarks.size) else "",
+    Text(stringResource(R.string.shelf_progress, page, e.total),
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     LinearProgressIndicator(progress = { page.toFloat() / e.total }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(3.dp).clip(RoundedCornerShape(2.dp)))
 }
