@@ -81,7 +81,8 @@ class Sheet(
     fun style(row: SheetRow, k: Int): CellStyle = styles.getOrNull(row.styles[k]) ?: CellStyle.DEFAULT
 
     /** What cell [k] of [row] shows. */
-    fun text(row: SheetRow, k: Int): String = row.texts[k] ?: NumberFormat.format(row.numbers[k], style(row, k).format, date1904)
+    fun text(row: SheetRow, k: Int): String = row.texts[k]
+        ?: try { NumberFormat.format(row.numbers[k], style(row, k).format, date1904) } catch (e: Exception) { "#NUM!" }
 
     /** True when cell [k] holds a number (shown on the right unless the cell says otherwise). */
     fun isNumber(row: SheetRow, k: Int): Boolean = row.texts[k] == null
@@ -101,6 +102,10 @@ object SheetLimits {
 
 /** Excel number formats, enough for what documents use: numbers, percentages, currency, dates and times. */
 object NumberFormat {
+    /** Longest format code used (Excel's own limit). */
+    const val MAX_CODE = 255
+    private val CONDITION = Regex("\\[(?:Red|Black|Blue|Green|White|Yellow|Magenta|Cyan|Color ?\\d+|[<>=][^]]*)]", RegexOption.IGNORE_CASE)
+
     /** Excel's built-in formats by number. */
     fun builtIn(id: Int): String? = when (id) {
         0 -> "General"; 1 -> "0"; 2 -> "0.00"; 3 -> "#,##0"; 4 -> "#,##0.00"
@@ -116,7 +121,7 @@ object NumberFormat {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?) = size > 256
     }
 
-    @Synchronized private fun sections(code: String): List<String> = cache.getOrPut(code) { split(code) }
+    @Synchronized private fun sections(code: String): List<String> = cache.getOrPut(code) { split(code.take(MAX_CODE)) }
 
     /** Sections separated by ";" outside quotes and brackets. */
     private fun split(code: String): List<String> {
@@ -146,10 +151,33 @@ object NumberFormat {
         if (secs.size >= 2 && value < 0) { section = secs[1]; v = -value }
         else if (secs.size >= 3 && value == 0.0) section = secs[2]
         // A condition like [<1000] is not evaluated: the first section is used
-        val clean = section.replace(Regex("\\[(?:Red|Black|Blue|Green|White|Yellow|Magenta|Cyan|Color ?\\d+|[<>=][^]]*)]", RegexOption.IGNORE_CASE), "")
-        if (clean.isBlank() || clean.equals("General", ignoreCase = true) || clean.trim() == "@") return general(v * (if (value < 0 && secs.size >= 2) -1 else 1), locale)
+        val clean = section.replace(CONDITION, "")
+        val signed = v * (if (value < 0 && secs.size >= 2) -1 else 1)
+        if (clean.isBlank() || clean.equals("General", ignoreCase = true) || clean.trim() == "@") return general(signed, locale)
+        // "General" with words around it: the words, and the number as General
+        if (clean.contains("General", ignoreCase = true)) return literal(clean.replace(Regex("General", RegexOption.IGNORE_CASE), "\u0001")).replace("\u0001", general(signed, locale))
         if (isDate(clean)) return date(v, clean, date1904, locale) ?: general(v, locale)
+        // Fractions are shown as ordinary numbers
+        if (clean.contains('/') && clean.contains('?')) return general(signed, locale)
         return number(v, clean, locale, negativeSign = value < 0 && secs.size < 2)
+    }
+
+    /** The literal text of a format piece: quotes removed, escapes and padding resolved. */
+    private fun literal(code: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < code.length) {
+            val c = code[i]
+            when {
+                c == '"' -> { val end = code.indexOf('"', i + 1).let { if (it < 0) code.length else it }; sb.append(code, i + 1, end); i = end + 1; continue }
+                c == '\\' && i + 1 < code.length -> { sb.append(code[i + 1]); i += 2; continue }
+                c == '_' -> { sb.append(' '); i += 2; continue }
+                c == '*' -> { i += 2; continue }
+                else -> sb.append(c)
+            }
+            i++
+        }
+        return sb.toString()
     }
 
     /** "General": integers as they are, other numbers with up to ten significant digits. */
@@ -160,7 +188,8 @@ object NumberFormat {
         if (a >= 1e11 || a < 1e-9) return String.format(Locale.ROOT, "%.5E", v).replace(Regex("0+E"), "E").replace(".E", "E").replace('.', sym.decimalSeparator)
         // Excel shows a General number in at most 11 characters: "0.333333333"
         val digits = (10 - (if (a >= 1) floor(kotlin.math.log10(a)).toInt() + 1 else 1)).coerceIn(0, 10)
-        var s = java.math.BigDecimal(v).setScale(digits, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+        // Rounded the way people see the number (2.675 → 2.68), not the exact binary value
+        var s = java.math.BigDecimal(v).round(java.math.MathContext(15)).setScale(digits, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
         if (s.contains('.')) s = s.replace('.', sym.decimalSeparator)
         return s
     }
@@ -216,11 +245,11 @@ object NumberFormat {
                 c == '[' -> {
                     val end = code.indexOf(']', i).let { if (it < 0) code.length else it }
                     val inner = code.substring(i + 1, end).lowercase()
-                    val totalHours = days * 24 + seconds / 3600
+                    val totalHours = d * 24 + seconds / 3600
                     when {
-                        inner.startsWith("h") -> out.append(totalHours.toString().padStart(inner.length, '0'))
-                        inner.startsWith("m") -> out.append((days * 1440 + seconds / 60).toString().padStart(inner.length, '0'))
-                        inner.startsWith("s") -> out.append((days * 86400 + seconds).toString().padStart(inner.length, '0'))
+                        inner.startsWith("h") -> out.append(totalHours.toString().padStart(inner.length.coerceAtMost(10), '0'))
+                        inner.startsWith("m") -> out.append((d * 1440 + seconds / 60).toString().padStart(inner.length.coerceAtMost(10), '0'))
+                        inner.startsWith("s") -> out.append((d * 86400 + seconds).toString().padStart(inner.length.coerceAtMost(10), '0'))
                         inner.startsWith("$") -> out.append(inner.drop(1).substringBefore('-'))
                     }
                     i = end + 1; continue
@@ -288,25 +317,27 @@ object NumberFormat {
             i++
         }
         var x = v
-        val percents = (prefix.count { it == '%' } + suffix.count { it == '%' })
+        val percents = (prefix.count { it == '%' } + suffix.count { it == '%' }).coerceAtMost(4)
         repeat(percents) { x *= 100 }
+        if (!x.isFinite()) return "#NUM!"
         val p = pattern.toString()
         val body = if (p.contains('E', ignoreCase = true)) scientific(x, p, sym) else plain(x, p, sym)
         val sign = if (negativeSign && body.any { it.isDigit() && it != '0' }) "-" else ""
         return sign + prefix + body + suffix
     }
 
-    private fun plain(x: Double, p: String, sym: DecimalFormatSymbols): String {
+    private fun plain(x: Double, whole: String, sym: DecimalFormatSymbols): String {
+        // Commas at the very end divide by a thousand each (also after decimals: "#,##0.0,,")
+        val trailing = whole.takeLastWhile { it == ',' }.length
+        val p = whole.dropLast(trailing)
         val dot = p.indexOf('.')
         val intPart = if (dot >= 0) p.substring(0, dot) else p
         val fracPart = if (dot >= 0) p.substring(dot + 1).filter { it in "0#?" } else ""
-        // Trailing commas divide by a thousand each
         var scaled = x
-        val trailing = intPart.takeLastWhile { it == ',' }.length
-        repeat(trailing) { scaled /= 1000 }
-        val grouping = intPart.dropLast(trailing).contains(',')
-        val minInt = intPart.count { it == '0' }
-        val bd = java.math.BigDecimal(scaled).setScale(fracPart.length, java.math.RoundingMode.HALF_UP)
+        repeat(trailing.coerceAtMost(4)) { scaled /= 1000 }
+        val grouping = intPart.contains(',')
+        val minInt = intPart.count { it == '0' }.coerceAtMost(40)
+        val bd = java.math.BigDecimal(scaled).round(java.math.MathContext(15)).setScale(fracPart.length.coerceAtMost(30), java.math.RoundingMode.HALF_UP)
         val plainStr = bd.abs().toPlainString()
         var intDigits = plainStr.substringBefore('.')
         var frac = if (fracPart.isNotEmpty()) plainStr.substringAfter('.', "") else ""
@@ -320,12 +351,14 @@ object NumberFormat {
             for ((k, ch) in intDigits.withIndex()) { if (k > 0 && (intDigits.length - k) % 3 == 0) sb.append(sym.groupingSeparator); sb.append(ch) }
             intDigits = sb.toString()
         }
-        return if (frac.isNotEmpty()) intDigits + sym.decimalSeparator + frac else if (dot >= 0 && fracPart.isEmpty() && p.endsWith('.')) intDigits + sym.decimalSeparator else intDigits.ifEmpty { if (fracPart.isEmpty()) "0" else "" }
+        // A pattern with no required digit ("#", "??") shows nothing for zero, as Excel does
+        return if (frac.isNotEmpty()) intDigits + sym.decimalSeparator + frac else if (dot >= 0 && fracPart.isEmpty() && p.endsWith('.')) intDigits + sym.decimalSeparator else intDigits
     }
 
     private fun scientific(x: Double, p: String, sym: DecimalFormatSymbols): String {
         val mant = p.substringBefore('E').substringBefore('e')
-        val decimals = mant.substringAfter('.', "").count { it in "0#?" }
+        val decimals = mant.substringAfter('.', "").count { it in "0#?" }.coerceAtMost(30)
+        if (!x.isFinite()) return "#NUM!"
         val s = String.format(Locale.ROOT, "%.${decimals}E", abs(x))
         val (m, e) = s.split('E')
         val exp = e.toInt()

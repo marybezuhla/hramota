@@ -91,6 +91,16 @@ private class Geometry(val sheet: Sheet) {
     val rows = max(sheet.rowCount, 1)
     val colX = FloatArray(cols + 1).also { a -> for (c in 0 until cols) a[c + 1] = a[c] + sheet.width(c) }
     val rowY = FloatArray(rows + 1).also { a -> for (r in 0 until rows) a[r + 1] = a[r] + sheet.height(r) }
+    /** For each index, the next one that is not hidden (zero size), so hidden ranges cost nothing to skip. */
+    val nextRow = next(rowY)
+    val nextCol = next(colX)
+
+    private fun next(edges: FloatArray): IntArray {
+        val n = edges.size - 1
+        val out = IntArray(n + 1) { n }
+        for (i in n - 1 downTo 0) out[i] = if (edges[i + 1] > edges[i]) i else out[i + 1]
+        return out
+    }
 
     /** The first index whose edge passes [v] (binary search over [edges]). */
     fun indexAt(edges: FloatArray, v: Float): Int {
@@ -111,6 +121,9 @@ fun WorkbookDocument(
 ) {
     val sheet = workbook.sheets[sheetIndex.coerceIn(0, workbook.sheets.size - 1)]
     var selected by remember(sheet) { mutableStateOf<Pair<Int, Int>?>(null) }
+    // Another sheet opens at its top left
+    var shown by remember { mutableStateOf(sheet) }
+    if (shown !== sheet) { shown = sheet; state.x = 0f; state.y = 0f }
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             SheetGrid(sheet, state, hits, current, selected) { selected = it }
@@ -201,7 +214,11 @@ private fun SheetGrid(
         state.y = (g.rowY[r.coerceIn(0, g.rows - 1)] * unit - frozenH - viewport.height / 3).coerceIn(0f, maxY())
         state.target = null
     }
-    val found = remember(hits, current, sheet) { foundCells(sheet, hits, current) }
+    // Cells with matches, worked out off the main thread; the current one is checked when drawing
+    val found by androidx.compose.runtime.produceState(emptyMap<Int, Set<Int>>(), hits, sheet) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { foundCells(sheet, hits) }
+    }
+    val currentCell = remember(current, sheet) { current?.let { cellOf(sheet, it) } }
     val texts = remember(sheet) { object : LinkedHashMap<Long, String>(256, 0.75f, true) { override fun removeEldestEntry(e: MutableMap.MutableEntry<Long, String>?) = size > 4000 } }
     fun cellText(row: SheetRow, k: Int): String = texts.getOrPut((row.index.toLong() shl 16) or row.cols[k].toLong()) { sheet.text(row, k) }
 
@@ -222,7 +239,7 @@ private fun SheetGrid(
                 }
             },
     ) {
-        val ctx = Ctx(this, g, sheet, measurer, unit, density.density, density.fontScale, found, ::cellText)
+        val ctx = Ctx(this, g, sheet, measurer, unit, density.density, density.fontScale, found, currentCell, ::cellText)
         val fr = sheet.frozenRows.coerceAtMost(g.rows); val fc = sheet.frozenCols.coerceAtMost(g.cols)
         val body = Offset(headerW, headerH)
         // Four parts: the frozen corner, frozen rows (scroll sideways), frozen columns (scroll down), the rest
@@ -283,22 +300,19 @@ private fun SheetGrid(
     }
 }
 
-/** Cells with a search match: row number → (column → is it the current match). */
-private fun foundCells(sheet: Sheet, hits: Map<Int, List<SearchHit>>, current: SearchHit?): Map<Int, Map<Int, Boolean>> {
+/** The cell a match is in: (row number, column). */
+private fun cellOf(sheet: Sheet, hit: SearchHit): Pair<Int, Int>? {
+    val row = sheet.rows.getOrNull(hit.page) ?: return null
+    var at = 0
+    for (k in row.cols.indices) { val len = sheet.text(row, k).length; if (hit.start <= at + len) return row.index to row.cols[k]; at += len + 1 }
+    return null
+}
+
+/** Cells with a search match: row number → columns. */
+private fun foundCells(sheet: Sheet, hits: Map<Int, List<SearchHit>>): Map<Int, Set<Int>> {
     if (hits.isEmpty()) return emptyMap()
-    val out = HashMap<Int, HashMap<Int, Boolean>>()
-    for ((ordinal, list) in hits) {
-        val row = sheet.rows.getOrNull(ordinal) ?: continue
-        val starts = IntArray(row.cols.size)
-        var at = 0
-        for (k in row.cols.indices) { starts[k] = at; at += sheet.text(row, k).length + 1 }
-        for (h in list) {
-            var k = starts.indexOfLast { it <= h.start }
-            if (k < 0) k = 0
-            val m = out.getOrPut(row.index) { HashMap() }
-            m[row.cols[k]] = (m[row.cols[k]] ?: false) || h == current
-        }
-    }
+    val out = HashMap<Int, HashSet<Int>>()
+    for (list in hits.values) for (h in list) cellOf(sheet, h)?.let { (r, c) -> out.getOrPut(r) { HashSet() } += c }
     return out
 }
 
@@ -306,7 +320,7 @@ private fun foundCells(sheet: Sheet, hits: Map<Int, List<SearchHit>>, current: S
 private class Ctx(
     val d: DrawScope, val g: Geometry, val sheet: Sheet, val measurer: TextMeasurer,
     val unit: Float, val density: Float, val fontScale: Float,
-    val found: Map<Int, Map<Int, Boolean>>, val text: (SheetRow, Int) -> String,
+    val found: Map<Int, Set<Int>>, val current: Pair<Int, Int>?, val text: (SheetRow, Int) -> String,
 ) {
     private val grid = Color(0xFFE0E0E0)
     private val hit = Color(0x99FFD54F)
@@ -323,45 +337,59 @@ private class Ctx(
             fun y(r: Int) = oy + g.rowY[r] * unit
             val firstCol = max(c0, g.indexAt(g.colX, (left - ox) / unit))
             val firstRow = max(r0, g.indexAt(g.rowY, (top - oy) / unit))
-            var lastCol = firstCol
-            while (lastCol < c1 - 1 && x(lastCol + 1) < right) lastCol++
-            var lastRow = firstRow
-            while (lastRow < r1 - 1 && y(lastRow + 1) < bottom) lastRow++
-            // Grid lines
-            for (c in firstCol..lastCol + 1) { val xx = x(c); drawLine(grid, Offset(xx, top), Offset(xx, bottom)) }
-            for (r in firstRow..lastRow + 1) { val yy = y(r); drawLine(grid, Offset(left, yy), Offset(right, yy)) }
+            // The last row and column in view: found by edge position (binary search), not by walking hidden ones
+            val lastCol = min(c1 - 1, g.indexAt(g.colX, (right - ox) / unit))
+            val lastRow = min(r1 - 1, g.indexAt(g.rowY, (bottom - oy) / unit))
+            // Grid lines, skipping hidden rows and columns
+            var c = firstCol
+            while (c <= lastCol + 1 && c <= g.cols) { val xx = x(c); drawLine(grid, Offset(xx, top), Offset(xx, bottom)); c = if (c >= g.cols) c + 1 else g.nextCol[c + 1].coerceAtMost(g.cols).let { if (it == c) c + 1 else it } }
+            var rr = firstRow
+            while (rr <= lastRow + 1 && rr <= g.rows) { val yy = y(rr); drawLine(grid, Offset(left, yy), Offset(right, yy)); rr = if (rr >= g.rows) rr + 1 else g.nextRow[rr + 1].coerceAtMost(g.rows).let { if (it == rr) rr + 1 else it } }
             // Merged areas in view: blank them (no inner lines) and remember them
             val merges = sheet.merges.filter { it.bottom >= firstRow && it.top <= lastRow && it.right >= firstCol && it.left <= lastCol }
             for (m in merges) {
                 val mx = x(m.left.coerceIn(0, g.cols - 1)); val my = y(m.top.coerceIn(0, g.rows - 1))
                 drawRect(Color.White, Offset(mx + 0.5f, my + 0.5f), Size(x(min(m.right + 1, g.cols)) - mx - 1f, y(min(m.bottom + 1, g.rows)) - my - 1f))
             }
-            fun covered(r: Int, c: Int) = merges.any { r in it.top..it.bottom && c in it.left..it.right && !(r == it.top && c == it.left) }
-            for (r in firstRow..lastRow) {
-                val row = sheet.row(r) ?: continue
-                val rowHits = found[r]
-                // Cells left of the view may still spill text into it: start a few columns earlier
-                var k = row.cols.binarySearch(firstCol).let { if (it >= 0) it else -it - 1 }
-                k = max(0, k - 1)
-                while (k < row.cols.size && row.cols[k] <= lastCol) {
-                    val c = row.cols[k]
-                    if (c >= c0 && !covered(r, c)) cell(row, k, r, c, ::x, ::y, merges, rowHits?.get(c), lastCol)
-                    k++
+            // Cells covered by a merge (not its first cell), only those in view: a lookup per cell, not a search
+            val coveredCells = HashSet<Long>()
+            for (m in merges) for (r in max(m.top, firstRow)..min(m.bottom, lastRow)) for (cc in max(m.left, firstCol - 4)..min(m.right, lastCol)) {
+                if (r != m.top || cc != m.left) coveredCells += (r.toLong() shl 20) or cc.toLong()
+            }
+            val anchors = merges.associateBy { (it.top.toLong() shl 20) or it.left.toLong() }
+            var r = firstRow
+            while (r <= lastRow) {
+                val row = sheet.row(r)
+                if (row != null) {
+                    val rowHits = found[r]
+                    // Cells left of the view may still spill text into it: start a few columns earlier
+                    var k = row.cols.binarySearch(firstCol).let { if (it >= 0) it else -it - 1 }
+                    k = max(0, k - 4)
+                    while (k < row.cols.size && row.cols[k] <= lastCol) {
+                        val cc = row.cols[k]
+                        if (cc >= c0 && ((r.toLong() shl 20) or cc.toLong()) !in coveredCells) cell(row, k, r, cc, ::x, ::y, anchors, hitState(rowHits, r, cc), lastCol)
+                        k++
+                    }
                 }
+                r = g.nextRow[min(r + 1, g.rows)].let { if (it <= r) r + 1 else it }
             }
             // A merged area that starts outside this part (across the frozen line, or above or left of the view) still shows its content here
             for (m in merges) {
-                if (m.top >= firstRow && m.left >= firstCol && m.top >= r0 && m.left >= c0) continue
+                // Anchors in view (or just left of it, which the rows above already drew) are done
+                if (m.top >= firstRow && m.left >= max(c0, firstCol - 4) && m.top >= r0) continue
                 val row = sheet.row(m.top) ?: continue
                 val k = row.find(m.left)
-                if (k >= 0) cell(row, k, m.top, m.left, ::x, ::y, merges, found[m.top]?.get(m.left), lastCol)
+                if (k >= 0) cell(row, k, m.top, m.left, ::x, ::y, anchors, hitState(found[m.top], m.top, m.left), lastCol)
             }
         }
     }
 
-    private fun cell(row: SheetRow, k: Int, r: Int, c: Int, x: (Int) -> Float, y: (Int) -> Float, merges: List<ua.hramota.doc.sheet.Merge>, found: Boolean?, lastCol: Int) = with(d) {
+    /** Null: no match in the cell; false: a match; true: the current match. */
+    private fun hitState(rowHits: Set<Int>?, r: Int, c: Int): Boolean? = if (rowHits != null && c in rowHits) (current?.first == r && current.second == c) else null
+
+    private fun cell(row: SheetRow, k: Int, r: Int, c: Int, x: (Int) -> Float, y: (Int) -> Float, anchors: Map<Long, ua.hramota.doc.sheet.Merge>, found: Boolean?, lastCol: Int) = with(d) {
         val style = sheet.style(row, k)
-        val m = merges.firstOrNull { it.top == r && it.left == c }
+        val m = anchors[(r.toLong() shl 20) or c.toLong()]
         val right = if (m != null) min(m.right + 1, g.cols) else c + 1
         val bottomRow = if (m != null) min(m.bottom + 1, g.rows) else r + 1
         val cx = x(c); val cy = y(r)
