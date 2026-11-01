@@ -126,6 +126,30 @@ fun ViewerScreen(
     readSettings: ua.hramota.data.AppSettings = ua.hramota.data.AppSettings(),
     onReadSettings: ((ua.hramota.data.AppSettings) -> ua.hramota.data.AppSettings) -> Unit = {},
 ) {
+    // A book takes the colours of its paper, the bars too
+    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings) }
+}
+
+@Composable
+private fun ViewerContent(
+    name: String,
+    state: ViewerState,
+    onBack: () -> Unit,
+    startInReading: Boolean = false,
+    bookmarks: Set<Int> = emptySet(),
+    onToggleBookmark: (Int) -> Unit = {},
+    startInOverview: Boolean = false,
+    startSearch: String? = null,
+    showInspector: Boolean = true,
+    /** Where reading stopped last time (page, or position in the text); reported back as it changes. */
+    startPosition: Int = 0,
+    onPosition: (Int, Int) -> Unit = { _, _ -> },
+    /** Extra actions in the ⋮ menu: label and what it does. */
+    menu: List<Pair<String, () -> Unit>> = emptyList(),
+    /** How books look (paper, type, pages), and how to change it. */
+    readSettings: ua.hramota.data.AppSettings = ua.hramota.data.AppSettings(),
+    onReadSettings: ((ua.hramota.data.AppSettings) -> ua.hramota.data.AppSettings) -> Unit = {},
+) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
     val list = rememberLazyListState()
