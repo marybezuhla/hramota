@@ -209,7 +209,7 @@ class ScreensTest {
         ViewerScreen("Таблиці.docx", ViewerState.Paged(docxPages("04-tables.docx"), emptyList()), onBack = {})
     }
 
-    @Test fun viewerUnsupported() = shot("05-viewer-unsupported") { ViewerScreen("Бюджет родини 2026.xlsx", ViewerState.Unsupported(Format.XLSX), onBack = {}) }
+    @Test fun viewerUnsupported() = shot("05-viewer-unsupported") { ViewerScreen("Презентація проєкту.pptx", ViewerState.Unsupported(Format.PPTX), onBack = {}) }
     @Test fun viewerLoading() = shot("05-viewer-loading") { ViewerScreen("Звіт за жовтень.pdf", ViewerState.Loading, onBack = {}) }
 
     @Test fun compare() = shot("06-compare") {
@@ -254,4 +254,10 @@ class ScreensTest {
     @Test fun viewerCsvDark() = shot("10-viewer-csv-dark") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
     @Test fun viewerCsvSearch() = shot("10-viewer-csv-search", settle = 40) { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}, startSearch = "2100") }
     @Test fun viewerTextSearch() = shot("04-viewer-reading-search", settle = 40) { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}, startSearch = "листопада") }
+
+    private fun budget() = ua.hramota.doc.sheet.XlsxReader.read(File(javaClass.classLoader!!.getResource("sheets/01-budget.xlsx")!!.toURI()).inputStream())
+    @Test fun viewerSheet() = shot("11-viewer-sheet") { ViewerScreen("Сімейний бюджет.xlsx", ViewerState.Sheets(budget()), onBack = {}) }
+    @Config(qualifiers = "+night")
+    @Test fun viewerSheetDark() = shot("11-viewer-sheet-dark") { ViewerScreen("Сімейний бюджет.xlsx", ViewerState.Sheets(budget()), onBack = {}) }
+    @Test fun viewerSheetSearch() = shot("11-viewer-sheet-search", settle = 40) { ViewerScreen("Сімейний бюджет.xlsx", ViewerState.Sheets(budget()), onBack = {}, startSearch = "квітень") }
 }
