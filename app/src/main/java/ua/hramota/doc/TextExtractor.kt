@@ -12,7 +12,7 @@ data class Paragraph(val text: String, val heading: Int = 0)
 
 /** The kinds of file Hramota recognises, by name and type. */
 enum class Format(val label: String) {
-    PDF("PDF"), DOCX("DOCX"), ODT("ODT"), TXT("TXT"), MARKDOWN("Markdown"),
+    PDF("PDF"), DOCX("DOCX"), ODT("ODT"), TXT("TXT"), MARKDOWN("MD"),
     DOC("DOC"), XLSX("XLSX"), XLS("XLS"), ODS("ODS"), CSV("CSV"),
     PPTX("PPTX"), PPT("PPT"), ODP("ODP"), RTF("RTF"), UNKNOWN("");
 
