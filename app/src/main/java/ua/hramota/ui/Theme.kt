@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,20 +94,22 @@ fun TopBar(title: String, subtitle: String? = null, onBack: (() -> Unit)?, actio
     }
 }
 
-/** A small coloured label with the file's format, e.g. "PDF". */
+/** A small tinted label with the file's format, e.g. "PDF"; the colour says the kind of file. */
 @Composable
 fun FormatBadge(format: Format, modifier: Modifier = Modifier) {
-    val (bg, fg) = when (format) {
-        Format.PDF -> Color(0xFFB4472E) to Color.White
-        Format.DOCX, Format.DOC, Format.ODT, Format.RTF -> Color(0xFF24467A) to Color.White
-        Format.XLSX, Format.XLS, Format.ODS, Format.CSV -> Color(0xFF2E6B45) to Color.White
-        Format.PPTX, Format.PPT, Format.ODP -> Color(0xFFA0632A) to Color.White
-        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+    val base = when (format) {
+        Format.PDF -> Color(0xFFB4472E)
+        Format.DOCX, Format.DOC, Format.ODT, Format.RTF -> Color(0xFF2F5597)
+        Format.XLSX, Format.XLS, Format.ODS, Format.CSV -> Color(0xFF2E7D4F)
+        Format.PPTX, Format.PPT, Format.ODP -> Color(0xFFB0651F)
+        else -> Color(0xFF6B6B6B)
     }
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val fg = if (dark) lerp(base, Color.White, 0.45f) else base
     Box(
-        modifier.size(width = 44.dp, height = 52.dp).clip(RoundedCornerShape(8.dp)).background(bg),
+        modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(base.copy(alpha = if (dark) 0.24f else 0.12f)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(format.label.ifEmpty { "?" }.take(4), color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(format.label.ifEmpty { "•" }.take(4), color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, letterSpacing = 0.3.sp)
     }
 }

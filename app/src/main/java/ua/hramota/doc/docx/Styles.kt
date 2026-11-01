@@ -154,6 +154,16 @@ class Styles(
         return p to r
     }
 
+    /** Paragraph and run properties a table style gives to the text in its cells. */
+    fun table(id: String?): Pair<ParaProps, RunProps> {
+        var p = ParaProps()
+        var r = RunProps()
+        for (s in chain(id ?: defaultTableStyle)) { p = p.with(s.para); r = r.with(s.run) }
+        return p to r
+    }
+
+    val defaultParagraphStyle: String? get() = defaultParaStyle
+
     fun character(id: String?): RunProps {
         var r = RunProps()
         for (s in chain(id)) r = r.with(s.run)

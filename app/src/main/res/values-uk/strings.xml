@@ -10,6 +10,8 @@
     <string name="recent_empty">Тут з\'являться файли, які ви відкриєте. Грамота бачить лише файли, які ви обрали.</string>
     <string name="recent_clear">Очистити</string>
     <string name="recent_remove">Прибрати з нещодавніх</string>
+    <string name="today_at">Сьогодні, %1$s</string>
+    <string name="yesterday_at">Учора, %1$s</string>
     <string name="privacy_note">Без доступу до інтернету: ніщо не залишає телефон.</string>
     <string name="loading">Відкриваю…</string>
     <string name="back">Назад</string>
@@ -33,6 +35,7 @@
         <item quantity="many">%d змін</item>
         <item quantity="other">%d зміни</item>
     </plurals>
+    <string name="legend_edited">змінено</string>
     <string name="legend_added">додано</string>
     <string name="legend_removed">видалено</string>
     <string name="compare_too_big">Документи відрізняються надто сильно для порівняння за абзацами; змінену частину показано цілком.</string>

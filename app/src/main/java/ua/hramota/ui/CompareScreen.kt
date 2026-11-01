@@ -1,7 +1,6 @@
 package ua.hramota.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,7 +64,7 @@ sealed interface CompareState {
 fun CompareScreen(olderName: String, newerName: String, state: CompareState, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         TopBar(title = stringResource(R.string.compare_title), onBack = onBack)
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             NameLine(stringResource(R.string.compare_older), olderName)
             NameLine(stringResource(R.string.compare_newer), newerName)
         }
@@ -81,9 +80,9 @@ fun CompareScreen(olderName: String, newerName: String, state: CompareState, onB
 
 @Composable
 private fun NameLine(label: String, name: String) {
-    Row(Modifier.padding(vertical = 2.dp)) {
-        Text("$label: ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(72.dp))
+        Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 
@@ -102,9 +101,14 @@ private fun Result(c: Comparison, modifier: Modifier) {
 
     Column(modifier) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Legend(stringResource(R.string.legend_added), colors.addedBg, colors.addedText, strike = false)
-            Spacer(Modifier.width(12.dp))
-            Legend(stringResource(R.string.legend_removed), colors.removedBg, colors.removedText, strike = true)
+            val edited = c.blocks.count { it is Block.Changed }
+            val added = c.blocks.count { it is Block.Added }
+            val removed = c.blocks.count { it is Block.Removed }
+            Legend("${stringResource(R.string.legend_edited)} $edited", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, strike = false)
+            Spacer(Modifier.width(8.dp))
+            Legend("${stringResource(R.string.legend_added)} $added", colors.addedBg, colors.addedText, strike = false)
+            Spacer(Modifier.width(8.dp))
+            Legend("${stringResource(R.string.legend_removed)} $removed", colors.removedBg, colors.removedText, strike = true)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SelectionContainer(Modifier.weight(1f)) {
@@ -192,7 +196,7 @@ private fun BlockText(block: Block, focused: Boolean) {
             if (text.isEmpty()) AnnotatedString(" ") else text,
             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp),
             modifier = Modifier.weight(1f).then(
-                if (focused) Modifier.border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(6.dp)).padding(4.dp)
+                if (focused) Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)).padding(horizontal = 6.dp, vertical = 2.dp)
                 else Modifier
             ),
         )
