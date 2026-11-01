@@ -17,6 +17,8 @@
     <string name="unsupported_title">Цей формат поки не підтримується</string>
     <string name="unsupported_body">Файли %1$s з\'являться згодом. Поки Грамота відкриває PDF, DOCX, ODT, TXT і Markdown.</string>
     <string name="simplified_note">Спрощений перегляд: лише текст. Точний вигляд сторінок — у роботі.</string>
+    <string name="mode_reading">Читання</string>
+    <string name="mode_pages">Сторінки</string>
     <string name="page_of">Сторінка %1$d з %2$d</string>
     <string name="compare_title">Порівняння версій</string>
     <string name="compare_older">Попередня</string>

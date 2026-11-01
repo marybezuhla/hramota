@@ -16,6 +16,8 @@ import kotlinx.coroutines.withContext
 import ua.hramota.data.Recents
 import ua.hramota.doc.Format
 import ua.hramota.doc.PdfSource
+import ua.hramota.doc.docx.DocxPages
+import ua.hramota.doc.docx.DocxReader
 import ua.hramota.ui.HramotaTheme
 import ua.hramota.ui.ViewerScreen
 import ua.hramota.ui.ViewerState
@@ -42,7 +44,11 @@ class ViewerActivity : ComponentActivity() {
                                 when {
                                     format == Format.PDF -> {
                                         val fd = contentResolver.openFileDescriptor(uri, "r") ?: return@withContext ViewerState.Failed
-                                        ViewerState.Pdf(PdfSource.open(fd))
+                                        ViewerState.Paged(PdfSource.open(fd))
+                                    }
+                                    format == Format.DOCX -> {
+                                        val doc = contentResolver.openInputStream(uri)?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        ViewerState.Paged(DocxPages(doc, appFonts(applicationContext)), doc.readingText())
                                     }
                                     format.hasText -> ViewerState.Text(readText(this@ViewerActivity, uri, format), format)
                                     else -> ViewerState.Unsupported(format)
@@ -54,7 +60,7 @@ class ViewerActivity : ComponentActivity() {
                     }
                     // The PDF engine holds the open file: release it when the window goes
                     DisposableEffect(state) {
-                        onDispose { ((state as? ViewerState.Pdf)?.pages as? PdfSource)?.close() }
+                        onDispose { ((state as? ViewerState.Paged)?.pages as? PdfSource)?.close() }
                     }
                     ViewerScreen(name, state, onBack = { finishAndRemoveTask() })
                 }

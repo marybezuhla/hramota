@@ -59,6 +59,24 @@ jobs:
         shell: bash
         run: bash .github/check-permissions.sh app/build/outputs/apk/release/app-release-unsigned.apk
 
+      # Accuracy report: LibreOffice renders the same test documents (with the same free fonts);
+      # the difference per page goes to the log. A report for now, not a gate.
+      - name: Compare rendering with LibreOffice
+        if: success() || failure()
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -e
+          test -d app/build/render || { echo "no renders"; exit 0; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui fonts-crosextra-carlito \
+            fonts-crosextra-caladea fonts-liberation poppler-utils python3-pil > /dev/null
+          mkdir -p ref
+          soffice --headless --convert-to pdf --outdir ref app/src/test/resources/docs/*.docx > /dev/null
+          for f in ref/*.pdf; do pdftoppm -r 150 -png "$f" "ref/$(basename "$f" .pdf)"; done
+          python3 scripts/compare_render.py app/build/render ref render-report
+
       - name: Prepare build log
         if: always()
         shell: bash
@@ -69,6 +87,9 @@ jobs:
           cp gradle/verification-metadata.xml log/ 2>/dev/null || true
           # Pictures of the screens drawn with made-up documents, for review
           cp -r app/build/screens log/screens 2>/dev/null || true
+          # Page renders of the test documents and the comparison with LibreOffice
+          cp -r render-report log/render 2>/dev/null || cp -r app/build/render log/render 2>/dev/null || true
+          cp app/build/render/*.txt log/render/ 2>/dev/null || true
           # The first errors as annotations, so they show on the pull request without opening the log.
           { grep -E "^e: |What went wrong|FAILED|AssertionError|expected:|PROBLEM:" -A2 build.log 2>/dev/null | grep -v "^--$" | head -15 \
             | sed -E 's/%/%25/g' | while IFS= read -r l; do echo "::warning title=build::$l"; done; } || true
