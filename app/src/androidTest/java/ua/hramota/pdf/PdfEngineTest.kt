@@ -57,6 +57,17 @@ class PdfEngineTest {
             assertTrue(i.risky)
 
             assertTrue(pages.text(0)!!.contains("Hramota test page"))
+
+            // Search and selection: text, boxes on the page, and the character under a finger
+            val text = pages.pageText(0)
+            val at = text.indexOf("test")
+            val boxes = pages.boxes(0, at, at + 4)
+            assertEquals(1, boxes.size)
+            val b = boxes[0]
+            assertTrue("$b", b.top in 0.05f..0.15f && b.left in 0.3f..0.4f)
+            val c = pages.charAt(0, (b.left + b.right) / 2, (b.top + b.bottom) / 2)
+            assertTrue("charAt $c", c in at until at + 4)
+            assertEquals(-1, pages.charAt(0, 0.98f, 0.98f))
         } finally {
             pages.close()
         }

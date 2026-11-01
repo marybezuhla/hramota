@@ -20,6 +20,34 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.activity.compose.BackHandler
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import ua.hramota.doc.Search
+import ua.hramota.doc.SearchHit
+import ua.hramota.doc.TextPages
+import ua.hramota.doc.TextSelection
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,15 +102,58 @@ fun ViewerScreen(
     bookmarks: Set<Int> = emptySet(),
     onToggleBookmark: (Int) -> Unit = {},
     startInOverview: Boolean = false,
+    startSearch: String? = null,
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val current by remember { derivedStateOf { list.firstVisibleItemIndex } }
-    BackHandler(enabled = overview) { overview = false }
+    val textPages = (state as? ViewerState.Paged)?.pages as? TextPages
+
+    // Search: pages are scanned in order and results appear as they are found
+    var searching by rememberSaveable { mutableStateOf(startSearch != null) }
+    var query by rememberSaveable { mutableStateOf(startSearch ?: "") }
+    var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
+    var hitIndex by remember { mutableIntStateOf(0) }
+    var scanning by remember { mutableStateOf(false) }
+    LaunchedEffect(textPages, query, searching) {
+        hits = emptyList(); hitIndex = 0; scanning = false
+        if (!searching || textPages == null || query.isBlank()) return@LaunchedEffect
+        delay(300)
+        scanning = true
+        val found = ArrayList<SearchHit>()
+        for (p in 0 until textPages.pageCount) {
+            val pageText = textPages.pageText(p)
+            withContext(Dispatchers.Default) { Search.find(pageText, query) }.forEach { found += SearchHit(p, it.first, it.last + 1) }
+            if (p % 8 == 7 || p == textPages.pageCount - 1 || found.size >= MAX_HITS) hits = found.toList()
+            if (found.size >= MAX_HITS) break
+        }
+        scanning = false
+    }
+    val hitsByPage = remember(hits) { hits.groupBy { it.page } }
+    val currentHit = hits.getOrNull(hitIndex)
+    LaunchedEffect(currentHit) { currentHit?.let { list.animateScrollToItem(it.page) } }
+
+    var selection by remember { mutableStateOf<TextSelection?>(null) }
+    BackHandler(enabled = overview || searching || selection != null) {
+        when { selection != null -> selection = null; searching -> searching = false; else -> overview = false }
+    }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
+        if (searching) SearchBar(
+            query = query,
+            onQuery = { query = it },
+            position = if (hits.isEmpty()) 0 else hitIndex + 1,
+            total = hits.size,
+            scanning = scanning,
+            onPrev = { if (hits.isNotEmpty()) hitIndex = (hitIndex - 1 + hits.size) % hits.size },
+            onNext = { if (hits.isNotEmpty()) hitIndex = (hitIndex + 1) % hits.size },
+            onClose = { searching = false },
+        ) else TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
+            if (textPages != null && !reading && !overview) IconButton(onClick = { searching = true; selection = null }) {
+                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_open))
+            }
             if (state is ViewerState.Paged && !reading) {
                 if (!overview) IconButton(onClick = { onToggleBookmark(current) }) {
                     val marked = current in bookmarks
@@ -123,9 +194,94 @@ fun ViewerScreen(
                         overview = false
                         scope.launch { list.scrollToItem(page) }
                     }
-                    else -> ZoomablePages(state.pages, list, bookmarks)
+                    else -> ZoomablePages(
+                        state.pages, list, bookmarks,
+                        hits = if (searching) hitsByPage else emptyMap(),
+                        currentHit = if (searching) currentHit else null,
+                        selection = selection,
+                        onSelection = { selection = it },
+                    )
                 }
             }
+        }
+        val sel = selection
+        if (sel != null && textPages != null) SelectionBar(
+            onCopy = {
+                scope.launch {
+                    copyText(context, selectedText(textPages, sel))
+                    selection = null
+                }
+            },
+            onShare = {
+                scope.launch {
+                    val t = selectedText(textPages, sel)
+                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t), null))
+                }
+            },
+            onClose = { selection = null },
+        )
+    }
+}
+
+/** Most matches collected for one search. */
+private const val MAX_HITS = 5000
+
+private suspend fun selectedText(pages: TextPages, sel: TextSelection): String {
+    val t = pages.pageText(sel.page)
+    return t.substring(sel.start.coerceIn(0, t.length), sel.end.coerceIn(0, t.length)).replace('\uFFFC', ' ').trim()
+}
+
+private fun copyText(context: Context, text: String) {
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.app_name), text))
+}
+
+/** The search line in place of the title: field, "3 of 12", previous / next, close. */
+@Composable
+private fun SearchBar(
+    query: String, onQuery: (String) -> Unit, position: Int, total: Int, scanning: Boolean,
+    onPrev: () -> Unit, onNext: () -> Unit, onClose: () -> Unit,
+) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: IllegalStateException) {} }
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.search_close)) }
+        Box(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+            if (query.isEmpty()) Text(stringResource(R.string.search_hint), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+            BasicTextField(
+                value = query,
+                onValueChange = { onQuery(it.take(Search.MAX_QUERY)) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onNext() }),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+        }
+        if (query.isNotBlank()) Text(
+            when {
+                total > 0 -> stringResource(R.string.search_position, position, total) + if (scanning) "…" else ""
+                scanning -> "…"
+                else -> stringResource(R.string.search_none)
+            },
+            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+        IconButton(onClick = onPrev, enabled = total > 0) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = stringResource(R.string.search_prev)) }
+        IconButton(onClick = onNext, enabled = total > 0) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.search_next)) }
+    }
+}
+
+/** Actions for selected text, at the bottom within reach of the thumb. */
+@Composable
+private fun SelectionBar(onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onCopy) { Text(stringResource(R.string.copy)) }
+            TextButton(onClick = onShare) { Text(stringResource(R.string.share)) }
+            Box(Modifier.weight(1f))
+            IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_selection)) }
         }
     }
 }
