@@ -158,7 +158,8 @@ object NumberFormat {
         if (v == floor(v) && abs(v) < 1e11) return v.toLong().toString().replace('-', '-')
         val a = abs(v)
         if (a >= 1e11 || a < 1e-9) return String.format(Locale.ROOT, "%.5E", v).replace(Regex("0+E"), "E").replace(".E", "E").replace('.', sym.decimalSeparator)
-        val digits = (10 - (if (a >= 1) floor(kotlin.math.log10(a)).toInt() + 1 else 0)).coerceIn(0, 10)
+        // Excel shows a General number in at most 11 characters: "0.333333333"
+        val digits = (10 - (if (a >= 1) floor(kotlin.math.log10(a)).toInt() + 1 else 1)).coerceIn(0, 10)
         var s = java.math.BigDecimal(v).setScale(digits, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
         if (s.contains('.')) s = s.replace('.', sym.decimalSeparator)
         return s

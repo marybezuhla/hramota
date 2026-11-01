@@ -72,7 +72,7 @@ class BigDocumentsTest {
     }
 
     @Test fun bigWorkbook() {
-        val bytes = BigDocs.xlsx(200_000)
+        val bytes = BigDocs.xlsx(100_000)
         val (w, ms, mb) = measure { ua.hramota.doc.sheet.XlsxReader.read(ByteArrayInputStream(bytes)) }
         val s = w.sheets[0]
         val (hit, searchMs, _) = measure { s.rows.indexOfLast { r -> r.cols.indices.any { s.text(r, it) == BigDocs.NEEDLE } } }

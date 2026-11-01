@@ -11,7 +11,15 @@ import java.util.zip.ZipInputStream
 
 /** Collects one sheet's cells in any order and builds it with rows sorted. */
 class SheetBuilder(private val name: String, private val budget: IntArray) {
-    private class RowCells { val cols = ArrayList<Int>(); val styles = ArrayList<Int>(); val numbers = ArrayList<Double>(); val texts = ArrayList<String?>() }
+    /** One row's cells as they come, in plain arrays (no boxed numbers: a sheet may hold millions). */
+    private class RowCells {
+        var size = 0
+        var cols = IntArray(4); var styles = IntArray(4); var numbers = DoubleArray(4); var texts = arrayOfNulls<String>(4)
+        fun add(c: Int, s: Int, n: Double, t: String?) {
+            if (size == cols.size) { val m = size * 2; cols = cols.copyOf(m); styles = styles.copyOf(m); numbers = numbers.copyOf(m); texts = texts.copyOf(m) }
+            cols[size] = c; styles[size] = s; numbers[size] = n; texts[size] = t; size++
+        }
+    }
     private val rows = HashMap<Int, RowCells>()
     val widths = HashMap<Int, Float>()
     val heights = HashMap<Int, Float>()
@@ -33,12 +41,14 @@ class SheetBuilder(private val name: String, private val budget: IntArray) {
         if (row !in 0 until SheetLimits.MAX_ROWS || col !in 0 until SheetLimits.MAX_COLS || budget[0] <= 0) return
         budget[0]--
         val r = rows.getOrPut(row) { RowCells() }
-        r.cols += col; r.styles += style; r.numbers += number; r.texts += text
+        r.add(col, style, number, text)
     }
 
     fun build(styles: List<CellStyle>, date1904: Boolean): Sheet {
         val out = rows.entries.sortedBy { it.key }.map { (index, r) ->
-            val order = r.cols.indices.sortedBy { r.cols[it] }.distinctBy { r.cols[it] }
+            // Cells usually come in order; sorting is needed only when they do not
+            val inOrder = (1 until r.size).all { r.cols[it] > r.cols[it - 1] }
+            val order = if (inOrder) (0 until r.size).toList() else (0 until r.size).sortedBy { r.cols[it] }.distinctBy { r.cols[it] }
             SheetRow(
                 index,
                 IntArray(order.size) { r.cols[order[it]] },
