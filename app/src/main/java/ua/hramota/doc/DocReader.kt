@@ -127,12 +127,12 @@ object DocReader {
     }
 
     internal fun u16(b: ByteArray, at: Int): Int {
-        if (at < 0 || at + 2 > b.size) throw IOException("Read past end")
+        if (at < 0 || at > b.size - 2) throw IOException("Read past end")
         return (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8)
     }
 
     internal fun i32(b: ByteArray, at: Int): Int {
-        if (at < 0 || at + 4 > b.size) throw IOException("Read past end")
+        if (at < 0 || at > b.size - 4) throw IOException("Read past end")
         return (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8) or
             ((b[at + 2].toInt() and 0xFF) shl 16) or ((b[at + 3].toInt() and 0xFF) shl 24)
     }
