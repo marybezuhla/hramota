@@ -9,3 +9,16 @@ interface Pages {
     fun aspect(index: Int): Float
     suspend fun render(index: Int, widthPx: Int): ImageBitmap?
 }
+
+/** A box on a page, in fractions of the page's width and height (0..1). */
+data class PageBox(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+/** Pages whose text can be searched, selected and copied. */
+interface TextPages : Pages {
+    /** The text of page [index]; a position in it is a character index for [boxes] and [charAt]. */
+    suspend fun pageText(index: Int): String
+    /** Boxes covering characters [start, end) of page [index]. */
+    suspend fun boxes(index: Int, start: Int, end: Int): List<PageBox>
+    /** The character at or near a point given in page fractions, or -1. */
+    suspend fun charAt(index: Int, x: Float, y: Float): Int
+}

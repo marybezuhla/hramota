@@ -103,6 +103,16 @@ class PdfEngineService : Service() {
                         reply?.writeNoException()
                         reply?.writeString(if (handle > 0) PdfiumNative.text(handle, index, MAX_TEXT) else null)
                     }
+                    RECTS -> {
+                        val index = data.readInt(); val start = data.readInt(); val count = data.readInt()
+                        reply?.writeNoException()
+                        reply?.writeFloatArray(if (handle > 0) PdfiumNative.rects(handle, index, start, count.coerceIn(0, MAX_TEXT), GRID, GRID) else null)
+                    }
+                    CHAR_AT -> {
+                        val index = data.readInt(); val x = data.readInt(); val y = data.readInt()
+                        reply?.writeNoException()
+                        reply?.writeInt(if (handle > 0) PdfiumNative.charAt(handle, index, x, y, GRID, GRID) else -1)
+                    }
                     CLOSE -> {
                         if (handle > 0) PdfiumNative.close(handle)
                         handle = 0
@@ -123,6 +133,10 @@ class PdfEngineService : Service() {
         const val INSPECT = IBinder.FIRST_CALL_TRANSACTION + 3
         const val TEXT = IBinder.FIRST_CALL_TRANSACTION + 4
         const val CLOSE = IBinder.FIRST_CALL_TRANSACTION + 5
+        const val RECTS = IBinder.FIRST_CALL_TRANSACTION + 6
+        const val CHAR_AT = IBinder.FIRST_CALL_TRANSACTION + 7
+        /** Positions on a page are exchanged on a GRID x GRID raster of the whole page (fractions × GRID). */
+        const val GRID = 100_000
         /** Pages scanned for links by the inspector. */
         const val INSPECT_PAGES = 300
         const val MAX_TEXT = 200_000

@@ -60,7 +60,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.debounce
 import ua.hramota.R
+import ua.hramota.doc.PageBox
 import ua.hramota.doc.Pages
+import ua.hramota.doc.Search
+import ua.hramota.doc.SearchHit
+import ua.hramota.doc.TextPages
+import ua.hramota.doc.TextSelection
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -72,7 +81,16 @@ private const val MAX_ZOOM = 5f
  */
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
-fun ZoomablePages(pages: Pages, list: LazyListState, bookmarks: Set<Int>) {
+fun ZoomablePages(
+    pages: Pages,
+    list: LazyListState,
+    bookmarks: Set<Int>,
+    hits: Map<Int, List<SearchHit>> = emptyMap(),
+    currentHit: SearchHit? = null,
+    selection: TextSelection? = null,
+    onSelection: (TextSelection?) -> Unit = {},
+) {
+    val text = pages as? TextPages
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     // The sharpness pages are drawn at follows the zoom once the fingers stop
@@ -136,8 +154,12 @@ fun ZoomablePages(pages: Pages, list: LazyListState, bookmarks: Set<Int>) {
                 val renderW = (widthPx * quality).roundToInt()
                 var image by remember(index) { mutableStateOf<ImageBitmap?>(null) }
                 LaunchedEffect(index, renderW) { pages.render(index, renderW)?.let { image = it } }
-                Box(Modifier.fillMaxWidth().aspectRatio(pageRatio(pages.aspect(index))).background(Color.White)) {
+                Box(
+                    Modifier.fillMaxWidth().aspectRatio(pageRatio(pages.aspect(index))).background(Color.White)
+                        .then(if (text != null) Modifier.selectText(text, index, selection, onSelection) else Modifier),
+                ) {
                     image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+                    if (text != null) TextMarks(text, index, hits[index].orEmpty(), currentHit, selection)
                     if (index in bookmarks) Icon(
                         AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.align(Alignment.TopEnd).padding(end = 10.dp).size(28.dp),
@@ -237,6 +259,64 @@ fun PageOverview(pages: Pages, bookmarks: Set<Int>, current: Int, onOpen: (Int) 
         }
     }
 }
+
+/** Search matches and the selection drawn over a page; boxes are fetched when the page is shown. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.TextMarks(
+    text: TextPages, index: Int, hits: List<SearchHit>, current: SearchHit?, selection: TextSelection?,
+) {
+    var hitBoxes by remember(index) { mutableStateOf<List<Pair<SearchHit, List<PageBox>>>>(emptyList()) }
+    LaunchedEffect(index, hits) { hitBoxes = hits.take(500).map { it to text.boxes(index, it.start, it.end) } }
+    var selBoxes by remember(index) { mutableStateOf<List<PageBox>>(emptyList()) }
+    LaunchedEffect(index, selection) {
+        selBoxes = if (selection != null && selection.page == index) text.boxes(index, selection.start, selection.end) else emptyList()
+    }
+    if (hitBoxes.isEmpty() && selBoxes.isEmpty()) return
+    val hitColor = Color(0x66FFD54F)
+    val currentColor = Color(0x99FF9800)
+    val selColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+    Canvas(Modifier.matchParentSize()) {
+        fun box(b: PageBox, c: Color) = drawRect(c, Offset(b.left * size.width, b.top * size.height),
+            androidx.compose.ui.geometry.Size((b.right - b.left) * size.width, (b.bottom - b.top) * size.height))
+        for ((hit, boxes) in hitBoxes) boxes.forEach { box(it, if (hit == current) currentColor else hitColor) }
+        selBoxes.forEach { box(it, selColor) }
+    }
+}
+
+/**
+ * Long press on a word selects it; keep the finger down and drag to select more. Character
+ * look-ups go to the engine one at a time, so a fast drag never piles up work.
+ */
+private fun Modifier.selectText(text: TextPages, index: Int, selection: TextSelection?, onSelection: (TextSelection?) -> Unit): Modifier =
+    pointerInput(text, index) {
+        coroutineScope {
+            var busy = false
+            var anchor = -1
+            fun look(p: Offset, then: (Int) -> Unit) {
+                if (busy) return
+                busy = true
+                launch {
+                    val c = text.charAt(index, p.x / size.width, p.y / size.height)
+                    busy = false
+                    if (c >= 0) then(c)
+                }
+            }
+            detectDragGesturesAfterLongPress(
+                onDragStart = { p ->
+                    look(p) { c ->
+                        launch {
+                            val w = Search.wordAt(text.pageText(index), c)
+                            if (!w.isEmpty()) { anchor = w.first; onSelection(TextSelection(index, w.first, w.last)) }
+                        }
+                    }
+                },
+                onDrag = { change, _ ->
+                    change.consume()
+                    look(change.position) { c -> if (anchor >= 0) onSelection(TextSelection(index, anchor, c)) }
+                },
+            )
+        }
+    }
 
 /** Width / height for a page, never zero, negative or infinite, whatever the file says. */
 fun pageRatio(aspect: Float): Float = (1f / aspect).takeIf { it.isFinite() && it > 0f }?.coerceIn(0.25f, 4f) ?: (1f / 1.414f)

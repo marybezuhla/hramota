@@ -194,7 +194,8 @@ JNIEXPORT jobjectArray JNICALL Java_ua_hramota_pdf_PdfiumNative_inspect(JNIEnv* 
     return out;
 }
 
-// The text of page [index], for search and selection (at most maxChars characters).
+// The text of page [index], one UTF-16 unit per PDFium character, so a position in the string is a
+// character index on the page (characters outside the BMP become U+FFFD). At most maxChars.
 JNIEXPORT jstring JNICALL Java_ua_hramota_pdf_PdfiumNative_text(JNIEnv* env, jclass cls, jlong handle, jint index, jint maxChars) {
     (void)cls;
     FPDF_DOCUMENT doc = ((Doc*)(intptr_t)handle)->doc;
@@ -204,19 +205,81 @@ JNIEXPORT jstring JNICALL Java_ua_hramota_pdf_PdfiumNative_text(JNIEnv* env, jcl
     jstring s = NULL;
     if (text) {
         int count = FPDFText_CountChars(text);
+        if (count < 0) count = 0;
         if (count > maxChars) count = maxChars;
-        if (count > 0) {
-            unsigned short* buf = malloc(((size_t)count + 1) * 2);
-            if (buf) {
-                int written = FPDFText_GetText(text, 0, count, buf);
-                s = (*env)->NewString(env, (const jchar*)buf, written > 0 ? written - 1 : 0);
-                free(buf);
+        unsigned short* buf = malloc(((size_t)count + 1) * 2);
+        if (buf) {
+            for (int i = 0; i < count; i++) {
+                unsigned int u = FPDFText_GetUnicode(text, i);
+                buf[i] = (u == 0 || u > 0xFFFF) ? 0xFFFD : (unsigned short)u;
             }
-        } else {
-            s = (*env)->NewStringUTF(env, "");
+            s = (*env)->NewString(env, (const jchar*)buf, count);
+            free(buf);
         }
         FPDFText_ClosePage(text);
     }
     FPDF_ClosePage(page);
     return s;
+}
+
+// Boxes covering characters [start, start + count) of page [index], in the coordinates of a
+// devW x devH drawing of the page (as rendered): [left, top, right, bottom, ...], at most 4096 boxes.
+JNIEXPORT jfloatArray JNICALL Java_ua_hramota_pdf_PdfiumNative_rects(JNIEnv* env, jclass cls, jlong handle, jint index,
+                                                                     jint start, jint count, jint devW, jint devH) {
+    (void)cls;
+    if (start < 0 || count <= 0 || devW <= 0 || devH <= 0) return (*env)->NewFloatArray(env, 0);
+    FPDF_DOCUMENT doc = ((Doc*)(intptr_t)handle)->doc;
+    FPDF_PAGE page = FPDF_LoadPage(doc, index);
+    if (!page) return NULL;
+    FPDF_TEXTPAGE text = FPDFText_LoadPage(page);
+    jfloatArray out = NULL;
+    if (text) {
+        int n = FPDFText_CountRects(text, start, count);
+        if (n < 0) n = 0;
+        if (n > 4096) n = 4096;
+        float* v = malloc(((size_t)n * 4 + 1) * sizeof(float));
+        if (v) {
+            int k = 0;
+            for (int i = 0; i < n; i++) {
+                double l, t, r, b;
+                if (!FPDFText_GetRect(text, i, &l, &t, &r, &b)) continue;
+                int x1, y1, x2, y2;
+                FPDF_PageToDevice(page, 0, 0, devW, devH, 0, l, t, &x1, &y1);
+                FPDF_PageToDevice(page, 0, 0, devW, devH, 0, r, b, &x2, &y2);
+                v[k++] = (float)(x1 < x2 ? x1 : x2);
+                v[k++] = (float)(y1 < y2 ? y1 : y2);
+                v[k++] = (float)(x1 < x2 ? x2 : x1);
+                v[k++] = (float)(y1 < y2 ? y2 : y1);
+            }
+            out = (*env)->NewFloatArray(env, k);
+            if (out && k > 0) (*env)->SetFloatArrayRegion(env, out, 0, k, v);
+            free(v);
+        }
+        FPDFText_ClosePage(text);
+    }
+    FPDF_ClosePage(page);
+    return out;
+}
+
+// Index of the character at or near (x, y) of a devW x devH drawing of page [index]; -1 if none.
+JNIEXPORT jint JNICALL Java_ua_hramota_pdf_PdfiumNative_charAt(JNIEnv* env, jclass cls, jlong handle, jint index,
+                                                               jint x, jint y, jint devW, jint devH) {
+    (void)env; (void)cls;
+    if (devW <= 0 || devH <= 0) return -1;
+    FPDF_DOCUMENT doc = ((Doc*)(intptr_t)handle)->doc;
+    FPDF_PAGE page = FPDF_LoadPage(doc, index);
+    if (!page) return -1;
+    FPDF_TEXTPAGE text = FPDFText_LoadPage(page);
+    int result = -1;
+    if (text) {
+        double px, py;
+        if (FPDF_DeviceToPage(page, 0, 0, devW, devH, 0, x, y, &px, &py)) {
+            // About a finger's width on the page
+            result = FPDFText_GetCharIndexAtPos(text, px, py, 12.0, 12.0);
+            if (result < 0) result = -1;
+        }
+        FPDFText_ClosePage(text);
+    }
+    FPDF_ClosePage(page);
+    return result;
 }

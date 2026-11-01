@@ -18,7 +18,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import ua.hramota.doc.Inspection
-import ua.hramota.doc.Pages
+import ua.hramota.doc.PageBox
+import ua.hramota.doc.TextPages
 import java.io.Closeable
 import java.io.IOException
 import java.util.UUID
@@ -41,7 +42,7 @@ class PdfiumPages private constructor(
     private val binder: IBinder,
     private val sizes: FloatArray,
     val inspection: Inspection,
-) : Pages, Closeable {
+) : TextPages, Closeable {
     private val lock = Mutex()
     private val cache = LinkedHashMap<Long, ImageBitmap>(16, 0.75f, true)
     private var cacheBytes = 0L
@@ -97,6 +98,38 @@ class PdfiumPages private constructor(
     /** Text of a page, for search (null if the engine is gone). */
     suspend fun text(index: Int): String? = withContext(Dispatchers.IO) {
         lock.withLock { if (closed) null else call(PdfEngineService.TEXT, { it.writeInt(index) }) { it.readString() } }
+    }
+
+    // Pages' text is asked for again and again while searching: keep it (bounded by the engine's limit per page)
+    private val texts = HashMap<Int, String>()
+
+    override suspend fun pageText(index: Int): String {
+        synchronized(texts) { texts[index] }?.let { return it }
+        val t = text(index)?.take(PdfEngineService.MAX_TEXT) ?: return ""
+        synchronized(texts) { if (texts.size > 500) texts.clear(); texts[index] = t }
+        return t
+    }
+
+    override suspend fun boxes(index: Int, start: Int, end: Int): List<PageBox> = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (closed || end <= start || index !in 0 until pageCount) return@withLock emptyList()
+            val v = call(PdfEngineService.RECTS, { d -> d.writeInt(index); d.writeInt(start); d.writeInt(end - start) }) { it.createFloatArray() }
+                ?: return@withLock emptyList()
+            val g = PdfEngineService.GRID.toFloat()
+            // The engine is not trusted: at most 4096 boxes, values kept on the page
+            (0 until minOf(v.size / 4, 4096)).map { i ->
+                fun f(k: Int) = (v[4 * i + k] / g).coerceIn(0f, 1f)
+                PageBox(f(0), f(1), f(2), f(3))
+            }
+        }
+    }
+
+    override suspend fun charAt(index: Int, x: Float, y: Float): Int = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (closed || index !in 0 until pageCount) return@withLock -1
+            val g = PdfEngineService.GRID
+            call(PdfEngineService.CHAR_AT, { d -> d.writeInt(index); d.writeInt((x * g).toInt()); d.writeInt((y * g).toInt()) }) { it.readInt() } ?: -1
+        }
     }
 
     private fun <T> call(code: Int, write: (Parcel) -> Unit = {}, read: (Parcel) -> T): T? = Companion.call(binder, code, write, read)

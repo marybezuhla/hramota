@@ -10,13 +10,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import ua.hramota.doc.Pages
+import ua.hramota.doc.PageBox
+import ua.hramota.doc.TextPages
 
 /**
  * A DOCX laid out on pages once, then drawn page by page at the width it is shown.
  * Create off the main thread: the layout of a long document takes a moment.
  */
-class DocxPages(doc: DocxDocument, fonts: Fonts) : Pages {
+class DocxPages(doc: DocxDocument, fonts: Fonts) : TextPages {
     private val pictures = PictureCache(doc)
     private val layout = DocxLayout(doc, fonts) { rel, w, h -> pictures.get(rel, w, h) }
     val pages: List<LaidOutPage> = layout.layout()
@@ -29,6 +30,81 @@ class DocxPages(doc: DocxDocument, fonts: Fonts) : Pages {
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.Default) {
         lock.withLock { draw(index, widthPx)?.asImageBitmap() }
+    }
+
+    /** One paragraph slice on a page and where its text starts in the page's text. */
+    private class Segment(val item: PageItem.Text, val pageStart: Int, val layoutStart: Int, val layoutEnd: Int)
+
+    private val pageTexts = arrayOfNulls<Pair<String, List<Segment>>>(pages.size)
+
+    /** The page's text in reading order (paragraphs joined by a line break) and where each slice sits in it. */
+    private fun textOf(index: Int): Pair<String, List<Segment>> {
+        pageTexts[index]?.let { return it }
+        val sb = StringBuilder()
+        val segments = ArrayList<Segment>()
+        for (item in pages[index].items) {
+            if (item !is PageItem.Text) continue
+            val l = item.layout
+            val a = l.getLineStart(item.first)
+            val b = l.getLineEnd(item.last)
+            if (sb.isNotEmpty()) sb.append('\n')
+            segments += Segment(item, sb.length, a, b)
+            sb.append(l.text, a, b)
+        }
+        // Pictures and tabs stay as placeholders, so positions keep matching the layouts
+        return (sb.toString() to segments).also { pageTexts[index] = it }
+    }
+
+    override suspend fun pageText(index: Int): String = withContext(Dispatchers.Default) {
+        if (index !in pages.indices) "" else lock.withLock { textOf(index).first }
+    }
+
+    override suspend fun boxes(index: Int, start: Int, end: Int): List<PageBox> = withContext(Dispatchers.Default) {
+        if (index !in pages.indices || end <= start) return@withContext emptyList()
+        lock.withLock {
+            val out = ArrayList<PageBox>()
+            for (seg in textOf(index).second) {
+                val l = seg.item.layout
+                val from = maxOf(start - seg.pageStart + seg.layoutStart, seg.layoutStart)
+                val to = minOf(end - seg.pageStart + seg.layoutStart, seg.layoutEnd)
+                if (from >= to) continue
+                val sliceTop = l.getLineTop(seg.item.first)
+                for (line in seg.item.first..seg.item.last) {
+                    val ls = l.getLineStart(line); val le = l.getLineEnd(line)
+                    val a = maxOf(from, ls); val b = minOf(to, le)
+                    if (a >= b) continue
+                    val x1 = l.getPrimaryHorizontal(a)
+                    val x2 = if (b >= le) l.getLineRight(line) else l.getPrimaryHorizontal(b)
+                    val top = seg.item.y + (l.getLineTop(line) - sliceTop)
+                    val bottom = seg.item.y + (l.getLineBottom(line) - sliceTop)
+                    out += PageBox(
+                        ((seg.item.x + minOf(x1, x2)) / layout.pageWidth).coerceIn(0f, 1f), (top / layout.pageHeight).coerceIn(0f, 1f),
+                        ((seg.item.x + maxOf(x1, x2)) / layout.pageWidth).coerceIn(0f, 1f), (bottom / layout.pageHeight).coerceIn(0f, 1f),
+                    )
+                }
+            }
+            out
+        }
+    }
+
+    override suspend fun charAt(index: Int, x: Float, y: Float): Int = withContext(Dispatchers.Default) {
+        if (index !in pages.indices) return@withContext -1
+        lock.withLock {
+            val ux = x * layout.pageWidth
+            val uy = y * layout.pageHeight
+            val tolerance = DocxLayout.U * 6
+            for (seg in textOf(index).second) {
+                val l = seg.item.layout
+                val sliceTop = l.getLineTop(seg.item.first)
+                val height = l.getLineBottom(seg.item.last) - sliceTop
+                if (uy < seg.item.y - tolerance || uy > seg.item.y + height + tolerance) continue
+                if (ux < seg.item.x - tolerance || ux > seg.item.x + l.width + tolerance) continue
+                val line = l.getLineForVertical((sliceTop + (uy - seg.item.y)).toInt()).coerceIn(seg.item.first, seg.item.last)
+                val off = l.getOffsetForHorizontal(line, ux - seg.item.x).coerceIn(seg.layoutStart, maxOf(seg.layoutStart, seg.layoutEnd - 1))
+                return@withLock seg.pageStart + (off - seg.layoutStart)
+            }
+            -1
+        }
     }
 
     /** Draws page [index] into a new bitmap [widthPx] wide (also used by tests). */

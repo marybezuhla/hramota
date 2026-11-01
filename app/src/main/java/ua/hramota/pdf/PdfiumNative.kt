@@ -19,4 +19,6 @@ internal object PdfiumNative {
     @JvmStatic external fun render(handle: Long, index: Int, buffer: ByteBuffer, width: Int, height: Int, stride: Int): Boolean
     @JvmStatic external fun inspect(handle: Long, maxPages: Int): Array<String?>?
     @JvmStatic external fun text(handle: Long, index: Int, maxChars: Int): String?
+    @JvmStatic external fun rects(handle: Long, index: Int, start: Int, count: Int, devW: Int, devH: Int): FloatArray?
+    @JvmStatic external fun charAt(handle: Long, index: Int, x: Int, y: Int, devW: Int, devH: Int): Int
 }

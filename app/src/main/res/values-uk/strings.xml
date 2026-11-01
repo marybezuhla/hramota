@@ -90,4 +90,14 @@
         <item quantity="many">%d коментарів</item>
         <item quantity="other">%d коментарі</item>
     </plurals>
+    <string name="search_open">Пошук</string>
+    <string name="search_close">Закрити пошук</string>
+    <string name="search_hint">Пошук у документі</string>
+    <string name="search_none">Не знайдено</string>
+    <string name="search_position">%1$d з %2$d</string>
+    <string name="search_prev">Попередній збіг</string>
+    <string name="search_next">Наступний збіг</string>
+    <string name="copy">Копіювати</string>
+    <string name="share">Поділитися</string>
+    <string name="clear_selection">Скасувати виділення</string>
 </resources>

@@ -65,8 +65,10 @@ class ScreensTest {
                 }
             }
         }
-        repeat(6) {
-            shadowOf(Looper.getMainLooper()).idle()
+        // Let delays (search waits for typing to pause) and background work finish
+        repeat(8) {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+            Thread.sleep(40)
             compose.waitForIdle()
         }
         var bitmap: Bitmap? = null
@@ -166,10 +168,13 @@ class ScreensTest {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val file = File(javaClass.classLoader!!.getResource("docs/$name")!!.toURI())
         val pages = DocxPages(file.inputStream().use { DocxReader.read(it) }, Fonts(app.assets))
-        return object : Pages {
+        return object : ua.hramota.doc.TextPages {
             override val pageCount = pages.pageCount
             override fun aspect(index: Int) = pages.aspect(index)
             override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = pages.draw(index, widthPx)?.asImageBitmap()
+            override suspend fun pageText(index: Int) = pages.pageText(index)
+            override suspend fun boxes(index: Int, start: Int, end: Int) = pages.boxes(index, start, end)
+            override suspend fun charAt(index: Int, x: Float, y: Float) = pages.charAt(index, x, y)
         }
     }
 
@@ -183,6 +188,9 @@ class ScreensTest {
     @Test fun viewerInspectorQuiet() = shot("04-viewer-inspector-info") {
         val info = ua.hramota.doc.Inspection(comments = 2, trackedChanges = true)
         ViewerScreen("Протокол.docx", ViewerState.Paged(docxPages("03-lists.docx"), emptyList(), info), onBack = {})
+    }
+    @Test fun viewerSearch() = shot("04-viewer-search") {
+        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, startSearch = "розділ договору")
     }
     @Test fun viewerOverview() = shot("04-viewer-overview") {
         ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, bookmarks = setOf(0, 3), startInOverview = true)
