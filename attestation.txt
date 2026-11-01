@@ -1,0 +1,2 @@
+pdfium-android-arm.tgz sha256:ac4ac5319ded88ba5d885747a6b2641e7f712c9797de0770465104abe4dbf7da built by https://github.com/bblanchon/pdfium-binaries/.github/workflows/build-all.yml@refs/heads/master at 4bdb7acd45b39ef6a7fc2a5b4c83f0398e45c9a6
+pdfium-android-arm.tgz sha256:ac4ac5319ded88ba5d885747a6b2641e7f712c9797de0770465104abe4dbf7da built by https://github.com/bblanchon/pdfium-binaries/.github/workflows/build-all.yml@refs/heads/master at 4bdb7acd45b39ef6a7fc2a5b4c83f0398e45c9a6
