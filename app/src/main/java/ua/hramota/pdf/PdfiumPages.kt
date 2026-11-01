@@ -128,7 +128,7 @@ class PdfiumPages private constructor(
             val intent = Intent(app, PdfEngineService::class.java)
             // A separate isolated process for every document
             val bound = try {
-                app.bindIsolatedService(intent, Context.BIND_AUTO_CREATE, "doc-" + UUID.randomUUID(), executor, connection)
+                app.bindIsolatedService(intent, Context.BIND_AUTO_CREATE, "doc_" + UUID.randomUUID().toString().replace("-", ""), executor, connection)
             } catch (e: SecurityException) { false }
             if (!bound) { pfd.close(); throw PdfEngineUnavailableException("PDF engine unavailable") }
             try {
