@@ -129,7 +129,7 @@
     <string name="licenses_text">Грамота — GPL-3.0.\n\nPDFium — BSD 3-Clause (Google, автори PDFium).\npdfium-binaries — MIT (Benoît Blanchon).\n\nШрифти Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX і Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
     <string name="pages_cut">не всі сторінки: забракло пам\'яті</string>
     <string name="slide_n">Слайд %1$d</string>
-    <string name="settings_docx_open_hint">Сторінки — як на папері, з розташуванням оригіналу. Текст — суцільним текстом під ширину екрана, зручніше читати на телефоні. Перемкнути можна будь-коли в самому документі (Сторінки / Текст).</string>
+    <string name="settings_docx_open_hint">Сторінки, як на папері, з розташуванням оригіналу. Текст суцільний, під ширину екрана, зручніше читати на телефоні. Перемкнути можна будь-коли в самому документі.</string>
     <string name="settings_dynamic">Кольори зі шпалер</string>
     <string name="settings_dynamic_hint">Material You: застосунок бере кольори акцентів із ваших шпалер</string>
     <string name="recent_no_access">«%1$s» відкрили з іншого застосунку лише один раз, тож зі списку його вже не відкрити. Відкрийте його знову з того застосунку або через «Відкрити файл».</string>
