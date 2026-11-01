@@ -2,6 +2,7 @@ package ua.hramota.doc
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -31,7 +32,7 @@ class LegacyFormatsTest {
     }
 
     @Test fun csvQuotesAndSeparators() {
-        val rows = CsvReader.parse("Назва;Сума;Примітка\r\n\"Папір; А4\";1 450,00;\"він сказав \"\"так\"\"\"\n\nРучки;640,00;\n")
+        val rows = CsvReader.rows("Назва;Сума;Примітка\r\n\"Папір; А4\";1 450,00;\"він сказав \"\"так\"\"\"\n\nРучки;640,00;\n")
         assertEquals(3, rows.size)
         assertEquals(listOf("Папір; А4", "1 450,00", "він сказав \"так\""), rows[1])
         assertEquals(listOf("Ручки", "640,00", ""), rows[2])
@@ -41,8 +42,28 @@ class LegacyFormatsTest {
 
     @Test fun windows1251Csv() {
         val bytes = "Прізвище;Місто\nІваненко;Київ\n".toByteArray(charset("windows-1251"))
-        val rows = CsvReader.read(ByteArrayInputStream(bytes))
+        val rows = CsvReader.read(ByteArrayInputStream(bytes)).rows
         assertEquals(listOf("Іваненко", "Київ"), rows[1])
         assertEquals("Ґанок", TextDecoding.decode("Ґанок".toByteArray()))
+    }
+
+    // A file built to make one enormous paragraph or millions of empty cells stays usable
+    @Test fun hugeInputsAreBounded() {
+        val one = TextExtractor.split(listOf(Paragraph("слово ".repeat(200_000))))
+        assertTrue(one.size > 100)
+        assertTrue(one.all { it.text.length <= TextExtractor.MAX_PARAGRAPH })
+        assertEquals("слово ".repeat(200_000), one.joinToString("") { it.text })
+
+        val table = CsvReader.parse(",".repeat(255) + "\n" + (",".repeat(255) + "\n").repeat(20_000))
+        assertTrue(table.truncated)
+        assertTrue(table.rows.sumOf { it.size } <= CsvReader.MAX_CELLS)
+        assertEquals(256, table.widths.size)
+    }
+
+    @Test fun widthsFollowContent() {
+        val t = CsvReader.parse("a;довга назва колонки\n1;2")
+        assertEquals(1, t.widths[0])
+        assertEquals("довга назва колонки".length, t.widths[1])
+        assertFalse(t.truncated)
     }
 }

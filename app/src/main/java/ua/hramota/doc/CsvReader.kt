@@ -41,23 +41,46 @@ object TextDecoding {
  * CSV and TSV files as rows of cells: quotes as in RFC 4180, the separator guessed from the first
  * lines (comma, semicolon, tab or bar), and limits so a huge file stays usable.
  */
+/** A table read from CSV: rows, whether it was cut at a limit, and each column's widest text (in characters, capped). */
+class CsvTable(val rows: List<List<String>>, val truncated: Boolean, val widths: IntArray)
+
 object CsvReader {
     const val MAX_BYTES = 32L * 1024 * 1024
     const val MAX_ROWS = 100_000
     const val MAX_COLUMNS = 256
     const val MAX_CELL = 10_000
+    /** All cells together; a file of nothing but separators stops here. */
+    const val MAX_CELLS = 2_000_000
+    /** Widths are measured on the first rows only, and never beyond what a column can show. */
+    private const val WIDTH_ROWS = 300
+    private const val WIDTH_CAP = 40
 
-    fun read(input: InputStream): List<List<String>> = parse(TextDecoding.decode(TextDecoding.readLimited(input, MAX_BYTES)))
+    fun read(input: InputStream): CsvTable = parse(TextDecoding.decode(TextDecoding.readLimited(input, MAX_BYTES)))
 
-    fun parse(text: String): List<List<String>> {
+    fun parse(text: String): CsvTable {
+        val rows = rows(text)
+        val truncated = rows.size >= MAX_ROWS || rows.sumOf { it.size }.toLong() >= MAX_CELLS
+        val columns = rows.maxOfOrNull { it.size } ?: 0
+        val widths = IntArray(columns)
+        for (r in rows.asSequence().take(WIDTH_ROWS)) for ((c, cell) in r.withIndex()) {
+            var line = 0
+            for (i in 0 until minOf(cell.length, WIDTH_CAP * 4)) {
+                if (cell[i] == '\n') line = 0 else if (++line > widths[c]) widths[c] = minOf(line, WIDTH_CAP)
+            }
+        }
+        return CsvTable(rows, truncated, widths)
+    }
+
+    fun rows(text: String): List<List<String>> {
         val sep = guessSeparator(text)
         val rows = ArrayList<List<String>>()
         var row = ArrayList<String>()
         val cell = StringBuilder()
         var quoted = false
         var i = 0
+        var cells = 0
         fun endCell() {
-            if (row.size < MAX_COLUMNS) row += cell.toString()
+            if (row.size < MAX_COLUMNS) { row += if (cell.isEmpty()) "" else cell.toString(); cells++ }
             cell.clear()
         }
         fun endRow() {
@@ -66,7 +89,7 @@ object CsvReader {
             if (!(row.size == 1 && row[0].isEmpty())) rows += row
             row = ArrayList()
         }
-        while (i < text.length && rows.size < MAX_ROWS) {
+        while (i < text.length && rows.size < MAX_ROWS && cells < MAX_CELLS) {
             val c = text[i]
             if (quoted) {
                 if (c == '"') {
@@ -87,7 +110,7 @@ object CsvReader {
 
     /** The separator that splits the first lines most consistently. */
     fun guessSeparator(text: String): Char {
-        val lines = text.lineSequence().filter { it.isNotBlank() }.take(20).toList()
+        val lines = text.take(65_536).lineSequence().filter { it.isNotBlank() }.take(20).toList()
         if (lines.isEmpty()) return ','
         var best = ','
         var bestScore = -1

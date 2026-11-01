@@ -16,9 +16,11 @@ class EncryptedDocumentException : IOException("Encrypted document")
  */
 object DocReader {
     /** Largest .doc file read whole into memory. */
-    const val MAX_FILE = 64L * 1024 * 1024
+    const val MAX_FILE = 32L * 1024 * 1024
     /** Longest text read. */
     const val MAX_CHARS = 20_000_000
+    private const val MAX_FIELD_DEPTH = 20
+    private const val MAX_FIELD_CODE = 8192
 
     fun read(input: InputStream): List<Paragraph> {
         val file = readAll(input)
@@ -49,12 +51,16 @@ object DocReader {
         if (lcb < 16 || plc.toLong() + lcb > table.size) throw IOException("Piece table damaged")
         val n = (lcb - 4) / 12
         val text = StringBuilder()
+        // Pieces must follow one another; overlapping or reordered ones are not read twice
+        var lastEnd = 0
         val cp1252 = Charset.forName("windows-1252")
         for (i in 0 until n) {
             val cpStart = i32(table, plc + i * 4)
             val cpEnd = minOf(i32(table, plc + (i + 1) * 4), ccpText)
             if (cpStart >= ccpText) break
-            val count = cpEnd - cpStart
+            if (cpStart < lastEnd) throw IOException("Pieces out of order")
+            lastEnd = cpEnd
+            val count = minOf(cpEnd - cpStart, MAX_CHARS - text.length)
             if (count <= 0) continue
             val pcd = plc + (n + 1) * 4 + i * 8
             val fcRaw = i32(table, pcd + 2)
@@ -67,7 +73,7 @@ object DocReader {
                 if (fcRaw < 0 || fcRaw.toLong() + count * 2L > word.size) throw IOException("Text piece out of range")
                 text.append(String(word, fcRaw, count * 2, Charsets.UTF_16LE))
             }
-            if (text.length > MAX_CHARS) break
+            if (text.length >= MAX_CHARS) break
         }
         return paragraphs(text)
     }
@@ -78,14 +84,20 @@ object DocReader {
         val sb = StringBuilder()
         // Inside a field: text before its separator (the field code) is skipped
         val fields = ArrayList<Boolean>()
+        // A field code is short; one running this long was never closed, so its text is shown after all
+        var skipped = 0
         fun flush() { out += Paragraph(sb.toString().trimEnd()); sb.clear() }
         for (c in text) {
             when (c.code) {
-                0x13 -> { fields += false; continue }
+                0x13 -> { if (fields.size < MAX_FIELD_DEPTH) fields += false; skipped = 0; continue }
                 0x14 -> { if (fields.isNotEmpty()) fields[fields.size - 1] = true; continue }
                 0x15 -> { if (fields.isNotEmpty()) fields.removeAt(fields.size - 1); continue }
             }
-            if (fields.isNotEmpty() && !fields.last()) continue
+            if (fields.isNotEmpty() && !fields.last()) {
+                if (++skipped <= MAX_FIELD_CODE) continue
+                fields.clear()
+            }
+            if (out.size >= TextExtractor.MAX_PARAGRAPHS) break
             when (c.code) {
                 0x0D, 0x07, 0x0C -> flush()
                 0x0B -> sb.append('\n')
@@ -94,6 +106,7 @@ object DocReader {
                 0x1F, 0x01, 0x08, 0x05, 0x02, 0x03, 0x04 -> Unit
                 else -> if (c.code >= 0x20) sb.append(c)
             }
+            if (sb.length >= TextExtractor.MAX_PARAGRAPH * 4) flush()
         }
         if (sb.isNotEmpty()) flush()
         return out
@@ -131,7 +144,10 @@ object DocReader {
         private val fat: IntArray
         private val miniFat: IntArray
         private val miniStream: ByteArray
-        private val entries = ArrayList<Triple<String, Int, Long>>()  // name, start sector, size
+        private class Entry(val name: String, val type: Int, val start: Int, val size: Long, val left: Int, val right: Int, val child: Int)
+        private val entries = ArrayList<Entry>()
+        /** Streams directly inside the root storage (not inside embedded objects). */
+        private val top = HashMap<String, Entry>()
         private val miniCutoff: Int
 
         init {
@@ -142,19 +158,24 @@ object DocReader {
             val sectors = maxOf(0, (f.size - sectorSize) / sectorSize)
             miniCutoff = i32(f, 0x38).let { if (it in 1..65536) it else 4096 }
             // FAT sector list: 109 in the header, the rest in the DIFAT chain
-            val fatSectors = ArrayList<Int>()
-            for (i in 0 until 109) { val s = i32(f, 0x4C + i * 4); if (s >= 0 && s < sectors) fatSectors += s }
+            val perSector = sectorSize / 4
+            // Never more FAT sectors than needed to describe the whole file
+            val needed = sectors / perSector + 1
+            val fatSectors = IntArray(needed)
+            var fatCount = 0
+            for (i in 0 until 109) { val s = i32(f, 0x4C + i * 4); if (s >= 0 && s < sectors && fatCount < needed) fatSectors[fatCount++] = s }
             var dif = i32(f, 0x44)
-            var guard = 0
-            while (dif >= 0 && dif < sectors && guard++ < sectors) {
+            val seen = java.util.BitSet(sectors)
+            while (dif >= 0 && dif < sectors && !seen[dif] && fatCount < needed) {
+                seen.set(dif)
                 val base = offset(dif)
-                val per = sectorSize / 4 - 1
-                for (i in 0 until per) { val s = i32(f, base + i * 4); if (s >= 0 && s < sectors) fatSectors += s }
+                val per = perSector - 1
+                for (i in 0 until per) { val s = i32(f, base + i * 4); if (s >= 0 && s < sectors && fatCount < needed) fatSectors[fatCount++] = s }
                 dif = i32(f, base + per * 4)
             }
-            val perSector = sectorSize / 4
-            fat = IntArray(minOf(fatSectors.size * perSector, sectors + perSector))
-            loop@ for ((k, s) in fatSectors.withIndex()) {
+            fat = IntArray(minOf(fatCount * perSector, sectors + perSector))
+            loop@ for (k in 0 until fatCount) {
+                val s = fatSectors[k]
                 val base = offset(s)
                 for (i in 0 until perSector) {
                     val idx = k * perSector + i
@@ -171,10 +192,23 @@ object DocReader {
                 val type = dir[at + 0x42].toInt()
                 val start = i32(dir, at + 0x74)
                 val size = i32(dir, at + 0x78).toLong() and 0xFFFFFFFFL
-                if (type == 1 || type == 2 || type == 5) entries += Triple(name, start, size)
+                entries += Entry(name, type, start, size, i32(dir, at + 0x44), i32(dir, at + 0x48), i32(dir, at + 0x4C))
             }
-            val root = entries.firstOrNull() ?: throw IOException("No root entry")
-            miniStream = chain(root.second, root.third)
+            val root = entries.firstOrNull()?.takeIf { it.type == 5 } ?: throw IOException("No root entry")
+            // The root's children form a tree through left and right siblings
+            val stack = ArrayDeque<Int>()
+            val visited = java.util.BitSet(entries.size)
+            if (root.child in entries.indices) stack += root.child
+            while (stack.isNotEmpty()) {
+                val i = stack.removeLast()
+                if (i !in entries.indices || visited[i]) continue
+                visited.set(i)
+                val e = entries[i]
+                if (e.type == 2) top.putIfAbsent(e.name, e)
+                if (e.left in entries.indices) stack += e.left
+                if (e.right in entries.indices) stack += e.right
+            }
+            miniStream = chain(root.start, root.size)
             miniFat = chain(i32(f, 0x3C), Long.MAX_VALUE).let { b -> IntArray(b.size / 4) { i32(b, it * 4) } }
         }
 
@@ -186,15 +220,22 @@ object DocReader {
 
         /** Bytes of a sector chain from [start], at most [size] (and never past a loop). */
         private fun chain(start: Int, size: Long): ByteArray {
-            val out = ByteArrayOutputStream()
+            // Count the chain first, so the result is allocated once at its real size
             var s = start
-            var guard = 0
-            while (s >= 0 && s < fat.size && out.size() < size && guard++ <= fat.size) {
-                out.write(f, offset(s), sectorSize)
+            var length = 0
+            val seen = java.util.BitSet(fat.size)
+            while (s >= 0 && s < fat.size && !seen[s] && length.toLong() * sectorSize < size) { seen.set(s); length++; s = fat[s] }
+            val total = minOf(length.toLong() * sectorSize, size, MAX_FILE).toInt()
+            val out = ByteArray(total)
+            s = start
+            var at = 0
+            while (at < total) {
+                val n = minOf(sectorSize, total - at)
+                System.arraycopy(f, offset(s), out, at, n)
+                at += n
                 s = fat[s]
             }
-            val bytes = out.toByteArray()
-            return if (size < bytes.size) bytes.copyOf(size.toInt()) else bytes
+            return out
         }
 
         private fun miniChain(start: Int, size: Long): ByteArray {
@@ -213,9 +254,9 @@ object DocReader {
         }
 
         fun stream(name: String): ByteArray? {
-            val e = entries.drop(1).firstOrNull { it.first == name } ?: return null
-            if (e.third > MAX_FILE) throw IOException("Stream too large")
-            return if (e.third < miniCutoff) miniChain(e.second, e.third) else chain(e.second, e.third)
+            val e = top[name] ?: return null
+            if (e.size > MAX_FILE) throw IOException("Stream too large")
+            return if (e.size < miniCutoff) miniChain(e.start, e.size) else chain(e.start, e.size)
         }
     }
 }
