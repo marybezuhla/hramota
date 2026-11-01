@@ -36,12 +36,13 @@ class BigDocumentsTest {
         val bytes = BigDocs.docxTable(ROWS, 1)
         val (doc, readMs, readMb) = measure { DocxReader.read(ByteArrayInputStream(bytes)) }
         val (pages, layoutMs, layoutMb) = measure { DocxPages(doc, fonts) }
-        assertTrue("pages: ${pages.pageCount}", pages.pageCount >= 900)
         val (hit, searchMs, _) = measure { runBlocking { (0 until pages.pageCount).lastOrNull { Search.find(pages.pageText(it), BigDocs.NEEDLE.lowercase()).isNotEmpty() } } }
-        assertEquals(pages.pageCount - 1, hit)
         val (_, drawMs, _) = measure { pages.draw(pages.pageCount - 1, 1080) }
         report("DOCX table, ${ROWS} rows, ${bytes.size / 1024} KB zipped: ${pages.pageCount} pages; read $readMs ms (+$readMb MB), " +
             "layout $layoutMs ms (+$layoutMb MB), search all pages $searchMs ms, draw last page $drawMs ms")
+        assertTrue("pages: ${pages.pageCount}", pages.pageCount >= 900)
+        // The last row can break across the last two pages
+        assertTrue("found on $hit", hit != null && hit >= pages.pageCount - 2)
     }
 
     @Test fun longProse() = runBlocking {
@@ -49,17 +50,17 @@ class BigDocumentsTest {
         val (doc, readMs, readMb) = measure { DocxReader.read(ByteArrayInputStream(bytes)) }
         val (pages, layoutMs, layoutMb) = measure { DocxPages(doc, fonts) }
         val (hit, searchMs, _) = measure { runBlocking { (0 until pages.pageCount).lastOrNull { Search.find(pages.pageText(it), BigDocs.NEEDLE).isNotEmpty() } } }
-        assertEquals(pages.pageCount - 1, hit)
         report("DOCX prose, $PARAGRAPHS paragraphs: ${pages.pageCount} pages; read $readMs ms (+$readMb MB), layout $layoutMs ms (+$layoutMb MB), search $searchMs ms")
+        assertEquals(pages.pageCount - 1, hit)
     }
 
     @Test fun compareThousandPages() {
         val a = TextExtractor.read(ByteArrayInputStream(BigDocs.docxTable(ROWS, 1)), Format.DOCX).map { it.text }
         val b = TextExtractor.read(ByteArrayInputStream(BigDocs.docxTable(ROWS, 2)), Format.DOCX).map { it.text }
         val (c, ms, mb) = measure { Diff.compare(a, b) }
+        report("Compare ${a.size} vs ${b.size} paragraphs: ${c.changes.size} changes in $ms ms (+$mb MB)")
         assertFalse("compared as one replaced block", c.coarse)
         assertEquals(BigDocs.changesExpected(ROWS), c.changes.size)
-        report("Compare ${a.size} vs ${b.size} paragraphs: ${c.changes.size} changes in $ms ms (+$mb MB)")
     }
 
     @Test fun bigCsv() {

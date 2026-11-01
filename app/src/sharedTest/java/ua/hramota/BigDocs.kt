@@ -41,7 +41,8 @@ object BigDocs {
             if (version == 2 && i % 499 == 0) continue
             val last = if (i == rows) " $NEEDLE" else ""
             out += listOf("$i", old, new + last, note)
-            if (version == 2 && i % 701 == 0) out += listOf("$i-а", "—", sentence(r, 10), "Новий пункт")
+            // Its own random source: the rows after it stay the same in both versions
+            if (version == 2 && i % 701 == 0) out += listOf("$i-а", "—", sentence(Random(i), 10), "Новий пункт")
         }
         return out
     }
