@@ -164,6 +164,7 @@ fun ZoomablePages(pages: Pages, list: LazyListState, bookmarks: Set<Int>) {
  * All pages laid out like on a table (as in Apple Books): pinch to see more or fewer per row,
  * tap to open a page. A second tab shows only bookmarked pages.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun PageOverview(pages: Pages, bookmarks: Set<Int>, current: Int, onOpen: (Int) -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
