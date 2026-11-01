@@ -2,6 +2,7 @@ package ua.hramota.diff
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class DiffTest {
@@ -48,12 +49,36 @@ class DiffTest {
         assertEquals(Block.Added("Nothing in common at all"), c.blocks[2])
     }
 
+    // Nothing in common and too large for an exact match: paragraphs are paired in order
     @Test fun hugeDifferenceFallsBackToBlock() {
         val a = List(3000) { "old line $it" }
         val b = List(3000) { "new line $it" }
         val c = Diff.compare(a, b)
         assertTrue(c.coarse)
-        assertEquals(6000, c.changes.size)
+        assertEquals(3000, c.changes.size)
+    }
+
+    // Large documents with a few changes are matched exactly, wherever the changes are
+    @Test fun largeDocumentsWithScatteredChanges() {
+        val a = List(40_000) { "Пункт $it. Текст пункту номер $it." }
+        val b = a.toMutableList()
+        b[100] = "Пункт 100. Змінений текст пункту номер 100."
+        b.removeAt(20_000)
+        b.add(30_000, "Новий пункт")
+        b[39_000] = "Пункт 39001. Текст пункту номер 39001 — уточнено."
+        val c = Diff.compare(a, b)
+        assertFalse(c.coarse)
+        assertEquals(4, c.changes.size)
+        assertEquals(Block.Removed("Пункт 20000. Текст пункту номер 20000."), c.blocks[c.changes[1]])
+        assertEquals(Block.Added("Новий пункт"), c.blocks[c.changes[2]])
+    }
+
+    // Repeated paragraphs (empty lines, "—") have no anchors of their own and are matched in the gaps
+    @Test fun repeatedParagraphsBetweenAnchors() {
+        val a = listOf("Вступ", "", "—", "Розділ 1", "", "—", "Розділ 2")
+        val b = listOf("Вступ", "", "—", "Розділ 1", "", "Розділ 2")
+        val c = Diff.compare(a, b)
+        assertEquals(listOf(Block.Removed("—")), c.changes.map { c.blocks[it] })
     }
 
     @Test fun largeDocumentWithOneEditIsFast() {

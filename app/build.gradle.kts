@@ -47,6 +47,9 @@ android {
 
     // PDFium itself: the reviewed prebuilt library in /pdfium (see pdfium/ATTESTATION.txt)
     sourceSets["main"].jniLibs.srcDir(rootProject.file("pdfium/lib"))
+    // Made-up large documents, shared by the computer and the emulator tests
+    sourceSets["test"].java.srcDir("src/sharedTest/java")
+    sourceSets["androidTest"].java.srcDir("src/sharedTest/java")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

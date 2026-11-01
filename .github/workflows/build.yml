@@ -114,6 +114,7 @@ jobs:
           # Page renders of the test documents and the comparison with LibreOffice
           cp -r render-report log/render 2>/dev/null || cp -r app/build/render log/render 2>/dev/null || true
           cp app/build/render/*.txt log/render/ 2>/dev/null || true
+          cp app/build/big/report.txt log/big-report.txt 2>/dev/null || true
           # The first errors as annotations, so they show on the pull request without opening the log.
           { grep -E "^e: |What went wrong|FAILED|AssertionError|expected:|PROBLEM:" -A2 build.log 2>/dev/null | grep -v "^--$" | head -15 \
             | sed -E 's/%/%25/g' | while IFS= read -r l; do echo "::warning title=build::$l"; done; } || true

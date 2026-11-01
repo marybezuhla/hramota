@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.Color
+import ua.hramota.doc.SearchHit
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
@@ -32,7 +36,12 @@ import ua.hramota.doc.CsvTable
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TableDocument(table: CsvTable) {
+fun TableDocument(
+    table: CsvTable,
+    list: LazyListState = rememberLazyListState(),
+    hits: Map<Int, List<SearchHit>> = emptyMap(),
+    current: SearchHit? = null,
+) {
     val rows = table.rows
     if (rows.isEmpty()) {
         Box(Modifier.fillMaxSize().padding(32.dp)) { Text(stringResource(R.string.table_empty), color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -40,20 +49,19 @@ fun TableDocument(table: CsvTable) {
     }
     // Width from the longest text in the first rows (measured while reading): about 8 dp a character, 56–280 dp
     val widths: List<Dp> = remember(table) { table.widths.map { (it * 8 + 24).coerceIn(56, 280).dp } }
-    val columns = widths.size
     val scroll = rememberScrollState()
     val grid = MaterialTheme.colorScheme.outlineVariant
     SelectionContainer {
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = list) {
             stickyHeader {
                 Row(Modifier.background(MaterialTheme.colorScheme.surfaceVariant).horizontalScroll(scroll)) {
-                    for (c in 0 until columns) Cell(rows[0].getOrNull(c).orEmpty(), widths[c], header = true, grid = grid)
+                    TableRow(rows[0], widths, header = true, grid = grid, hits = hits[0], current = current)
                 }
             }
             items(rows.size - 1) { i ->
                 val row = rows[i + 1]
                 Row(Modifier.background(if (i % 2 == 1) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.background).horizontalScroll(scroll)) {
-                    for (c in 0 until columns) Cell(row.getOrNull(c).orEmpty(), widths[c], header = false, grid = grid)
+                    TableRow(row, widths, header = false, grid = grid, hits = hits[i + 1], current = current)
                 }
             }
             if (table.truncated) item {
@@ -65,11 +73,27 @@ fun TableDocument(table: CsvTable) {
 
 private const val SHOWN = 300
 
+/** Between cells in a row's search text: never part of a query, so a match stays inside one cell. */
+private const val CELL_SEPARATOR = '\u0000'
+
+/** A row as one text for search; cells start where [rowText] puts them. */
+internal fun rowText(row: List<String>): String = row.joinToString(CELL_SEPARATOR.toString())
+
 @Composable
-private fun Cell(text: String, width: Dp, header: Boolean, grid: androidx.compose.ui.graphics.Color) {
+private fun TableRow(row: List<String>, widths: List<Dp>, header: Boolean, grid: Color, hits: List<SearchHit>?, current: SearchHit?) {
+    var offset = 0
+    for (c in widths.indices) {
+        val text = row.getOrNull(c).orEmpty()
+        Cell(text, widths[c], header, grid, hits?.filter { it.start < offset + text.length && it.end > offset }, current, offset)
+        offset += text.length + 1
+    }
+}
+
+@Composable
+private fun Cell(text: String, width: Dp, header: Boolean, grid: Color, hits: List<SearchHit>?, current: SearchHit?, offset: Int) {
     // A cell shows at most four lines of a narrow column; more text would only cost layout time
     Text(
-        if (text.length > SHOWN) text.take(SHOWN) + "…" else text,
+        highlighted(if (text.length > SHOWN) text.take(SHOWN) + "…" else text, hits, current, offset),
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = if (header) FontWeight.SemiBold else null,
         maxLines = if (header) 2 else 4,
