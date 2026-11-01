@@ -411,7 +411,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
         val spacingCut = (autofit?.attr("lnSpcReduction")?.num() ?: 0f) / 100000f
         // A plain shape's text takes its colour from the shape's style (white on a blue shape), not the master's
         val fontRefColor = if (ph == null) color(style?.child("fontRef")) else null
-        val base = styles[kind]?.let { arr -> if (fontRefColor != null) Array(9) { (arr[it] ?: Level()).copy(color = fontRefColor) } else arr }
+        val base: Array<Level?>? = styles[kind]?.let { arr -> if (fontRefColor != null) Array<Level?>(9) { (arr[it] ?: Level()).copy(color = fontRefColor) } else arr }
         val levels = mergeLevels(base, levels(mph?.child("txBody")?.child("lstStyle")), levels(lph?.child("txBody")?.child("lstStyle")), levels(body?.child("lstStyle")))
         val paragraphs = ArrayList<SlidePara>()
         val counters = IntArray(9)
