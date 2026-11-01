@@ -17,8 +17,13 @@ import java.util.zip.ZipInputStream
 object PptxReader {
     const val MAX_PART = 16L * 1024 * 1024
 
-    fun read(input: InputStream): Deck {
+    /** All XML parts together. */
+    const val MAX_PARTS = 256L * 1024 * 1024
+
+    /** [withMedia] false skips pictures (for comparing text). */
+    fun read(input: InputStream, withMedia: Boolean = true): Deck {
         val parts = HashMap<String, ByteArray>()
+        var partsTotal = 0L
         val media = HashMap<String, ByteArray>()
         var mediaTotal = 0L
         var macros = false
@@ -31,14 +36,19 @@ object PptxReader {
                 when {
                     lower.endsWith("vbaproject.bin") -> macros = true
                     lower.startsWith("ppt/embeddings/") -> embedded += name.substringAfterLast('/')
-                    lower.startsWith("ppt/media/") && (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".bmp") || lower.endsWith(".webp")) -> {
+                    withMedia && lower.startsWith("ppt/media/") && (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".bmp") || lower.endsWith(".webp")) -> {
                         if (mediaTotal < Deck.MAX_MEDIA) {
-                            val bytes = readLimited(zip, 64L * 1024 * 1024)
+                            val bytes = readLimited(zip, minOf(64L * 1024 * 1024, Deck.MAX_MEDIA - mediaTotal))
                             mediaTotal += bytes.size
                             media[name] = bytes
                         }
                     }
-                    lower.endsWith(".xml") || lower.endsWith(".rels") -> parts[name] = readLimited(zip, MAX_PART)
+                    lower.endsWith(".xml") || lower.endsWith(".rels") -> {
+                        val bytes = readLimited(zip, MAX_PART)
+                        partsTotal += bytes.size
+                        if (partsTotal > MAX_PARTS) throw IOException("Presentation too large")
+                        parts[name] = bytes
+                    }
                 }
             }
         }
@@ -60,6 +70,9 @@ object PptxReader {
         return out.toByteArray()
     }
 }
+
+/** A finite number from a file ("NaN" and "Infinity" are refused). */
+private fun String.num(): Float? = toFloatOrNull()?.takeIf { it.isFinite() }
 
 /** Text properties for one outline level, merged from master, layout and shape (null: inherit). */
 private data class Level(
@@ -89,7 +102,11 @@ private class Part(val path: String, val root: XmlNode, val rels: Map<String, St
 
 private class Builder(private val parts: Map<String, ByteArray>, private val media: Map<String, ByteArray>) {
     private val trees = HashMap<String, XmlNode?>()
-    private fun tree(path: String): XmlNode? = trees.getOrPut(path) { parts[path]?.let { Xml.tree(ByteArrayInputStream(it)) } }
+    /** Layouts, masters, themes and relationships are kept (slides share them); a slide's own tree is not. */
+    private fun tree(path: String): XmlNode? {
+        if (path.contains("/slides/slide")) return parts[path]?.let { Xml.tree(ByteArrayInputStream(it)) }
+        return trees.getOrPut(path) { parts[path]?.let { Xml.tree(ByteArrayInputStream(it)) } }
+    }
 
     /** Relationship id → target path, resolved against the part's folder. */
     private fun rels(path: String): Map<String, String> {
@@ -161,7 +178,9 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
             }
         }
         if (lumMod != 1.0 || lumOff != 0.0) rgb = lum(rgb, lumMod, lumOff)
-        return (rgb and 0xFFFFFF) or ((alpha * 255).toInt().coerceIn(0, 255) shl 24)
+        // Fully transparent is the same as no colour
+        if (alpha <= 0.0) return null
+        return (rgb and 0xFFFFFF) or ((alpha * 255).toInt().coerceIn(1, 255) shl 24)
     }
 
     private fun mix(a: Int, b: Int, t: Double): Int {
@@ -197,10 +216,10 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
 
     private fun level(pPr: XmlNode?, defRPr: XmlNode?, scale: Float = 1f): Level {
         val r = defRPr
-        fun pts(n: XmlNode?) = n?.child("spcPts")?.attr("val")?.toFloatOrNull()?.let { it / 100f }
+        fun pts(n: XmlNode?) = n?.child("spcPts")?.attr("val")?.num()?.let { it / 100f }
         val lnSpc = pPr?.child("lnSpc")
         return Level(
-            size = r?.attr("sz")?.toFloatOrNull()?.let { (it / 100f * scale).coerceIn(1f, 400f) },
+            size = r?.attr("sz")?.num()?.let { (it / 100f * scale).coerceIn(1f, 400f) },
             bold = r?.attr("b")?.let { it == "1" || it == "true" },
             italic = r?.attr("i")?.let { it == "1" || it == "true" },
             color = r?.child("solidFill")?.let { color(it) },
@@ -210,14 +229,14 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
             indent = pPr?.attr("indent")?.toLongOrNull()?.let { emu(it) },
             spaceBefore = pts(pPr?.child("spcBef")),
             spaceAfter = pts(pPr?.child("spcAft")),
-            lineSpacing = lnSpc?.child("spcPct")?.attr("val")?.toFloatOrNull()?.let { it / 100000f },
+            lineSpacing = lnSpc?.child("spcPct")?.attr("val")?.num()?.let { it / 100000f },
             lineExact = pts(lnSpc),
             bullet = pPr?.child("buChar")?.attr("char")?.let { bulletChar(it) },
             bulletNone = if (pPr?.child("buNone") != null) true else null,
             autoNumber = pPr?.child("buAutoNum")?.attr("type"),
             bulletColor = pPr?.child("buClr")?.let { color(it) },
-            spaceBeforePct = pPr?.child("spcBef")?.child("spcPct")?.attr("val")?.toFloatOrNull()?.let { it / 100000f },
-            spaceAfterPct = pPr?.child("spcAft")?.child("spcPct")?.attr("val")?.toFloatOrNull()?.let { it / 100000f },
+            spaceBeforePct = pPr?.child("spcBef")?.child("spcPct")?.attr("val")?.num()?.let { it / 100000f },
+            spaceAfterPct = pPr?.child("spcAft")?.child("spcPct")?.attr("val")?.num()?.let { it / 100000f },
         )
     }
 
@@ -263,8 +282,10 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
         val width = emu(sz?.attr("cx")?.toLongOrNull() ?: 9144000L).coerceIn(72f, 5000f)
         val height = emu(sz?.attr("cy")?.toLongOrNull() ?: 6858000L).coerceIn(72f, 5000f)
         val slides = ArrayList<Slide>()
+        val seen = HashSet<String>()
         for (id in pres.child("sldIdLst")?.all("sldId").orEmpty().take(Deck.MAX_SLIDES)) {
             val path = presRels[id.attr("id")] ?: continue
+            if (!seen.add(path)) continue
             val slide = part(path) ?: continue
             if (slide.root.attr("show") == "0") continue
             val layout = slide.rels.values.firstOrNull { it.contains("slideLayout") }?.let { part(it) }
@@ -334,7 +355,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
                 val cw = emu(chExt?.attr("cx")?.toLongOrNull()).takeIf { it > 0 } ?: gw
                 val ch = emu(chExt?.attr("cy")?.toLongOrNull()).takeIf { it > 0 } ?: gh
                 val inner = Transform(t.x(gx), t.y(gy), emu(chOff?.attr("x")?.toLongOrNull()), emu(chOff?.attr("y")?.toLongOrNull()),
-                    t.sx * (if (cw > 0) gw / cw else 1f), t.sy * (if (ch > 0) gh / ch else 1f))
+                    (t.sx * (if (cw > 0) gw / cw else 1f)).coerceIn(1e-3f, 1e3f), (t.sy * (if (ch > 0) gh / ch else 1f)).coerceIn(1e-3f, 1e3f))
                 for (c in n.children) shapeOf(c, p, layout, master, styles, out, inner, decoration, depth + 1)
             }
             "graphicFrame" -> table(n, t, styles, out)
@@ -375,14 +396,23 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
 
         // Text: master style for the kind of placeholder, then the master's and layout's placeholder, then the shape
         val body = sp.child("txBody")
-        val kind = when (ph?.type) { "title", "ctrTitle" -> "title"; null -> if (ph == null) "other" else "body"; "body", "subTitle", "obj" -> "body"; else -> if (ph.idx != null) "body" else "other" }
+        val kind = when (ph?.type) {
+            "title", "ctrTitle" -> "title"
+            null -> if (ph == null) "other" else "body"
+            "body", "subTitle", "obj" -> "body"
+            "dt", "ftr", "sldNum", "hdr" -> "other"
+            else -> if (ph.idx != null) "body" else "other"
+        }
         val bodyPr = body?.child("bodyPr")
         val lBodyPr = lph?.child("txBody")?.child("bodyPr"); val mBodyPr = mph?.child("txBody")?.child("bodyPr")
         fun bp(name: String) = bodyPr?.attr(name) ?: lBodyPr?.attr(name) ?: mBodyPr?.attr(name)
         val autofit = bodyPr?.child("normAutofit") ?: lBodyPr?.child("normAutofit")
-        val scale = (autofit?.attr("fontScale")?.toFloatOrNull() ?: 100000f) / 100000f
-        val spacingCut = (autofit?.attr("lnSpcReduction")?.toFloatOrNull() ?: 0f) / 100000f
-        val levels = mergeLevels(styles[kind], levels(mph?.child("txBody")?.child("lstStyle")), levels(lph?.child("txBody")?.child("lstStyle")), levels(body?.child("lstStyle")))
+        val scale = (autofit?.attr("fontScale")?.num() ?: 100000f) / 100000f
+        val spacingCut = (autofit?.attr("lnSpcReduction")?.num() ?: 0f) / 100000f
+        // A plain shape's text takes its colour from the shape's style (white on a blue shape), not the master's
+        val fontRefColor = if (ph == null) color(style?.child("fontRef")) else null
+        val base = styles[kind]?.let { arr -> if (fontRefColor != null) Array(9) { (arr[it] ?: Level()).copy(color = fontRefColor) } else arr }
+        val levels = mergeLevels(base, levels(mph?.child("txBody")?.child("lstStyle")), levels(lph?.child("txBody")?.child("lstStyle")), levels(body?.child("lstStyle")))
         val paragraphs = ArrayList<SlidePara>()
         val counters = IntArray(9)
         for (pNode in body?.all("p").orEmpty().take(500)) {
@@ -404,7 +434,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
                     font = rl.font ?: if (kind == "title") majorFont else minorFont,
                 )
             }
-            val endSize = pNode.child("endParaRPr")?.attr("sz")?.toFloatOrNull()?.let { it / 100f } ?: l.size ?: 18f
+            val endSize = pNode.child("endParaRPr")?.attr("sz")?.num()?.let { it / 100f } ?: l.size ?: 18f
             // Automatic numbers count paragraphs at the same level; a deeper level starts again
             val number = l.autoNumber?.let { type ->
                 counters[lvl]++
@@ -488,7 +518,8 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
             var x = r.x
             var col = 0
             val laid = ArrayList<SlideShape.Box>()
-            for (tc in tr.all("tc")) {
+            for (tc in tr.all("tc").take(64)) {
+                if (out.size + laid.size >= Deck.MAX_SHAPES) break
                 val span = (tc.attr("gridSpan")?.toIntOrNull() ?: 1).coerceIn(1, 64)
                 val w = (col until minOf(col + span, cols.size)).sumOf { cols[it].toDouble() }.toFloat()
                 if (tc.attr("hMerge") != "1" && tc.attr("vMerge") != "1") {

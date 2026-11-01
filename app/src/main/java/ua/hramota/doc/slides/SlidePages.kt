@@ -50,21 +50,28 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
     private val cache = object : LinkedHashMap<Int, Laid>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Laid>?) = size > 6
     }
+    /** Decoded pictures, at most [PICTURE_BYTES] together. */
     private val pictures = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?) = size > 16
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean {
+            if (values.sumOf { it.byteCount.toLong() } <= PICTURE_BYTES || size <= 1) return false
+            return true
+        }
     }
+    private val PICTURE_BYTES = 64L * 1024 * 1024
 
     override val pageCount: Int get() = deck.slides.size
     override fun aspect(index: Int): Float = ratio
 
     private fun laid(index: Int): Laid = cache.getOrPut(index) {
         val slide = deck.slides[index]
-        Laid(slide.shapes, slide.shapes.map { s -> if (s is SlideShape.Box) layoutText(s) else emptyList() })
+        Laid(slide.shapes, slide.shapes.map { s -> if (s is SlideShape.Box) (try { layoutText(s) } catch (e: Exception) { emptyList() }) else emptyList() })
     }
 
     /** The paragraphs of a box, each laid out at the box's text width, placed by its vertical anchor. */
     private fun layoutText(b: SlideShape.Box): List<Block> {
         if (b.paragraphs.isEmpty()) return emptyList()
+        // A box with sizes that make no sense (from a damaged file) shows no text rather than failing
+        if (!(b.x.isFinite() && b.y.isFinite() && b.w.isFinite() && b.h.isFinite()) || b.inset.any { !it.isFinite() }) return emptyList()
         val width = if (b.wrap) max(U, (b.w - b.inset[0] - b.inset[2]) * U) else 20000 * U
         val laid = ArrayList<Pair<StaticLayout, Float>>()  // layout and the gap above it
         var total = 0f
@@ -133,7 +140,9 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
     }
 
     /** Draws slide [index] into a new bitmap [widthPx] wide (also used by tests). */
-    fun draw(index: Int, widthPx: Int): Bitmap? {
+    fun draw(index: Int, widthPx: Int): Bitmap? = try { drawSlide(index, widthPx) } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+
+    private fun drawSlide(index: Int, widthPx: Int): Bitmap? {
         if (index !in deck.slides.indices || widthPx <= 0) return null
         val w = widthPx.coerceAtMost(2048)
         val h = (w * ratio).toInt().coerceIn(1, 2048 * 2)
@@ -177,14 +186,16 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
 
     /** A picture decoded at about the size it is shown. */
     private fun picture(key: String, w: Int, h: Int): Bitmap? {
-        val cacheKey = "$key@${w / 128}"
+        // Never decoded larger than the biggest page drawn
+        val tw = w.coerceIn(1, 2048); val th = h.coerceIn(1, 2048)
+        val cacheKey = "$key@${tw / 128}"
         pictures[cacheKey]?.let { return it }
         val bytes = deck.media[key] ?: return null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= w.coerceAtLeast(1) && bounds.outHeight / (sample * 2) >= h.coerceAtLeast(1)) sample *= 2
+        while (bounds.outWidth / (sample * 2) >= tw && bounds.outHeight / (sample * 2) >= th) sample *= 2
         val bmp = try { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) } catch (_: OutOfMemoryError) { null } ?: return null
         pictures[cacheKey] = bmp
         return bmp
@@ -193,9 +204,10 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
     // ---- Text for search and selection ----
     private class Segment(val block: Block, val pageStart: Int)
 
-    private val texts = HashMap<Int, Pair<String, List<Segment>>>()
+    /** Page texts are kept (they are small); the laid-out paragraphs behind them only for recent slides. */
+    private val pageTexts = HashMap<Int, String>()
 
-    private fun textOf(index: Int): Pair<String, List<Segment>> = texts.getOrPut(index) {
+    private fun textOf(index: Int): Pair<String, List<Segment>> = run {
         val sb = StringBuilder()
         val segments = ArrayList<Segment>()
         for (blocks in laid(index).blocks) for (b in blocks) {
@@ -203,11 +215,11 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
             segments += Segment(b, sb.length)
             sb.append(b.layout.text)
         }
-        sb.toString() to segments
+        sb.toString().also { pageTexts[index] = it } to segments
     }
 
     override suspend fun pageText(index: Int): String = withContext(Dispatchers.Default) {
-        if (index !in deck.slides.indices) "" else lock.withLock { textOf(index).first }
+        if (index !in deck.slides.indices) "" else lock.withLock { pageTexts[index] ?: try { textOf(index).first } catch (e: Exception) { "" } }
     }
 
     override suspend fun boxes(index: Int, start: Int, end: Int): List<PageBox> = withContext(Dispatchers.Default) {
