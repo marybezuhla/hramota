@@ -46,6 +46,11 @@ class LaidOutPage(val items: List<PageItem>)
  */
 class TextSource internal constructor(private val cache: LayoutCache, private val build: () -> StaticLayout) {
     val layout: StaticLayout get() = cache.get(this, build)
+    /** The paragraph's characters as laid out, and where each line starts (the end last): page text without a layout. */
+    var text: String = ""
+        internal set
+    var starts: IntArray = IntArray(1)
+        internal set
     /** A new layout, not kept (for measuring). */
     fun fresh(): StaticLayout = build()
 }
@@ -316,6 +321,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val measured = source.fresh()
         val n = measured.lineCount
         val tops = FloatArray(n + 1) { if (it < n) measured.getLineTop(it).toFloat() else measured.getLineBottom(n - 1).toFloat() }
+        source.text = measured.text.toString()
+        source.starts = IntArray(n + 1) { if (it < n) measured.getLineStart(it) else measured.getLineEnd(n - 1) }
         return Para(source, tops, baseX, before, after, pp.widowControl != false, pp.shading, l, r)
     }
 

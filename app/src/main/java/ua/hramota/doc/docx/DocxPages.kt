@@ -96,12 +96,13 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
         val segments = ArrayList<Segment>()
         for (item in page(index)?.items.orEmpty()) {
             if (item !is PageItem.Text) continue
-            val l = item.layout
-            val a = l.getLineStart(item.first)
-            val b = l.getLineEnd(item.last)
+            // From the text kept at measuring: searching a long document builds no layouts
+            val src = item.source
+            val a = src.starts[item.first]
+            val b = src.starts[item.last + 1]
             if (sb.isNotEmpty()) sb.append('\n')
             segments += Segment(item, sb.length, a, b)
-            sb.append(l.text, a, b)
+            sb.append(src.text, a, b)
         }
         // Pictures and tabs stay as placeholders, so positions keep matching the layouts
         return (sb.toString() to segments).also { pageTexts[index] = it }

@@ -79,6 +79,36 @@ class BigDocumentsTest {
         report("CSV ${t.rows.size} rows, ${text.length / 1024} K chars: $ms ms (+$mb MB)")
     }
 
+    // Where reading a large DOCX spends its time: the reading thread's stack, sampled every millisecond
+    @Test fun readerProfile() {
+        val bytes = BigDocs.docxTable(ROWS, 1)
+        repeat(2) { DocxReader.read(ByteArrayInputStream(bytes)) }
+        val worker = Thread.currentThread()
+        val own = HashMap<String, Int>()
+        val inside = HashMap<String, Int>()
+        var samples = 0
+        @Volatile var running = true
+        val sampler = Thread {
+            while (running) {
+                val stack = worker.stackTrace
+                if (stack.isNotEmpty()) {
+                    samples++
+                    val top = stack.first()
+                    own.merge("${top.className.substringAfterLast('.')}.${top.methodName}", 1, Int::plus)
+                    stack.map { "${it.className.substringAfterLast('.')}.${it.methodName}" }.filter { it.contains("Styles") || it.contains("Props") || it.contains("Body") || it.contains("Xml") || it.contains("Parser") || it.contains("Docx") }
+                        .distinct().forEach { inside.merge(it, 1, Int::plus) }
+                }
+                Thread.sleep(1)
+            }
+        }
+        sampler.start()
+        repeat(3) { DocxReader.read(ByteArrayInputStream(bytes)) }
+        running = false
+        sampler.join()
+        report("Reader profile, $samples samples. Own time: " + own.entries.sortedByDescending { it.value }.take(12).joinToString { "${it.key} ${it.value * 100 / samples}%" })
+        report("Reader profile, inclusive: " + inside.entries.sortedByDescending { it.value }.take(20).joinToString { "${it.key} ${it.value * 100 / samples}%" })
+    }
+
     private data class Measured<T>(val value: T, val ms: Long, val mb: Long)
 
     private fun <T> measure(block: () -> T): Measured<T> {
