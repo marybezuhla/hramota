@@ -1,6 +1,7 @@
 package ua.hramota.doc.docx
 
 import org.xmlpull.v1.XmlPullParser
+import ua.hramota.doc.Inspection
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -43,6 +44,7 @@ class DocxDocument(
     val addSpacing: Boolean = false,
     /** Word version the document was laid out for (15 = Word 2013 and later). */
     val compatibilityMode: Int = 15,
+    val inspection: Inspection = Inspection(),
 ) {
     fun picture(rel: String): ByteArray? = rels[rel]?.let { media[it] }
 }
@@ -71,6 +73,9 @@ object DocxReader {
         val parts = HashMap<String, ByteArray>()
         val media = HashMap<String, ByteArray>()
         var mediaTotal = 0L
+        // For the document inspector: what the package carries besides the text
+        var macros = false
+        val embedded = ArrayList<String>()
         ZipInputStream(input).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
@@ -78,7 +83,11 @@ object DocxReader {
                 when {
                     name == "word/document.xml" -> parts[name] = readLimited(zip, MAX_PART)
                     name == "word/styles.xml" || name == "word/numbering.xml" || name == "word/theme/theme1.xml" ||
-                        name == "word/_rels/document.xml.rels" || name == "word/settings.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
+                        name == "word/_rels/document.xml.rels" || name == "word/settings.xml" || name == "word/_rels/settings.xml.rels" ||
+                        name == "word/comments.xml" || name == "docProps/core.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
+                    name.endsWith("vbaProject.bin", ignoreCase = true) || name.startsWith("word/vba", ignoreCase = true) -> macros = true
+                    name.startsWith("word/embeddings/") && !name.endsWith("/") -> if (embedded.size < 100) embedded += name.substringAfterLast('/')
+                    name.startsWith("word/activeX/") && name.endsWith(".xml") -> if (embedded.size < 100) embedded += name.substringAfterLast('/')
                     name.startsWith("word/media/") -> {
                         val bytes = readLimited(zip, MAX_PART)
                         mediaTotal += bytes.size
@@ -128,7 +137,55 @@ object DocxReader {
             ?.firstOrNull { it.attr("name") == "compatibilityMode" }?.attr("val")?.toIntOrNull()
             // No setting means an older Word document
             ?: if (settings != null) 12 else 15
-        return DocxDocument(page, blocks, media, fonts, rels, addSpacing, compat)
+        val inspection = inspect(parts, doc, macros, embedded)
+        return DocxDocument(page, blocks, media, fonts, rels, addSpacing, compat, inspection)
+    }
+
+    /** What the inspector reports: risky parts (never run or fetched) and things to know before sending. */
+    private fun inspect(parts: Map<String, ByteArray>, doc: ByteArray, macros: Boolean, embedded: List<String>): Inspection {
+        fun rels(name: String) = parts[name]?.let { Xml.tree(ByteArrayInputStream(it)) }?.all("Relationship").orEmpty()
+        val docRels = rels("word/_rels/document.xml.rels")
+        val external = (docRels + rels("word/_rels/settings.xml.rels")).filter { it.attr("TargetMode") == "External" }
+        val links = external.count { it.attr("Type")?.endsWith("/hyperlink") == true }
+        val core = parts["docProps/core.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
+        // Byte searches: the body can be tens of megabytes, too big to turn into one string
+        fun has(vararg marks: String) = marks.any { indexOf(doc, it.toByteArray()) >= 0 }
+        return Inspection(
+            macros = macros,
+            embedded = embedded,
+            // Anything external that is not a link: a remote template, a linked picture or object
+            remoteResources = external.size - links,
+            dde = has(">DDEAUTO", "> DDEAUTO", ">DDE ", "> DDE ", "w:instr=\"DDE", "w:instr=\" DDE"),
+            links = links,
+            trackedChanges = has("<w:ins ", "<w:del "),
+            comments = parts["word/comments.xml"]?.let { c -> count(c, "<w:comment ".toByteArray()) } ?: 0,
+            hiddenText = has("<w:vanish/>", "<w:vanish "),
+            author = core?.find("creator")?.let { textOf(it) },
+            lastModifiedBy = core?.find("lastModifiedBy")?.let { textOf(it) },
+        )
+    }
+
+    private fun textOf(n: XmlNode): String? = n.text.takeIf { it.isNotBlank() }?.take(200)
+
+    private fun indexOf(data: ByteArray, mark: ByteArray, from: Int = 0): Int {
+        if (mark.isEmpty()) return -1
+        var i = from
+        val last = data.size - mark.size
+        outer@ while (i <= last) {
+            if (data[i] == mark[0]) {
+                for (k in 1 until mark.size) if (data[i + k] != mark[k]) { i++; continue@outer }
+                return i
+            }
+            i++
+        }
+        return -1
+    }
+
+    private fun count(data: ByteArray, mark: ByteArray): Int {
+        var n = 0
+        var i = indexOf(data, mark)
+        while (i >= 0 && n < 100_000) { n++; i = indexOf(data, mark, i + mark.size) }
+        return n
     }
 
     private fun pageSetup(s: XmlNode): PageSetup {
