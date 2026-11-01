@@ -11,3 +11,7 @@
 | Arimo | Arial, Helvetica | SIL OFL 1.1 |
 | Tinos | Times New Roman | SIL OFL 1.1 |
 | Cousine | Courier New | SIL OFL 1.1 |
+
+## PDFium (`pdfium/`)
+
+Рушій PDF із Chromium (BSD-3-Clause; ліцензії складників — у `pdfium/licenses`), готова збірка з [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) (MIT), реліз `chromium/8125`, без V8. Походження перевірено атестацією GitHub (`pdfium/ATTESTATION.txt`).

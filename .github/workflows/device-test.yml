@@ -39,7 +39,8 @@ jobs:
           target: default
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: gradle --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee device.log
+          # Each script line runs on its own; pipefail keeps a failed test run from looking green
+          script: bash -c "set -o pipefail; gradle --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee device.log"
       - name: Collect results
         if: always()
         run: |

@@ -176,6 +176,14 @@ class ScreensTest {
     @Test fun viewerPages() = shot("04-viewer-docx-pages") {
         ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, bookmarks = setOf(0))
     }
+    @Test fun viewerInspector() = shot("04-viewer-inspector") {
+        val risky = ua.hramota.doc.Inspection(macros = true, embedded = listOf("oleObject1.bin"), remoteResources = 1, links = 3, trackedChanges = true, author = "Автор документа")
+        ViewerScreen("Рахунок.docx", ViewerState.Paged(docxPages("04-tables.docx"), emptyList(), risky), onBack = {})
+    }
+    @Test fun viewerInspectorQuiet() = shot("04-viewer-inspector-info") {
+        val info = ua.hramota.doc.Inspection(comments = 2, trackedChanges = true)
+        ViewerScreen("Протокол.docx", ViewerState.Paged(docxPages("03-lists.docx"), emptyList(), info), onBack = {})
+    }
     @Test fun viewerOverview() = shot("04-viewer-overview") {
         ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {}, bookmarks = setOf(0, 3), startInOverview = true)
     }
