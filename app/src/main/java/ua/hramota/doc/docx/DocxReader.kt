@@ -29,7 +29,7 @@ sealed interface Block {
     data class Table(val columns: List<Int>, val rows: List<Row>, val borders: Boolean, val indent: Int) : Block
 }
 
-data class Row(val cells: List<Cell>, val height: Int?, val exact: Boolean)
+data class Row(val cells: List<Cell>, val height: Int?, val exact: Boolean, val cantSplit: Boolean = false)
 data class Cell(val span: Int, val mergedAbove: Boolean, val blocks: List<Block>, val shading: Int?)
 
 class DocxDocument(
@@ -363,6 +363,7 @@ object DocxReader {
                     },
                     height = trh?.attr("val")?.toIntOrNull()?.coerceIn(0, ParaProps.MAX_LEN),
                     exact = trh?.attr("hRule") == "exact",
+                    cantSplit = tr.path("trPr", "cantSplit").isOn() == true,
                 )
             }.toList()
             return Block.Table(cols, rows, borders, indent)

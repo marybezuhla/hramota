@@ -28,6 +28,10 @@ class PdfEngineService : Service() {
         private var handle = 0L
         /** When the call now inside PDFium started (0 = none). */
         @Volatile private var busySince = 0L
+        /** The last thing that went wrong, sent back so the app can say why a page is missing. */
+        private var problem: String? = null
+        /** A page drawn for fetching in parts. */
+        private var kept: java.nio.ByteBuffer? = null
 
         init {
             // Watchdog: a file that makes PDFium loop or work for too long ends this process,
@@ -77,22 +81,54 @@ class PdfEngineService : Service() {
                         val index = data.readInt()
                         val width = data.readInt()
                         val height = data.readInt()
-                        val memory: SharedMemory? = if (data.readInt() == 1) SharedMemory.CREATOR.createFromParcel(data) else null
-                        var ok = false
+                        val memory: SharedMemory? = try {
+                            if (data.readInt() == 1) SharedMemory.CREATOR.createFromParcel(data) else null
+                        } catch (e: Exception) { problem = e.toString(); null }
+                        var status = if (memory == null) R_TRANSPORT else R_FAILED
+                        if (handle <= 0) status = R_NO_DOCUMENT
                         if (handle > 0 && memory != null) {
                             try {
                                 val buffer = memory.mapReadWrite()
                                 try {
-                                    ok = PdfiumNative.render(handle, index, buffer, width, height, width * 4)
+                                    if (PdfiumNative.render(handle, index, buffer, width, height, width * 4)) status = R_OK
                                 } finally {
                                     SharedMemory.unmap(buffer)
                                 }
+                            } catch (e: Exception) {
+                                // Shared memory could not be used here: the app switches to sending pixels in parts
+                                problem = e.toString(); status = R_TRANSPORT
                             } finally {
                                 memory.close()
                             }
                         }
                         reply?.writeNoException()
-                        reply?.writeInt(if (ok) 1 else 0)
+                        reply?.writeInt(status)
+                        reply?.writeString(if (status == R_OK) null else problem?.take(300))
+                    }
+                    RENDER_KEEP -> {
+                        // Draws into memory of this process; the app then fetches it in parts (PIXELS)
+                        val index = data.readInt(); val width = data.readInt(); val height = data.readInt()
+                        kept = null
+                        var status = R_NO_DOCUMENT
+                        if (handle > 0 && width in 1..MAX_SIDE && height in 1..MAX_SIDE * 2) {
+                            status = try {
+                                val buffer = java.nio.ByteBuffer.allocateDirect(width * height * 4)
+                                if (PdfiumNative.render(handle, index, buffer, width, height, width * 4)) { kept = buffer; R_OK } else R_FAILED
+                            } catch (e: Throwable) { problem = e.toString(); R_FAILED }
+                        }
+                        reply?.writeNoException()
+                        reply?.writeInt(status)
+                    }
+                    PIXELS -> {
+                        val offset = data.readInt(); val length = data.readInt().coerceIn(0, CHUNK)
+                        val buffer = kept
+                        reply?.writeNoException()
+                        if (buffer == null || offset < 0 || offset > buffer.capacity()) { reply?.writeByteArray(ByteArray(0)); return true }
+                        val n = minOf(length, buffer.capacity() - offset)
+                        val out = ByteArray(n)
+                        buffer.position(offset); buffer.get(out, 0, n)
+                        if (offset + n >= buffer.capacity()) kept = null
+                        reply?.writeByteArray(out)
                     }
                     INSPECT -> {
                         reply?.writeNoException()
@@ -135,6 +171,16 @@ class PdfEngineService : Service() {
         const val CLOSE = IBinder.FIRST_CALL_TRANSACTION + 5
         const val RECTS = IBinder.FIRST_CALL_TRANSACTION + 6
         const val CHAR_AT = IBinder.FIRST_CALL_TRANSACTION + 7
+        const val RENDER_KEEP = IBinder.FIRST_CALL_TRANSACTION + 8
+        const val PIXELS = IBinder.FIRST_CALL_TRANSACTION + 9
+        /** Render results. */
+        const val R_OK = 0
+        const val R_FAILED = 1
+        const val R_TRANSPORT = 2
+        const val R_NO_DOCUMENT = 3
+        /** Bytes sent per PIXELS call (well under the Binder transaction limit). */
+        const val CHUNK = 256 * 1024
+        const val MAX_SIDE = 2048
         /** Positions on a page are exchanged on a GRID x GRID raster of the whole page (fractions × GRID). */
         const val GRID = 100_000
         /** Pages scanned for links by the inspector. */

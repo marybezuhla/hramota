@@ -63,6 +63,28 @@ class DocxRenderTest {
         assertTrue(texts(pages.pages[pages.pageCount - 2]).any { it.startsWith("Додаток 1") })
     }
 
+    /** Rows taller than a page break across pages and lose no line of text. */
+    @Test fun tallTableRowsBreakAcrossPages() {
+        val file = docs().first { it.name.startsWith("06-") }
+        val doc = file.inputStream().use { DocxReader.read(it) }
+        val pages = DocxPages(doc, fonts)
+        assertTrue("pages: ${pages.pageCount}", pages.pageCount >= 4)
+        // Every line of every cell paragraph appears exactly once across the pages
+        val placed = HashMap<android.text.Layout, MutableSet<Int>>()
+        for (page in pages.pages) for (t in page.items.filterIsInstance<PageItem.Text>()) {
+            val set = placed.getOrPut(t.layout) { HashSet() }
+            for (line in t.first..t.last) assertTrue("line placed twice", set.add(line))
+        }
+        for ((layout, set) in placed) assertEquals("lines of a paragraph", layout.lineCount, set.size)
+        // Nothing hangs below the bottom margin
+        val bottom = doc.page.height - doc.page.bottom
+        for (page in pages.pages) for (t in page.items.filterIsInstance<PageItem.Text>()) {
+            val h = t.layout.getLineBottom(t.last) - t.layout.getLineTop(t.first)
+            assertTrue("text below the margin", (t.y + h) / DocxLayout.U * 20 <= bottom + 20)
+        }
+        assertTrue(pages.pages.last().items.filterIsInstance<PageItem.Text>().any { it.layout.text.toString() == "КІНЕЦЬ ТАБЛИЦІ" })
+    }
+
     @Test fun numberingLabels() {
         val n = Numbering.Companion
         assertEquals("iv", n.format(4, "lowerRoman"))

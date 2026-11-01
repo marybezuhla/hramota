@@ -55,33 +55,69 @@ class PdfiumPages private constructor(
         return if (a.isFinite()) a.coerceIn(0.25f, 4f) else 1.414f
     }
 
+    /** True once shared memory failed for this document; pages then come in parts over Binder. */
+    @Volatile private var inParts = false
+    @Volatile override var problem: String? = null
+        private set
+
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
         lock.withLock {
-            if (closed || index !in 0 until pageCount || widthPx <= 0 || !binder.isBinderAlive) return@withLock null
+            if (closed || index !in 0 until pageCount || widthPx <= 0) return@withLock null
+            if (!binder.isBinderAlive) { problem = "engine stopped"; return@withLock null }
             val w = widthPx.coerceAtMost(MAX_WIDTH)
             val key = index.toLong() shl 32 or w.toLong()
             cache[key]?.let { return@withLock it }
             val h = (w * aspect(index)).toInt().coerceIn(1, MAX_WIDTH * 2)
-            val memory = SharedMemory.create("page", w * h * 4)
-            try {
-                val ok = call(PdfEngineService.RENDER, { d ->
-                    d.writeInt(index); d.writeInt(w); d.writeInt(h)
-                    d.writeInt(1); memory.writeToParcel(d, 0)
-                }) { it.readInt() } == 1
-                // The engine process is not trusted: the memory must still be exactly the page's size
-                if (!ok || memory.size != w * h * 4) return@withLock null
-                memory.setProtect(android.system.OsConstants.PROT_READ)
-                val buffer = memory.mapReadOnly()
-                val bitmap = try {
-                    Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(buffer) }
-                } finally {
-                    SharedMemory.unmap(buffer)
-                }
-                bitmap.asImageBitmap().also { remember(key, it, w, h) }
-            } finally {
-                memory.close()
-            }
+            val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: if (inParts) viaParts(index, w, h) else null
+            bitmap?.asImageBitmap()?.also { remember(key, it, w, h) }
         }
+    }
+
+    private fun viaSharedMemory(index: Int, w: Int, h: Int): Bitmap? {
+        val memory = try { SharedMemory.create("page", w * h * 4) } catch (e: Exception) { inParts = true; problem = e.toString(); return null }
+        try {
+            val result = call(PdfEngineService.RENDER, { d ->
+                d.writeInt(index); d.writeInt(w); d.writeInt(h)
+                d.writeInt(1); memory.writeToParcel(d, 0)
+            }) { it.readInt() to it.readString() }
+            if (result == null) { problem = "engine stopped"; return null }
+            when (result.first) {
+                PdfEngineService.R_OK -> Unit
+                PdfEngineService.R_TRANSPORT -> { inParts = true; problem = result.second; return null }
+                else -> { problem = result.second ?: "render ${result.first}"; return null }
+            }
+            // The engine process is not trusted: the memory must still hold the whole page
+            if (memory.size < w * h * 4) { inParts = true; problem = "memory ${memory.size}"; return null }
+            val buffer = memory.mapReadOnly()
+            return try {
+                Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { buffer.limit(w * h * 4); it.copyPixelsFromBuffer(buffer) }
+            } finally {
+                SharedMemory.unmap(buffer)
+            }
+        } catch (e: Exception) {
+            inParts = true; problem = e.toString(); return null
+        } finally {
+            memory.close()
+        }
+    }
+
+    /** For tests: use the transfer in parts from now on. */
+    internal fun useParts() { inParts = true; cache.clear(); cacheBytes = 0 }
+
+    /** The page drawn in the engine's own memory and fetched in parts: slower, works everywhere. */
+    private fun viaParts(index: Int, w: Int, h: Int): Bitmap? {
+        val status = call(PdfEngineService.RENDER_KEEP, { d -> d.writeInt(index); d.writeInt(w); d.writeInt(h) }) { it.readInt() }
+        if (status != PdfEngineService.R_OK) { problem = "render ${status ?: "engine stopped"}"; return null }
+        val total = w * h * 4
+        val buffer = java.nio.ByteBuffer.allocate(total)
+        while (buffer.position() < total) {
+            val part = call(PdfEngineService.PIXELS, { d -> d.writeInt(buffer.position()); d.writeInt(PdfEngineService.CHUNK) }) { it.createByteArray() }
+            // An empty or oversized part from the engine ends the page
+            if (part == null || part.isEmpty() || part.size > total - buffer.position()) { problem = "pixels"; return null }
+            buffer.put(part)
+        }
+        buffer.rewind()
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(buffer) }
     }
 
     private fun remember(key: Long, image: ImageBitmap, w: Int, h: Int) {

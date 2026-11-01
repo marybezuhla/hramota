@@ -135,7 +135,26 @@ def flow_doc():
     d.save(os.path.join(OUT, "05-flow.docx"))
 
 
+def long_table_doc():
+    """A comparison table (old text | new text) whose rows are taller than a page."""
+    d = Document(); base(d, font="Times New Roman", size=12)
+    p = d.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("ПОРІВНЯЛЬНА ТАБЛИЦЯ"); r.bold = True
+    t = d.add_table(rows=1, cols=2); t.style = "Table Grid"
+    t.cell(0, 0).text = "Зміст положення чинного акта"; t.cell(0, 1).text = "Зміст відповідного положення проєкту"
+    for k in range(1, 4):
+        cells = t.add_row().cells
+        for c, mark in zip(cells, ("", " (нова редакція)")):
+            c.text = ""
+            c.paragraphs[0].add_run(f"Стаття {k}.{mark}").bold = True
+            for j in range(14):
+                c.add_paragraph(f"{j + 1}) {UK}")
+    last = t.add_row().cells
+    last[0].text = "Останній рядок"; last[1].text = "КІНЕЦЬ ТАБЛИЦІ"
+    d.save(os.path.join(OUT, "06-long-table.docx"))
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    fonts_doc(); paragraphs_doc(); lists_doc(); tables_doc(); flow_doc()
+    fonts_doc(); paragraphs_doc(); lists_doc(); tables_doc(); flow_doc(); long_table_doc()
     print("written to", os.path.abspath(OUT))

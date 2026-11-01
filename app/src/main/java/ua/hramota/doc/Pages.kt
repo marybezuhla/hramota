@@ -8,6 +8,8 @@ interface Pages {
     /** Height divided by width of page [index]. */
     fun aspect(index: Int): Float
     suspend fun render(index: Int, widthPx: Int): ImageBitmap?
+    /** Why the last page could not be drawn, if known (shown on the page instead of a blank sheet). */
+    val problem: String? get() = null
 }
 
 /** A box on a page, in fractions of the page's width and height (0..1). */
