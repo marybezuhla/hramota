@@ -24,6 +24,8 @@ class Recents(private val context: Context) {
 
     /** Remembers [uri] as opened now, keeping read access when the file's app allows it. */
     fun add(uri: Uri, name: String) {
+        // The person chose not to keep a list
+        if (!Settings.get(context).state.value.rememberRecent) return
         try {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
