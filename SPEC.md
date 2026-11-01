@@ -61,5 +61,5 @@
 - `deps.yml`: контрольні суми бібліотек (`gradle/verification-metadata.xml`) у гілку `deps-metadata` для перевірки.
 - Екрани рендеряться тестом `screens/ScreensTest.kt` (Robolectric) у `app/build/screens`: світла й темна тема, українська й англійська.
 - `device-test.yml`: тести на емуляторі Android (x86_64, API 34) — PDF-рушій в ізольованому процесі (`androidTest/pdf/PdfEngineTest.kt`, файли з `scripts/make_test_pdf.py`) і великі документи (`androidTest/big`): PDF на 600 сторінок, таблиця DOCX на ~1000 сторінок, порівняння двох її версій; час — у підсумку запуску.
-- Таблиці: `scripts/make_test_sheets.py` (openpyxl, вигадані дані) → `app/src/test/resources/sheets` (.xlsx пересохранений LibreOffice, щоб формули мали значення, і .xls від LibreOffice); `SheetsTest` перевіряє однакове читання обох і формати чисел.
+- Таблиці: `scripts/make_test_sheets.py` (openpyxl, вигадані дані) → `app/src/test/resources/sheets` (.xlsx ще раз збережений LibreOffice, щоб формули мали значення, і .xls від LibreOffice); `SheetsTest` перевіряє однакове читання обох і формати чисел.
 - Великі документи на комп'ютері (`test/big/BigDocumentsTest.kt`, генератор `sharedTest/.../BigDocs.kt`): час і пам'ять — у `ci-logs/big-report.txt`; там же профіль читання DOCX.
