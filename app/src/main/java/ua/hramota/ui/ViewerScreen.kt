@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.activity.compose.BackHandler
@@ -116,6 +120,19 @@ fun ViewerScreen(
     val context = LocalContext.current
     val current by remember { derivedStateOf { list.firstVisibleItemIndex } }
     val textPages = (state as? ViewerState.Paged)?.pages as? TextPages
+    // The reading view, plain text and tables scroll in their own list
+    val textList = rememberLazyListState()
+    val readingParagraphs = (state as? ViewerState.Paged)?.reading?.takeIf { reading }
+    // What search looks through: pages, paragraphs or table rows
+    val source: Searchable? = when {
+        overview -> null
+        readingParagraphs != null -> remember(readingParagraphs) { Searchable(readingParagraphs.size) { readingParagraphs[it].text } }
+        textPages != null -> remember(textPages) { Searchable(textPages.pageCount) { textPages.pageText(it) } }
+        state is ViewerState.Text -> remember(state) { Searchable(state.paragraphs.size) { state.paragraphs[it].text } }
+        state is ViewerState.Table -> remember(state) { Searchable(state.table.rows.size) { rowText(state.table.rows[it]) } }
+        else -> null
+    }
+    val inPages = readingParagraphs == null && textPages != null
 
     // Search: pages are scanned in order and results appear as they are found
     var searching by rememberSaveable { mutableStateOf(startSearch != null) }
@@ -125,17 +142,23 @@ fun ViewerScreen(
     var scanning by remember { mutableStateOf(false) }
     // The query whose search has finished: "not found" is said only about that one
     var searched by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(textPages, query, searching) {
+    LaunchedEffect(source, query, searching) {
         hits = emptyList(); hitIndex = 0; scanning = false; searched = null
-        if (!searching || textPages == null || query.isBlank()) return@LaunchedEffect
+        if (!searching || source == null || query.isBlank()) return@LaunchedEffect
         scanning = true
         delay(300)
         val found = ArrayList<SearchHit>()
-        for (p in 0 until textPages.pageCount) {
-            val pageText = textPages.pageText(p)
-            withContext(Dispatchers.Default) { Search.find(pageText, query) }.forEach { found += SearchHit(p, it.first, it.last + 1) }
-            if (p % 8 == 7 || p == textPages.pageCount - 1 || found.size >= MAX_HITS) hits = found.toList()
-            if (found.size >= MAX_HITS) break
+        // Pages are fetched one by one (a PDF page comes from the engine); paragraphs and rows in batches
+        val batch = if (inPages) 1 else 2000
+        var p = 0
+        while (p < source.count && found.size < MAX_HITS) {
+            val end = minOf(source.count, p + batch)
+            val texts = (p until end).map { source.text(it) }
+            withContext(Dispatchers.Default) {
+                for ((k, t) in texts.withIndex()) for (r in Search.find(t, query)) found += SearchHit(p + k, r.first, r.last + 1)
+            }
+            p = end
+            if (!inPages || p % 8 == 0 || p == source.count || found.size >= MAX_HITS) hits = found.toList()
         }
         hits = found.toList()
         scanning = false
@@ -143,7 +166,15 @@ fun ViewerScreen(
     }
     val hitsByPage = remember(hits) { hits.groupBy { it.page } }
     val currentHit = hits.getOrNull(hitIndex)
-    LaunchedEffect(currentHit) { currentHit?.let { list.animateScrollToItem(it.page) } }
+    LaunchedEffect(currentHit) {
+        val hit = currentHit ?: return@LaunchedEffect
+        when {
+            inPages -> list.animateScrollToItem(hit.page)
+            // The first table row stays on top: show the found row just below it
+            state is ViewerState.Table -> textList.animateScrollToItem(maxOf(0, hit.page - 1))
+            else -> textList.animateScrollToItem(hit.page + if (state is ViewerState.Text && hasNote(state)) 1 else 0)
+        }
+    }
 
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     BackHandler(enabled = overview || searching || selection != null) {
@@ -160,7 +191,7 @@ fun ViewerScreen(
             onNext = { if (hits.isNotEmpty()) hitIndex = (hitIndex + 1) % hits.size },
             onClose = { searching = false },
         ) else TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
-            if (textPages != null && !reading && !overview) IconButton(onClick = { searching = true; selection = null }) {
+            if (source != null) IconButton(onClick = { searching = true; selection = null }) {
                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_open))
             }
             if (state is ViewerState.Paged && !reading) {
@@ -196,10 +227,13 @@ fun ViewerScreen(
                     stringResource(R.string.unsupported_title),
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
-                is ViewerState.Text -> TextDocument(state)
-                is ViewerState.Table -> TableDocument(state.table)
+                is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Paged -> when {
-                    reading && state.reading != null -> TextDocument(ViewerState.Text(state.reading, Format.DOCX), note = false)
+                    reading && state.reading != null -> TextDocument(
+                        ViewerState.Text(state.reading, Format.DOCX), textList,
+                        if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, note = false,
+                    )
                     overview -> PageOverview(state.pages, bookmarks, current) { page ->
                         overview = false
                         scope.launch { list.scrollToItem(page) }
@@ -235,6 +269,28 @@ fun ViewerScreen(
 
 /** Most matches collected for one search. */
 private const val MAX_HITS = 5000
+
+/** Something search can look through, item by item (a page, a paragraph or a table row). */
+private class Searchable(val count: Int, val text: suspend (Int) -> String)
+
+private fun hasNote(state: ViewerState.Text) = state.format == Format.ODT || state.format == Format.DOC
+
+/** Text with found matches marked; [current] is the match search is on. */
+@Composable
+internal fun highlighted(text: String, hits: List<SearchHit>?, current: SearchHit?, offset: Int = 0): AnnotatedString {
+    if (hits.isNullOrEmpty()) return AnnotatedString(text)
+    return buildAnnotatedString {
+        append(text)
+        for (h in hits) {
+            val a = (h.start - offset).coerceIn(0, text.length)
+            val b = (h.end - offset).coerceIn(0, text.length)
+            if (a < b) addStyle(SpanStyle(background = if (h == current) CURRENT_HIT else HIT), a, b)
+        }
+    }
+}
+
+private val HIT = Color(0x80FFD54F)
+private val CURRENT_HIT = Color(0xCCFF9800)
 
 private suspend fun selectedText(pages: TextPages, sel: TextSelection): String {
     val t = pages.pageText(sel.page)
@@ -309,9 +365,15 @@ private fun Message(title: String, body: String?) {
 
 /** Reading view: text flows to the screen width, headings stand out, text can be selected and copied. */
 @Composable
-private fun TextDocument(state: ViewerState.Text, note: Boolean = state.format == Format.ODT || state.format == Format.DOC) {
+private fun TextDocument(
+    state: ViewerState.Text,
+    list: LazyListState,
+    hits: Map<Int, List<SearchHit>> = emptyMap(),
+    current: SearchHit? = null,
+    note: Boolean = hasNote(state),
+) {
     SelectionContainer {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
             if (note) item {
                 Text(
                     stringResource(R.string.simplified_note),
@@ -321,13 +383,13 @@ private fun TextDocument(state: ViewerState.Text, note: Boolean = state.format =
                         .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
                 )
             }
-            itemsIndexed(state.paragraphs) { _, p -> ParagraphText(p) }
+            itemsIndexed(state.paragraphs) { i, p -> ParagraphText(p, hits[i], current) }
         }
     }
 }
 
 @Composable
-private fun ParagraphText(p: Paragraph) {
+private fun ParagraphText(p: Paragraph, hits: List<SearchHit>? = null, current: SearchHit? = null) {
     val style = when (p.heading) {
         1 -> MaterialTheme.typography.headlineSmall
         2 -> MaterialTheme.typography.titleLarge
@@ -339,7 +401,7 @@ private fun ParagraphText(p: Paragraph) {
         Box(Modifier.padding(vertical = 4.dp))
     } else {
         Text(
-            p.text,
+            highlighted(p.text, hits, current),
             style = style,
             fontWeight = if (p.heading > 0) FontWeight.SemiBold else null,
             modifier = Modifier.padding(top = if (p.heading > 0) 16.dp else 4.dp, bottom = 4.dp),

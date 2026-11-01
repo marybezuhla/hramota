@@ -250,4 +250,6 @@ class ScreensTest {
     @Test fun viewerCsv() = shot("10-viewer-csv") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
     @Config(qualifiers = "+night")
     @Test fun viewerCsvDark() = shot("10-viewer-csv-dark") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}) }
+    @Test fun viewerCsvSearch() = shot("10-viewer-csv-search") { ViewerScreen("Витрати 2026.csv", ViewerState.Table(CsvReader.parse(budgetCsv)), onBack = {}, startSearch = "2100") }
+    @Test fun viewerTextSearch() = shot("04-viewer-reading-search") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}, startSearch = "листопада") }
 }

@@ -62,7 +62,7 @@ object DocxReader {
     const val MAX_SMALL_PART = 8L * 1024 * 1024
     const val MAX_MEDIA_TOTAL = 96L * 1024 * 1024
     /** Paragraphs and table cells read; a longer document shows its first part. */
-    const val MAX_BLOCKS = 100_000
+    const val MAX_BLOCKS = 400_000
     /** Tables inside tables, and wrappers (links, insertions) inside a paragraph. */
     const val MAX_TABLE_DEPTH = 16
     const val MAX_INLINE_DEPTH = 64
@@ -120,7 +120,12 @@ object DocxReader {
             when (p.next()) {
                 XmlPullParser.START_TAG -> when {
                     p.name == "body" -> inBody = true
-                    inBody && (p.name == "p" || p.name == "tbl" || p.name == "sectPr" || p.name == "sdt") -> {
+                    // A table can run to thousands of rows: it is read row by row
+                    inBody && p.name == "tbl" -> {
+                        body.streamTable(p, blocks)
+                        if (body.count > MAX_BLOCKS) break
+                    }
+                    inBody && (p.name == "p" || p.name == "sectPr" || p.name == "sdt") -> {
                         val node = Xml.subtree(p)
                         when (node.name) {
                             "sectPr" -> page = pageSetup(node)
@@ -335,37 +340,64 @@ object DocxReader {
             val tblPr = t.child("tblPr")
             val styleId = tblPr?.child("tblStyle")?.attr("val")
             tableStyles += styleId
-            try { return tableBody(t, tblPr, styleId, depth) } finally { tableStyles.removeAt(tableStyles.size - 1) }
+            try {
+                // Rows stop with the block limit too: a table cannot hold millions of rows in memory
+                val rows = t.all("tr").asSequence().takeWhile { count <= MAX_BLOCKS }.map { row(it, depth) }.toList()
+                return tableOf(tblPr, t.child("tblGrid"), styleId, rows)
+            } finally { tableStyles.removeAt(tableStyles.size - 1) }
         }
 
-        private fun tableBody(t: XmlNode, tblPr: XmlNode?, styleId: String?, depth: Int): Block.Table {
+        /** A top-level table straight from the parser (at its start tag), one row tree at a time. */
+        fun streamTable(p: XmlPullParser, out: MutableList<Block>) {
+            var tblPr: XmlNode? = null
+            var grid: XmlNode? = null
+            val rows = ArrayList<Row>()
+            tableStyles += null
+            try {
+                while (true) when (p.next()) {
+                    XmlPullParser.START_TAG -> {
+                        val node = Xml.subtree(p)
+                        when (node.name) {
+                            "tblPr" -> { tblPr = node; tableStyles[tableStyles.size - 1] = node.child("tblStyle")?.attr("val") }
+                            "tblGrid" -> grid = node
+                            "tr" -> if (count <= MAX_BLOCKS) rows += row(node, 1)
+                        }
+                    }
+                    XmlPullParser.END_TAG -> if (p.name == "tbl") break
+                    XmlPullParser.END_DOCUMENT -> break
+                }
+                out += tableOf(tblPr, grid, tableStyles.last(), rows)
+            } finally { tableStyles.removeAt(tableStyles.size - 1) }
+        }
+
+        private fun row(tr: XmlNode, depth: Int): Row {
+            val trh = tr.path("trPr", "trHeight")
+            return Row(
+                cells = tr.all("tc").take(MAX_COLUMNS).map { tc ->
+                    val pr = tc.child("tcPr")
+                    val vm = pr?.child("vMerge")
+                    val inner = ArrayList<Block>()
+                    count++
+                    for (c in tc.children) blocks(c, inner, depth)
+                    Cell(
+                        span = (pr?.child("gridSpan")?.attr("val")?.toIntOrNull() ?: 1).coerceIn(1, MAX_COLUMNS),
+                        mergedAbove = vm != null && vm.attr("val") != "restart",
+                        blocks = inner,
+                        shading = pr?.child("shd")?.attr("fill")?.let(::hexColor),
+                    )
+                },
+                height = trh?.attr("val")?.toIntOrNull()?.coerceIn(0, ParaProps.MAX_LEN),
+                exact = trh?.attr("hRule") == "exact",
+                cantSplit = tr.path("trPr", "cantSplit").isOn() == true,
+            )
+        }
+
+        private fun tableOf(tblPr: XmlNode?, grid: XmlNode?, styleId: String?, rows: List<Row>): Block.Table {
             val direct = tblPr?.child("tblBorders")?.children?.map { it.attr("val") }
             val borders = if (direct != null && direct.isNotEmpty()) direct.any { it != null && it != "nil" && it != "none" } else styles.tableHasBorders(styleId)
-            val cols = t.child("tblGrid")?.all("gridCol")?.take(MAX_COLUMNS)
+            val cols = grid?.all("gridCol")?.take(MAX_COLUMNS)
                 ?.map { (it.attr("w")?.toIntOrNull() ?: 0).coerceIn(0, ParaProps.MAX_LEN) }.orEmpty()
             val indent = (tblPr?.child("tblInd")?.attr("w")?.toIntOrNull() ?: 0).coerceIn(-ParaProps.MAX_LEN, ParaProps.MAX_LEN)
-            // Rows stop with the block limit too: a table cannot hold millions of rows in memory
-            val rows = t.all("tr").asSequence().takeWhile { count <= MAX_BLOCKS }.map { tr ->
-                val trh = tr.path("trPr", "trHeight")
-                Row(
-                    cells = tr.all("tc").take(MAX_COLUMNS).map { tc ->
-                        val pr = tc.child("tcPr")
-                        val vm = pr?.child("vMerge")
-                        val inner = ArrayList<Block>()
-                        count++
-                        for (c in tc.children) blocks(c, inner, depth)
-                        Cell(
-                            span = (pr?.child("gridSpan")?.attr("val")?.toIntOrNull() ?: 1).coerceIn(1, MAX_COLUMNS),
-                            mergedAbove = vm != null && vm.attr("val") != "restart",
-                            blocks = inner,
-                            shading = pr?.child("shd")?.attr("fill")?.let(::hexColor),
-                        )
-                    },
-                    height = trh?.attr("val")?.toIntOrNull()?.coerceIn(0, ParaProps.MAX_LEN),
-                    exact = trh?.attr("hRule") == "exact",
-                    cantSplit = tr.path("trPr", "cantSplit").isOn() == true,
-                )
-            }.toList()
             return Block.Table(cols, rows, borders, indent)
         }
     }
