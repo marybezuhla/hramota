@@ -117,6 +117,15 @@ private class Parser(file: ByteArray) {
     private val fcLcbStart = lwStart + cslw * 4 + 2
     private val fcLcbCount = u16(word, fcLcbStart - 2)
 
+    /** From where structure [index] starts to the end of the table stream (list levels follow the list table). */
+    private fun partOnwards(index: Int): ByteArray? {
+        if (index >= fcLcbCount) return null
+        val fc = i32(word, fcLcbStart + index * 8)
+        val lcb = i32(word, fcLcbStart + index * 8 + 4)
+        if (lcb <= 0 || fc < 0 || fc >= table.size) return null
+        return table.copyOfRange(fc, table.size)
+    }
+
     private fun part(index: Int): ByteArray? {
         if (index >= fcLcbCount) return null
         val fc = i32(word, fcLcbStart + index * 8)
@@ -331,7 +340,7 @@ private class Parser(file: ByteArray) {
 
     // ---- Lists ----
     private val numbering: Numbering = run {
-        val lst = part(73) ?: return@run Numbering.EMPTY
+        val lst = partOnwards(73) ?: return@run Numbering.EMPTY
         val lfo = part(74) ?: return@run Numbering.EMPTY
         try {
             val count = u16(lst, 0).coerceAtMost(4096)
