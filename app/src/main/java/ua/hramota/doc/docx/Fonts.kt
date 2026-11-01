@@ -13,15 +13,15 @@ import android.graphics.fonts.FontStyle
  */
 class Fonts(private val assets: AssetManager?) {
     /** A bundled family and how Word measures a line of the office font it replaces. */
-    enum class Family(val file: String, val ascent: Float, val descent: Float, val fallback: Family? = null, val system: String) {
+    enum class Family(val file: String, val ascent: Float, val descent: Float, val fallback: Family? = null, val system: String, val leading: Float = 0f) {
         CARLITO("Carlito", 0.9521f, 0.2686f, system = "sans-serif"),
-        TINOS("Tinos", 0.8911f, 0.2163f, system = "serif"),
+        TINOS("Tinos", 0.8911f, 0.2163f, system = "serif", leading = 0.0425f),
         CALADEA("Caladea", 0.9502f, 0.2222f, fallback = TINOS, system = "serif"),
-        ARIMO("Arimo", 0.9053f, 0.2119f, system = "sans-serif"),
+        ARIMO("Arimo", 0.9053f, 0.2119f, system = "sans-serif", leading = 0.0327f),
         COUSINE("Cousine", 0.8325f, 0.3003f, system = "monospace");
 
-        /** Height of a single line at size 1, as Word lays it out. */
-        val line: Float get() = ascent + descent
+        /** Height of a single line at size 1, as Word lays it out (with the font's external leading). */
+        val line: Float get() = ascent + descent + leading
     }
 
     private val cache = HashMap<Long, Typeface>()

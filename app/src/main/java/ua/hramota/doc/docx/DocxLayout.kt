@@ -67,8 +67,9 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         var items = ArrayList<PageItem>()
         var y = top
         var firstPage = true
+        var pendingAfter = 0f
         fun newPage() {
-            pages += LaidOutPage(items); items = ArrayList(); y = top; firstPage = false
+            pages += LaidOutPage(items); items = ArrayList(); y = top; firstPage = false; pendingAfter = 0f
         }
         fun atTop() = items.isEmpty()
 
@@ -93,10 +94,11 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                     val next = blocks.getOrNull(index + 1)?.first
                     if (block.props.keepNext == true && next is Block.Para && !atTop()) {
                         val nextP = paragraph(next, contentWidth)
-                        val need = before + p.height + p.after + nextP.before + nextP.lineHeight(0) + if (nextP.lines > 1) nextP.lineHeight(1) else 0f
+                        val need = gap(pendingAfter, before) + p.height + gap(p.after, nextP.before) + nextP.lineHeight(0) + if (nextP.lines > 1) nextP.lineHeight(1) else 0f
                         if (y + need > bottom && need <= bottom - top) newPage().also { before = 0f }
                     }
-                    y += before
+                    y += gap(pendingAfter, before)
+                    pendingAfter = 0f
                     var line = 0
                     while (line < p.lines) {
                         var fit = 0
@@ -117,11 +119,13 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                         line += fit
                         if (line < p.lines) newPage()
                     }
-                    y = min(y + if (dropAfter) 0f else p.after, bottom)
+                    // Space after waits for the next paragraph: Word uses the larger of the two gaps
+                    pendingAfter = if (dropAfter) 0f else p.after
                     prev = block
                 }
                 is Block.Table -> {
                     prev = null
+                    y = min(y + pendingAfter, bottom); pendingAfter = 0f
                     for (row in tableRows(block)) {
                         if (y + row.height > bottom && !atTop()) newPage()
                         row.items.forEach { items += it.moved(0f, y) }
@@ -189,7 +193,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             }
             // Line height is measured from the full size, as Word does
             val full = (props.size ?: 11f) * U
-            metrics += Metric(start, end, full * family.ascent, full * family.descent)
+            metrics += Metric(start, end, full * family.ascent, full * (family.descent + family.leading))
         }
 
         b.label?.takeIf { it.isNotEmpty() }?.let { label ->
@@ -260,6 +264,9 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         return Para(builder.build(), baseX, before, after, pp.widowControl != false, pp.shading, l, r)
     }
 
+    /** The gap between two paragraphs: the larger of the two spacings, or their sum if the document asks. */
+    private fun gap(after: Float, before: Float): Float = if (doc.addSpacing) after + before else max(after, before)
+
     private fun themeFont(theme: String?): String? = when {
         theme == null -> doc.fonts.minor
         theme.startsWith("major") -> doc.fonts.major
@@ -296,18 +303,20 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 val inner = ArrayList<PageItem>()
                 var y = 0f
                 if (!cell.mergedAbove) {
+                    var cellAfter = 0f
                     val paras = flatten(cell.blocks)
                     for ((k, p) in paras.withIndex()) {
                         val laid = paragraph(p, max(U, cw - 2 * margin))
                         val prevP = paras.getOrNull(k - 1)
                         val nextP = paras.getOrNull(k + 1)
                         val same = { o: Block.Para? -> o != null && o.props.styleId == p.props.styleId && (o.props.contextual == true || p.props.contextual == true) }
-                        y += if (same(prevP)) 0f else laid.before
+                        y += gap(cellAfter, if (same(prevP)) 0f else laid.before)
                         inner += PageItem.Text(laid.layout, 0, laid.lines - 1, cx + margin + laid.x, y)
                         y += laid.height
-                        // Space after the last paragraph of a cell still counts, as in Word
-                        if (!same(nextP)) y += laid.after
+                        cellAfter = if (same(nextP)) 0f else laid.after
                     }
+                    // Space after the last paragraph of a cell still counts, as in Word
+                    y += cellAfter
                 }
                 height = max(height, y)
                 cellBoxes += Triple(cx, cw, cell)
