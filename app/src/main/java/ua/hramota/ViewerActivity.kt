@@ -158,10 +158,11 @@ class ViewerActivity : ComponentActivity() {
                         onPosition = { position, total -> docId?.let { id -> library.setPosition(id, position, total) } },
                         menu = docId?.let { id ->
                             val e = entries[id]
-                            listOfNotNull(
-                                if (e?.onShelf == true) getString(R.string.shelf_remove) to { library.update(id) { it?.copy(onShelf = false) } }
+                            listOfNotNull<Pair<String, () -> Unit>>(
+                                if (e?.onShelf == true) getString(R.string.shelf_remove) to { library.update(id) { it?.copy(onShelf = false) }; Unit }
                                 else getString(R.string.shelf_add) to {
                                     library.update(id) { it?.copy(onShelf = true) ?: LibraryEntry(id, name, format.label, uri.toString(), onShelf = true, openedAt = System.currentTimeMillis()) }
+                                    Unit
                                 },
                                 if (e?.copy == null) getString(R.string.shelf_keep_copy) to {
                                     if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
@@ -169,6 +170,7 @@ class ViewerActivity : ComponentActivity() {
                                         val ok = withContext(Dispatchers.IO) { library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) } == true }
                                         android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.shelf_copy_kept else R.string.shelf_copy_failed), android.widget.Toast.LENGTH_SHORT).show()
                                     }
+                                    Unit
                                 } else null,
                             )
                         }.orEmpty(),
