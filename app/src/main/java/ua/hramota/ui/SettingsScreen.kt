@@ -19,6 +19,12 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,13 +59,17 @@ fun SettingsScreen(
             Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.bodyLarge)
                 val themes = listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark)
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    themes.forEachIndexed { i, (key, label) ->
-                        SegmentedButton(
-                            selected = settings.theme == key,
-                            onClick = { onChange { it.copy(theme = key) } },
-                            icon = {}, shape = SegmentedButtonDefaults.itemShape(i, themes.size),
-                        ) { Text(stringResource(label), maxLines = 1) }
+                Column(Modifier.padding(top = 4.dp).selectableGroup()) {
+                    themes.forEach { (key, label) ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                .selectable(selected = settings.theme == key, role = Role.RadioButton) { onChange { it.copy(theme = key) } }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = settings.theme == key, onClick = null, modifier = Modifier.padding(8.dp))
+                            Text(stringResource(label), style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
                 }
             }
