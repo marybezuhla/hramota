@@ -73,7 +73,7 @@ private class Biff(private val s: ByteArray) {
                         strike = grbit and 0x08 != 0, size = (u16(r.at) / 20f).coerceIn(1f, 409f), color = u16(r.at + 4),
                     )
                 }
-                0x041E -> if (r.len >= 5) formats[u16(r.at)] = string(r.at + 2, r.at + r.len, wide = true).first
+                0x041E -> if (r.len >= 5) formats[u16(r.at)] = string(r.at + 2, r.at + r.len, wide = true).first.take(NumberFormat.MAX_CODE)
                 0x00E0 -> if (r.len >= 20) xfs += intArrayOf(u16(r.at), u16(r.at + 2), u8(r.at + 6), i32(r.at + 10), i32(r.at + 14), u16(r.at + 18))
                 0x0092 -> palette = IntArray(minOf(u16(r.at), 56, (r.len - 2) / 4)) { k -> (u8(r.at + 2 + k * 4) shl 16) or (u8(r.at + 3 + k * 4) shl 8) or u8(r.at + 4 + k * 4) }
                 0x0085 -> if (r.len >= 8 && u8(r.at + 5) == 0 && u8(r.at + 4) == 0) {
@@ -208,15 +208,15 @@ private class Biff(private val s: ByteArray) {
                 0x0055 -> b.defaultWidth = ((u16(a) * 7 + 5 + 3) * 0.75f).coerceIn(0f, 1500f)
                 0x0225 -> if (r.len >= 4) b.defaultHeight = (u16(a + 2) / 20f).coerceIn(0f, 409f)
                 0x007D -> if (r.len >= 10) {
-                    val first = u16(a); val last = minOf(u16(a + 2), first + 2000)
+                    val first = u16(a); val last = minOf(u16(a + 2), first + 1024)
                     val hidden = u16(a + 8) and 0x01 != 0
                     val w = if (hidden) 0f else (u16(a + 4) / 256.0 * 7 * 0.75).toFloat().coerceIn(0f, 1500f)
-                    for (c in first..last) if (c < SheetLimits.MAX_COLS) b.widths[c] = w
+                    for (c in first..last) b.width(c, w)
                 }
                 0x0208 -> if (r.len >= 16) {
                     val row = u16(a); val height = u16(a + 6); val flags = i32(a + 12)
-                    if (flags and 0x20 != 0) b.heights[row] = 0f
-                    else if (height and 0x8000 == 0 && (flags and 0x40 != 0 || height / 20f > b.defaultHeight)) b.heights[row] = (height / 20f).coerceIn(0f, 409f)
+                    if (flags and 0x20 != 0) b.height(row, 0f)
+                    else if (height and 0x8000 == 0 && (flags and 0x40 != 0 || height / 20f > b.defaultHeight)) b.height(row, (height / 20f).coerceIn(0f, 409f))
                 }
                 0x00FD -> if (r.len >= 10) strings.getOrNull(i32(a + 6))?.let { b.text(u16(a), u16(a + 2), u16(a + 4), it) }
                 0x0204 -> if (r.len >= 8) b.text(u16(a), u16(a + 2), u16(a + 4), string(a + 6, a + r.len, wide = true).first)

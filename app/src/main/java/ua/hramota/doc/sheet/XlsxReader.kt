@@ -9,6 +9,9 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
+/** Marks a cell whose text is a shared string still to be looked up. */
+private val SHARED = String(charArrayOf('\u0000', 's'))
+
 /** Collects one sheet's cells in any order and builds it with rows sorted. */
 class SheetBuilder(private val name: String, private val budget: IntArray) {
     /** One row's cells as they come, in plain arrays (no boxed numbers: a sheet may hold millions). */
@@ -34,21 +37,32 @@ class SheetBuilder(private val name: String, private val budget: IntArray) {
 
     fun number(row: Int, col: Int, style: Int, value: Double) = put(row, col, style, value, null)
     fun text(row: Int, col: Int, style: Int, value: String) = put(row, col, style, 0.0, value.take(SheetLimits.MAX_TEXT))
-    /** An empty cell that still shows its fill or borders. */
-    fun blank(row: Int, col: Int, style: Int) = put(row, col, style, 0.0, "")
+    /** A cell whose text is shared string number [index], known once the shared strings are read. */
+    fun shared(row: Int, col: Int, style: Int, index: Int) = put(row, col, style, index.toDouble(), SHARED)
+    /** An empty cell that still shows its fill or borders; it has its own allowance, so formatted empty areas never crowd out data. */
+    fun blank(row: Int, col: Int, style: Int) { if (blanks > 0) { blanks--; put(row, col, style, 0.0, "", counted = false) } }
+    private var blanks = 1_000_000
+    private var sizes = 200_000
 
-    private fun put(row: Int, col: Int, style: Int, number: Double, text: String?) {
+    /** Sets a column width or row height, within an allowance (a file cannot make millions of them). */
+    fun width(col: Int, w: Float) { if (col in 0 until SheetLimits.MAX_COLS && sizes-- > 0) widths[col] = w }
+    fun height(row: Int, h: Float) { if (row in 0 until SheetLimits.MAX_ROWS && sizes-- > 0) heights[row] = h }
+
+    private fun put(row: Int, col: Int, style: Int, number: Double, text: String?, counted: Boolean = true) {
         if (row !in 0 until SheetLimits.MAX_ROWS || col !in 0 until SheetLimits.MAX_COLS || budget[0] <= 0) return
-        budget[0]--
+        if (counted) budget[0]--
         val r = rows.getOrPut(row) { RowCells() }
         r.add(col, style, number, text)
     }
 
-    fun build(styles: List<CellStyle>, date1904: Boolean): Sheet {
+    fun build(styles: List<CellStyle>, date1904: Boolean, strings: List<String> = emptyList(), title: String = name): Sheet {
+        // Empty cells that show nothing (no fill, no borders) are dropped below
         val out = rows.entries.sortedBy { it.key }.map { (index, r) ->
+            for (i in 0 until r.size) if (r.texts[i] === SHARED) r.texts[i] = strings.getOrNull(r.numbers[i].toInt()) ?: ""
             // Cells usually come in order; sorting is needed only when they do not
-            val inOrder = (1 until r.size).all { r.cols[it] > r.cols[it - 1] }
-            val order = if (inOrder) (0 until r.size).toList() else (0 until r.size).sortedBy { r.cols[it] }.distinctBy { r.cols[it] }
+            val keep = (0 until r.size).filter { i -> !(r.texts[i] == "" && styles.getOrNull(r.styles[i]).let { it == null || (it.fill == null && it.borders == 0) }) }
+            val inOrder = (1 until keep.size).all { r.cols[keep[it]] > r.cols[keep[it - 1]] }
+            val order = if (inOrder) keep else keep.sortedBy { r.cols[it] }.distinctBy { r.cols[it] }
             SheetRow(
                 index,
                 IntArray(order.size) { r.cols[order[it]] },
@@ -57,7 +71,7 @@ class SheetBuilder(private val name: String, private val budget: IntArray) {
                 Array(order.size) { r.texts[order[it]] },
             )
         }
-        return Sheet(name, out, styles, widths, defaultWidth, heights, defaultHeight, merges.take(10_000), frozenRows, frozenCols, date1904)
+        return Sheet(title, out.filter { it.cols.isNotEmpty() }, styles, widths, defaultWidth, heights, defaultHeight, merges.take(10_000), frozenRows, frozenCols, date1904)
     }
 }
 
@@ -70,14 +84,22 @@ fun storedWidth(width: Double): Float = (width * 7 * 0.75).toFloat().coerceIn(0f
  * value saved in the file; nothing is calculated or run.
  */
 object XlsxReader {
-    const val MAX_PART = 96L * 1024 * 1024
+    /** Largest small part (workbook, styles, theme, relationships) and the shared strings. */
+    const val MAX_PART = 16L * 1024 * 1024
+    const val MAX_STRINGS = 64L * 1024 * 1024
+    /** Most uncompressed bytes of all sheets together (a ZIP that unpacks without end stops here). */
+    const val MAX_SHEETS_BYTES = 1024L * 1024 * 1024
 
     fun read(input: InputStream): Workbook {
         val parts = HashMap<String, ByteArray>()
-        var total = 0L
         var macros = false
         val embedded = ArrayList<String>()
         var external = 0
+        val budget = intArrayOf(SheetLimits.MAX_CELLS)
+        // Sheets are read as they come in the ZIP (they usually come before styles and strings):
+        // styles and shared strings are looked up by number afterwards
+        val built = HashMap<String, SheetBuilder>()
+        val sheetBytes = LongArray(1)
         ZipInputStream(input).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
@@ -87,12 +109,13 @@ object XlsxReader {
                     lower.endsWith("vbaproject.bin") -> macros = true
                     lower.startsWith("xl/embeddings/") -> embedded += name.substringAfterLast('/')
                     lower.startsWith("xl/externallinks/") && lower.endsWith(".xml") -> external++
-                    lower.endsWith(".xml") || lower.endsWith(".rels") -> {
-                        val bytes = readLimited(zip, MAX_PART)
-                        total += bytes.size
-                        if (total > MAX_PART * 3) throw IOException("Workbook too large")
-                        parts[name] = bytes
+                    lower.startsWith("xl/worksheets/") && lower.endsWith(".xml") && !lower.contains("/_rels/") && built.size < SheetLimits.MAX_SHEETS -> {
+                        val b = SheetBuilder(name, budget)
+                        sheet(Limited(zip, sheetBytes, MAX_SHEETS_BYTES), b)
+                        built[name] = b
                     }
+                    lower == "xl/sharedstrings.xml" -> parts[name] = readLimited(zip, MAX_STRINGS)
+                    lower.endsWith(".xml") || lower.endsWith(".rels") -> parts[name] = readLimited(zip, MAX_PART)
                 }
             }
         }
@@ -103,23 +126,28 @@ object XlsxReader {
         val date1904 = wb.child("workbookPr")?.attr("date1904").let { it == "1" || it == "true" }
         val rels = tree("xl/_rels/workbook.xml.rels")?.all("Relationship").orEmpty()
             .associate { (it.attr("Id") ?: "") to (it.attr("Target") ?: "") }
-        val strings = parts["xl/sharedStrings.xml"]?.let { sharedStrings(it) } ?: emptyList()
+        val strings = parts.remove("xl/sharedStrings.xml")?.let { sharedStrings(it) } ?: emptyList()
         val theme = themeColors(tree("xl/theme/theme1.xml"))
         val styles = styles(tree("xl/styles.xml"), theme)
 
-        val budget = intArrayOf(SheetLimits.MAX_CELLS)
         val sheets = ArrayList<Sheet>()
         for (s in wb.child("sheets")?.all("sheet").orEmpty().take(SheetLimits.MAX_SHEETS)) {
             if (s.attr("state") == "hidden" || s.attr("state") == "veryHidden") continue
             val target = rels[s.attr("id")] ?: continue
             val path = if (target.startsWith("/")) target.removePrefix("/") else "xl/" + target.removePrefix("./")
-            val bytes = parts.remove(path) ?: continue
-            val b = SheetBuilder(s.attr("name") ?: "Sheet", budget)
-            sheet(bytes, b, strings)
-            sheets += b.build(styles, date1904)
+            val b = built[path] ?: continue
+            sheets += b.build(styles, date1904, strings, s.attr("name") ?: "Sheet")
         }
         if (sheets.isEmpty()) throw IOException("No sheets")
         return Workbook(sheets, Inspection(macros = macros, embedded = embedded.take(100), remoteResources = external))
+    }
+
+    /** Counts what the sheets unpack to, across all of them, and stops at [limit]. */
+    private class Limited(private val input: InputStream, private val total: LongArray, private val limit: Long) : InputStream() {
+        override fun read(): Int { val v = input.read(); if (v >= 0) count(1); return v }
+        override fun read(b: ByteArray, off: Int, len: Int): Int { val n = input.read(b, off, len); if (n > 0) count(n.toLong()); return n }
+        private fun count(n: Long) { total[0] += n; if (total[0] > limit) throw IOException("Sheets too large") }
+        override fun close() {}
     }
 
     private fun readLimited(input: InputStream, limit: Long): ByteArray {
@@ -181,7 +209,7 @@ object XlsxReader {
 
     private fun styles(root: XmlNode?, theme: List<Int>): List<CellStyle> {
         if (root == null) return listOf(CellStyle.DEFAULT)
-        val formats = root.child("numFmts")?.all("numFmt").orEmpty().associate { (it.attr("numFmtId")?.toIntOrNull() ?: -1) to (it.attr("formatCode") ?: "General") }
+        val formats = root.child("numFmts")?.all("numFmt").orEmpty().associate { (it.attr("numFmtId")?.toIntOrNull() ?: -1) to (it.attr("formatCode") ?: "General").take(NumberFormat.MAX_CODE) }
         val fonts = root.child("fonts")?.all("font").orEmpty()
         val fills = root.child("fills")?.all("fill").orEmpty()
         val borders = root.child("borders")?.all("border").orEmpty()
@@ -214,8 +242,8 @@ object XlsxReader {
     }
 
     /** A worksheet streamed row by row: a sheet of a million cells is never one tree. */
-    private fun sheet(bytes: ByteArray, b: SheetBuilder, strings: List<String>) {
-        val p = Xml.parser(ByteArrayInputStream(bytes))
+    private fun sheet(input: InputStream, b: SheetBuilder) {
+        val p = Xml.parser(input)
         var row = -1
         var nextCol = 0
         var cellRef: String? = null
@@ -234,11 +262,12 @@ object XlsxReader {
                     p.getAttributeValue(null, "defaultRowHeight")?.toFloatOrNull()?.let { b.defaultHeight = it.coerceIn(0f, 409f) }
                 }
                 "col" -> {
-                    val min = (p.getAttributeValue(null, "min")?.toIntOrNull() ?: 1) - 1
-                    val max = ((p.getAttributeValue(null, "max")?.toIntOrNull() ?: 1) - 1).coerceAtMost(min + 2000)
+                    val min = ((p.getAttributeValue(null, "min")?.toIntOrNull() ?: 1) - 1).coerceIn(0, SheetLimits.MAX_COLS - 1)
+                    val max = ((p.getAttributeValue(null, "max")?.toIntOrNull() ?: 1) - 1).coerceIn(min, SheetLimits.MAX_COLS - 1)
                     val hidden = p.getAttributeValue(null, "hidden").let { it == "1" || it == "true" }
                     val w = if (hidden) 0f else p.getAttributeValue(null, "width")?.toDoubleOrNull()?.let { storedWidth(it) } ?: b.defaultWidth
-                    for (c in min..max) if (c in 0 until SheetLimits.MAX_COLS) b.widths[c] = w.coerceAtLeast(0f)
+                    // A range for the whole sheet ("all columns") is common: past the data it is the default anyway
+                    for (c in min..minOf(max, min + 1024)) b.width(c, w.coerceAtLeast(0f))
                 }
                 "pane" -> if (p.getAttributeValue(null, "state").let { it == "frozen" || it == "frozenSplit" }) {
                     b.frozenCols = p.getAttributeValue(null, "xSplit")?.toDoubleOrNull()?.toInt()?.coerceIn(0, 50) ?: 0
@@ -249,7 +278,7 @@ object XlsxReader {
                     nextCol = 0
                     val hidden = p.getAttributeValue(null, "hidden").let { it == "1" || it == "true" }
                     val ht = p.getAttributeValue(null, "ht")?.toFloatOrNull()
-                    if (hidden) b.heights[row] = 0f else if (ht != null && p.getAttributeValue(null, "customHeight").let { it == "1" || it == "true" } || ht != null && ht > b.defaultHeight) b.heights[row] = ht!!.coerceIn(0f, 409f)
+                    if (hidden) b.height(row, 0f) else if (ht != null && (p.getAttributeValue(null, "customHeight").let { it == "1" || it == "true" } || ht > b.defaultHeight)) b.height(row, ht.coerceIn(0f, 409f))
                     if (!b.open) return
                 }
                 "c" -> {
@@ -284,7 +313,9 @@ object XlsxReader {
                     if (row >= 0) {
                         val v = value?.toString()
                         when (cellType) {
-                            "s" -> v?.trim()?.toIntOrNull()?.let { strings.getOrNull(it) }?.let { b.text(row, cellCol, cellStyle, it) } ?: b.blank(row, cellCol, cellStyle)
+                            "s" -> v?.trim()?.toIntOrNull()?.let { b.shared(row, cellCol, cellStyle, it) } ?: b.blank(row, cellCol, cellStyle)
+                            // A date written as text (ISO): shown as written
+                            "d" -> b.text(row, cellCol, cellStyle, v?.trim() ?: "")
                             "inlineStr" -> b.text(row, cellCol, cellStyle, inline.toString())
                             "str" -> b.text(row, cellCol, cellStyle, v ?: "")
                             "b" -> b.text(row, cellCol, cellStyle, if (v?.trim() == "1") "TRUE" else "FALSE")
