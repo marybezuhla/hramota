@@ -124,7 +124,8 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
             for (t in find(env, 0x0FA3)) masterStyles.putIfAbsent(t.instance, masterStyle(t))
         }
         child(doc, 0x040B)?.let { group ->
-            for (fbse in find(group, 0xF007)) if (fbse.len >= 36) blips += i32(fbse.at + 28)
+            // A short entry still takes its number, so the pictures after it keep theirs
+            for (fbse in find(group, 0xF007)) blips += if (fbse.len >= 36) i32(fbse.at + 28) else -1
         }
         // Colours of the first master
         val lists = children(doc).filter { it.type == 0x0FF0 }
@@ -141,13 +142,14 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
             // Each slide's persist record, then the text of its placeholders until the next slide
             var current: Int? = null
             var texts = ArrayList<TextBlock>()
-            var header = 4
-            fun flush() { current?.let { ref -> obj(ref)?.takeIf { it.type == 0x03EE }?.let { slides += slide(it, texts, media) } } }
+            val seen = HashSet<Int>()
+            fun flush() { current?.let { ref -> if (seen.add(ref)) obj(ref)?.takeIf { it.type == 0x03EE }?.let { slides += slide(it, texts, media) } } }
             for (c in children(list)) {
                 when (c.type) {
-                    0x03F3 -> { flush(); current = i32(c.at); texts = ArrayList(); header = 4 }
-                    0x0F9F -> header = if (c.len >= 4) i32(c.at) else 4
-                    0x0FA0, 0x0FA8 -> texts += TextBlock(header, text(c), null)
+                    0x03F3 -> { flush(); current = i32(c.at); texts = ArrayList() }
+                    // Each text header starts a block, even when no text follows (an empty placeholder keeps its number)
+                    0x0F9F -> texts += TextBlock(if (c.len >= 4) i32(c.at) else 4, "", null)
+                    0x0FA0, 0x0FA8 -> if (texts.isEmpty()) texts += TextBlock(4, text(c), null) else texts[texts.size - 1] = texts.last().copy(text = text(c))
                     0x0FA1 -> texts.lastOrNull()?.let { texts[texts.size - 1] = it.copy(styleAt = c) }
                 }
                 if (slides.size >= Deck.MAX_SLIDES) break
@@ -167,7 +169,15 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
         return (0xFF shl 24) or ((v and 0xFF) shl 16) or (v and 0xFF00) or ((v ushr 16) and 0xFF)
     }
 
-    private fun text(r: Rec): String = if (r.type == 0x0FA0) String(s, r.at, r.len and 1.inv(), Charsets.UTF_16LE) else String(s, r.at, r.len, Charsets.ISO_8859_1)
+    /** Characters of text read for the whole file: a file repeating huge texts stops here. */
+    private var budget = 2_000_000
+    private fun text(r: Rec): String {
+        val n = minOf(r.len, budget * 2).coerceAtLeast(0)
+        budget -= n / (if (r.type == 0x0FA0) 2 else 1)
+        val rr = Rec(r.type, r.instance, r.at, n, r.container)
+        return textOf(rr)
+    }
+    private fun textOf(r: Rec): String = if (r.type == 0x0FA0) String(s, r.at, r.len and 1.inv(), Charsets.UTF_16LE) else String(s, r.at, r.len, Charsets.ISO_8859_1)
 
     private data class TextBlock(val type: Int, val text: String, val styleAt: Rec?)
 
@@ -205,7 +215,7 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
         if (has(14)) { after = s16(p); p += 2 }
         if (has(8)) { margin = u16(p); p += 2 }
         if (has(10)) { indent = u16(p); p += 2 }
-        if (has(9)) p += 2
+        if (has(15)) p += 2  // default tab size
         if (has(20)) { val n = u16(p).coerceAtMost(200); p += 2 + n * 4 }
         if (has(16)) p += 2
         if (mask and (7 shl 17) != 0) p += 2
@@ -260,7 +270,11 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
         else -> 18
     }
 
-    private fun paragraphs(block: TextBlock): List<SlidePara> {
+    /** Paragraphs of each text block, worked out once (several shapes may show the same text). */
+    private val laidText = java.util.IdentityHashMap<TextBlock, List<SlidePara>>()
+    private fun paragraphs(block: TextBlock): List<SlidePara> = laidText.getOrPut(block) { paragraphsOf(block) }
+
+    private fun paragraphsOf(block: TextBlock): List<SlidePara> {
         val text = block.text
         val base = masterStyles[block.type] ?: masterStyles[when (block.type) { 6 -> 0; 5, 7, 8 -> 1; else -> 4 }] ?: emptyList()
         // Runs of paragraph and character formatting (each counts characters, the last includes the final break)
@@ -288,7 +302,7 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
         var pos = 0
         var pr = 0; var prLeft = paraRuns.firstOrNull()?.first ?: Int.MAX_VALUE
         var cr = 0; var crLeft = charRuns.firstOrNull()?.first ?: Int.MAX_VALUE
-        for (line in text.split('\r').take(500)) {
+        for (line in text.splitToSequence('\r').take(500)) {
             val (_, level, pp) = paraRuns.getOrNull(pr) ?: Triple(0, 0, Props())
             val master = base.getOrNull(level)
             val para = (master?.first ?: Props()).with(pp)
@@ -386,12 +400,12 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
                     val anchor = anchor(c, outer)
                     child(c, 0xF009)?.takeIf { it.len >= 16 }?.let { fg ->
                         val l = i32(fg.at) / 8f; val tp = i32(fg.at + 4) / 8f; val rt = i32(fg.at + 8) / 8f; val b = i32(fg.at + 12) / 8f
-                        if (anchor != null && rt > l && b > tp) t = Group(anchor[0], anchor[1], l, tp, anchor[2] / (rt - l), anchor[3] / (b - tp))
+                        if (anchor != null && rt > l && b > tp) t = Group(anchor[0], anchor[1], l, tp, (anchor[2] / (rt - l)).coerceIn(1e-3f, 1e3f), (anchor[3] / (b - tp)).coerceIn(1e-3f, 1e3f))
                     }
                 }
                 continue
             }
-            if (flags and 0x0001 != 0 || flags and 0x0004 != 0) continue  // a group or the patriarch itself
+            if (flags and 0x000D != 0) continue  // a group, the patriarch, or a deleted shape
             val a = anchor(c, t) ?: continue
             val p = props(c)
             val kind = fsp.instance
@@ -404,7 +418,8 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
             val filled = if (fillBits and (1 shl 20) != 0) fillBits and (1 shl 4) != 0 else p.containsKey(0x0181)
             val lineBits = p[0x01FF] ?: 0
             val lined = if (lineBits and (1 shl 19) != 0) lineBits and (1 shl 3) != 0 else p.containsKey(0x01C0)
-            val fill = if (filled && kind != 202) p[0x0181]?.let { artColor(it) } else null
+            // A text box has no fill unless it says so
+            val fill = if (filled && (kind != 202 || fillBits and (1 shl 20) != 0)) p[0x0181]?.let { artColor(it) } else null
             val line = if (lined) p[0x01C0]?.let { artColor(it) } ?: 0xFF000000.toInt() else null
             val lineWidth = (p[0x01CB] ?: 9525) / 12700f
             // Text inside the shape, or a reference to the slide's placeholder text
@@ -423,7 +438,7 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
             out += SlideShape.Box(
                 a[0], a[1], a[2], a[3], rot, geometry, fill, line, lineWidth, paragraphs,
                 floatArrayOf(inset(0x0081, 91440), inset(0x0082, 45720), inset(0x0083, 91440), inset(0x0084, 45720)),
-                anchor = when (p[0x0087] ?: 0) { 1, 4, 6, 8 -> "center"; 2, 5, 7, 9 -> "bottom"; else -> "top" },
+                anchor = when (p[0x0087] ?: 0) { 1, 4 -> "center"; 2, 5, 7, 9 -> "bottom"; else -> "top" },
             )
         }
     }
@@ -446,11 +461,15 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
     }
 
     /** Picture number [pib] from the Pictures stream, if it is a PNG or JPEG. */
+    private var mediaBytes = 0L
+
     private fun picture(pib: Int, media: MutableMap<String, ByteArray>): String? {
-        val key = "ppt$pib"
-        if (key in media) return key
         val pics = pictures ?: return null
         val off = blips.getOrNull(pib - 1) ?: return null
+        // Pictures are kept by where they are, so many numbers pointing at one picture keep one copy
+        val key = "ppt@$off"
+        if (key in media) return key
+        if (mediaBytes > Deck.MAX_MEDIA) return null
         if (off < 0 || off > pics.size - 8) return null
         val len = DocReader.i32(pics, off + 4)
         val end = (off.toLong() + 8 + len).coerceAtMost(pics.size.toLong()).toInt()
@@ -459,7 +478,7 @@ private class Ppt(private val s: ByteArray, private val user: ByteArray?, privat
         while (i + 4 < limit) {
             val png = pics[i] == 0x89.toByte() && pics[i + 1] == 'P'.code.toByte() && pics[i + 2] == 'N'.code.toByte()
             val jpg = pics[i] == 0xFF.toByte() && pics[i + 1] == 0xD8.toByte() && pics[i + 2] == 0xFF.toByte()
-            if (png || jpg) { media[key] = pics.copyOfRange(i, end); return key }
+            if (png || jpg) { media[key] = pics.copyOfRange(i, end); mediaBytes += end - i; return key }
             i++
         }
         return null

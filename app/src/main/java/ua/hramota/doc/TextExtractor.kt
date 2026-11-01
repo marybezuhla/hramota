@@ -102,7 +102,7 @@ object TextExtractor {
         // Sheets compared row by row, each sheet under its name
         Format.XLSX -> sheetText(ua.hramota.doc.sheet.XlsxReader.read(input))
         Format.XLS -> sheetText(ua.hramota.doc.sheet.XlsReader.read(input))
-        Format.PPTX -> ua.hramota.doc.slides.PptxReader.read(input).paragraphs { "#$it" }
+        Format.PPTX -> ua.hramota.doc.slides.PptxReader.read(input, withMedia = false).paragraphs { "#$it" }
         Format.PPT -> ua.hramota.doc.slides.PptReader.read(input).paragraphs { "#$it" }
         else -> throw IOException("No text reader for $format")
     }
