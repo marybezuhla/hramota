@@ -197,6 +197,8 @@ class ViewerActivity : ComponentActivity() {
                                 } else null,
                             )
                         }.orEmpty(),
+                        readSettings = settings,
+                        onReadSettings = { change -> ua.hramota.data.Settings.get(this@ViewerActivity).update(change) },
                     )
                 }
             }
@@ -233,6 +235,21 @@ class ViewerActivity : ComponentActivity() {
             val again = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
             ViewerState.Paged(PdfSource.open(again).also(onOpen))
         }
+    }
+
+    // While a book is read in pages, the volume keys turn them (and make no sound)
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        val h = ua.hramota.ui.PageKeys.handler
+        if (h != null && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP)) {
+            h(if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) 1 else -1)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if (ua.hramota.ui.PageKeys.handler != null && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP)) return true
+        return super.onKeyUp(keyCode, event)
     }
 
     companion object {

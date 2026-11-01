@@ -321,4 +321,10 @@ class ScreensTest {
     @Config(fontScale = 1.6f)
     @Test fun viewerBookLargeFont() = shot("13-viewer-book-large-font") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}) }
     @Test fun viewerBookContents() = shot("13-viewer-book-contents") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, startInOverview = true, bookmarks = setOf(3)) }
+    @Test fun viewerBookScroll() = shot("13-viewer-book-scroll") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, readSettings = ua.hramota.data.AppSettings(readPaged = false)) }
+    @Test fun viewerBookSepia() = shot("13-viewer-book-sepia") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, readSettings = ua.hramota.data.AppSettings(readPaper = "sepia")) }
+    @Test fun viewerBookNight() = shot("13-viewer-book-night") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, readSettings = ua.hramota.data.AppSettings(readPaper = "night")) }
+    @Test fun readingControls() = shot("13-reading-controls") { androidx.compose.material3.Surface { ua.hramota.ui.ReadingControls(ua.hramota.data.AppSettings(), {}) } }
+    @Config(qualifiers = "+night")
+    @Test fun readingControlsDark() = shot("13-reading-controls-dark") { androidx.compose.material3.Surface { ua.hramota.ui.ReadingControls(ua.hramota.data.AppSettings(readTurn = "curl"), {}) } }
 }

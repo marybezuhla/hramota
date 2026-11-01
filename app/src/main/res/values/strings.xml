@@ -141,4 +141,24 @@
     <string name="settings_wood_hint">Covers on wooden shelves, like the classic book app</string>
     <string name="book_contents">Contents</string>
     <string name="book_bookmarks">Bookmarks</string>
+    <string name="read_look">Text and page</string>
+    <string name="paper_auto">Auto</string>
+    <string name="paper_paper">Paper</string>
+    <string name="paper_sepia">Sepia</string>
+    <string name="paper_gray">Grey</string>
+    <string name="paper_night">Night</string>
+    <string name="read_font_serif">Literata</string>
+    <string name="read_font_sans">Sans serif</string>
+    <string name="read_size">Text size</string>
+    <string name="read_spacing">Line spacing</string>
+    <string name="read_margin">Margins</string>
+    <string name="read_justify">Justify with hyphens</string>
+    <string name="read_justify_hint">Each paragraph follows the rules of its own language</string>
+    <string name="read_pages">Pages</string>
+    <string name="read_scroll">Scroll</string>
+    <string name="read_turn">Page turn</string>
+    <string name="read_turn_slide">Slide</string>
+    <string name="read_turn_curl">Paper curl</string>
+    <string name="read_turn_none">None</string>
+    <string name="read_volume_keys">Volume keys turn pages</string>
 </resources>
