@@ -191,9 +191,12 @@ class ViewerActivity : ComponentActivity() {
                                 // Notes as text, sent where the person chooses
                                 (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
                                     getString(R.string.notes_export) to {
-                                        val text = ua.hramota.ui.notesText(book, name, e!!.notes)
-                                        startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-                                            .putExtra(android.content.Intent.EXTRA_SUBJECT, book.title.ifEmpty { name }).putExtra(android.content.Intent.EXTRA_TEXT, text), null))
+                                        // Kept within what one message between apps can carry
+                                        val text = ua.hramota.ui.notesText(book, name, e!!.notes).take(200_000)
+                                        try {
+                                            startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                                .putExtra(android.content.Intent.EXTRA_SUBJECT, book.title.ifEmpty { name }).putExtra(android.content.Intent.EXTRA_TEXT, text), null))
+                                        } catch (_: Exception) {}
                                         Unit
                                     }
                                 },
@@ -251,14 +254,16 @@ class ViewerActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
         val h = ua.hramota.ui.PageKeys.handler
         if (h != null && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP)) {
-            h(if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) 1 else -1)
-            return true
+            // At the first or last page the key changes the volume as usual
+            if (h(if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) 1 else -1)) { keyTurned = keyCode; return true }
         }
         return super.onKeyDown(keyCode, event)
     }
 
+    private var keyTurned = 0
+
     override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean {
-        if (ua.hramota.ui.PageKeys.handler != null && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP)) return true
+        if (keyCode == keyTurned) { keyTurned = 0; return true }
         return super.onKeyUp(keyCode, event)
     }
 

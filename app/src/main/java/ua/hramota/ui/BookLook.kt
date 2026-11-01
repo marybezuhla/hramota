@@ -122,6 +122,7 @@ class BookLook(val settings: AppSettings, val paper: Paper, private val language
         BookBlock.Kind.SUBTITLE -> body.copy(fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         BookBlock.Kind.QUOTE -> body.copy(fontSize = body.fontSize * 0.92f, fontStyle = FontStyle.Italic, color = paper.muted.copy(alpha = 1f).let { lerpColor(paper.text, it, 0.35f) })
         BookBlock.Kind.POEM -> body.copy(textAlign = TextAlign.Start, hyphens = Hyphens.None)
+        BookBlock.Kind.CONTINUED -> body
         // A paragraph after a heading, a picture or a quote starts flush, as in print
         else -> if (flush) body else body.copy(textIndent = TextIndent(firstLine = 1.5.em))
     }

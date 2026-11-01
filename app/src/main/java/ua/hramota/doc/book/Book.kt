@@ -11,7 +11,7 @@ sealed interface BookBlock {
     data class Text(val text: String, val spans: List<Span>, val kind: Kind) : BookBlock
     data class Image(val key: String) : BookBlock
 
-    enum class Kind { PARAGRAPH, HEADING1, HEADING2, HEADING3, QUOTE, POEM, SUBTITLE, BREAK }
+    enum class Kind { PARAGRAPH, HEADING1, HEADING2, HEADING3, QUOTE, POEM, SUBTITLE, BREAK, /** The rest of a very long paragraph: no indent. */ CONTINUED }
 }
 
 /** A book read from EPUB or FB2: title, author, its blocks and pictures (by key). */
@@ -72,13 +72,29 @@ internal class BlockBuilder {
         while (sb.isNotEmpty() && (sb.last() == ' ' || sb.last() == '\n')) sb.setLength(sb.length - 1)
         if (sb.isNotEmpty() || kind == BookBlock.Kind.BREAK) {
             val text = sb.toString()
-            blocks += BookBlock.Text(text, spans.filter { it.start < text.length }.map { if (it.end > text.length) it.copy(end = text.length) else it }, kind)
+            val all = spans.filter { it.start < text.length }.map { if (it.end > text.length) it.copy(end = text.length) else it }
+            // A paragraph pages long is cut after a sentence, so no page waits for one huge layout
+            var from = 0
+            while (from < text.length) {
+                var to = text.length
+                if (to - from > LONG) {
+                    val window = text.lastIndexOf(". ", from + LONG).takeIf { it > from + LONG / 2 }?.plus(2)
+                        ?: text.lastIndexOf(' ', from + LONG).takeIf { it > from + LONG / 2 }?.plus(1) ?: (from + LONG)
+                    to = window
+                }
+                val part = text.substring(from, to).trimEnd()
+                val partSpans = all.filter { it.end > from && it.start < to }.map { Span(maxOf(0, it.start - from), minOf(part.length, it.end - from), it.bold, it.italic, it.raised) }.filter { it.start < it.end }
+                blocks += BookBlock.Text(part, partSpans, if (from == 0 || kind != BookBlock.Kind.PARAGRAPH) kind else BookBlock.Kind.CONTINUED)
+                from = to
+            }
             total += text.length
         }
         sb.clear(); spans.clear(); styleStart = 0
     }
 
     fun image(key: String) { if (!full) blocks += BookBlock.Image(key) }
+
+    private companion object { const val LONG = 6000 }
 }
 
 /** Removes a DOCTYPE (with any internal subset) so no entity defined in the file can be expanded. */

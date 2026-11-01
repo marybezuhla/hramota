@@ -78,15 +78,24 @@ internal class BookSelection : TextToolbar {
 
     override fun hide() { rect = null; status = TextToolbarStatus.Hidden }
 
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
     /** The selected text, handed to [use] instead of the clipboard. */
     fun take(clipboard: TakingClipboard, use: (String) -> Unit) {
-        clipboard.taking = use
-        copy?.invoke()
+        val c = copy
         hide()
-        reset++
+        if (c == null) return
+        clipboard.taking = use
+        c()
+        // Never left waiting: a later real copy must reach the clipboard, not this action
+        main.postDelayed({ clipboard.taking = null; reset++ }, 600)
     }
 
-    fun copyToClipboard() { copy?.invoke(); hide(); reset++ }
+    fun copyToClipboard(clipboard: TakingClipboard) {
+        clipboard.taking = null
+        copy?.invoke(); hide()
+        main.postDelayed({ reset++ }, 600)
+    }
 }
 
 /** The clipboard, except when the book takes the selected text for a marker, note or another app. */
@@ -116,36 +125,40 @@ internal fun textApps(context: Context): List<Pair<String, android.content.Compo
  * Finds selected text among the blocks on screen: the place it starts and ends. The text is matched
  * as shown (no-break spaces count as spaces), which keeps the same length as the book's own text.
  */
-internal fun locate(book: Book, blocks: List<Int>, selected: String): Note? {
-    val wanted = selected.replace(' ', ' ').trim()
+internal fun locate(book: Book, parts: List<Visible.Part>, selected: String): Note? {
+    // Line ends are left out on both sides: paragraphs may be joined with or without one
+    fun norm(c: Char) = if (c == ' ') ' ' else c
+    val wanted = selected.filter { it != '\n' && it != '\r' }.map(::norm).joinToString("").trim()
     if (wanted.isEmpty()) return null
-    val sb = StringBuilder(); val starts = ArrayList<Int>()
-    for (b in blocks) {
-        val t = (book.blocks.getOrNull(b) as? BookBlock.Text)?.text ?: continue
-        if (sb.isNotEmpty()) sb.append('\n')
-        starts += sb.length; sb.append(t.replace(' ', ' '))
+    val sb = StringBuilder()
+    var blocks = IntArray(1024); var offsets = IntArray(1024); var n = 0
+    for (p in parts) {
+        val t = (book.blocks.getOrNull(p.block) as? BookBlock.Text)?.text ?: continue
+        // Only what is shown: the part of a paragraph on this page
+        for (k in p.from.coerceAtLeast(0) until minOf(t.length, p.to)) {
+            val c = t[k]
+            if (c == '\n' || c == '\r') continue
+            if (n == blocks.size) { blocks = blocks.copyOf(n * 2); offsets = offsets.copyOf(n * 2) }
+            sb.append(norm(c)); blocks[n] = p.block; offsets[n] = k; n++
+        }
     }
-    val textBlocks = blocks.filter { book.blocks.getOrNull(it) is BookBlock.Text }
-    val joined = sb.toString()
-    val at = joined.indexOf(wanted).takeIf { it >= 0 } ?: return null
-    fun place(pos: Int): Pair<Int, Int> {
-        var k = starts.indexOfLast { it <= pos }.coerceAtLeast(0)
-        return textBlocks[k] to (pos - starts[k])
-    }
-    val (b0, s0) = place(at)
-    val (b1, s1) = place(at + wanted.length - 1)
-    return Note(b0, s0, b1, s1 + 1, 0, at = System.currentTimeMillis())
+    val at = sb.indexOf(wanted).takeIf { it >= 0 } ?: return null
+    val last = at + wanted.length - 1
+    return Note(blocks[at], offsets[at], blocks[last], offsets[last] + 1, 0, at = System.currentTimeMillis())
 }
 
 @Composable
 internal fun SelectionMenu(
-    selection: BookSelection, clipboard: TakingClipboard, onMark: (String, Int) -> Unit, onNote: (String) -> Unit,
+    selection: BookSelection, clipboard: TakingClipboard, origin: androidx.compose.ui.geometry.Offset, onMark: (String, Int) -> Unit, onNote: (String) -> Unit,
 ) {
     val rect = selection.rect ?: return
     val context = androidx.compose.ui.platform.LocalContext.current
     val apps = remember { textApps(context) }
+    val above = with(androidx.compose.ui.platform.LocalDensity.current) { 60.dp.roundToPx() }
+    // The selection comes in window coordinates; the menu sits just above it (below, if no room)
+    val top = (rect.top - origin.y).toInt() - above
     Popup(
-        offset = IntOffset(rect.left.toInt().coerceAtLeast(0), (rect.top - 160).toInt().coerceAtLeast(0)),
+        offset = IntOffset((rect.left - origin.x).toInt().coerceAtLeast(0), if (top >= 0) top else (rect.bottom - origin.y).toInt() + 8),
         properties = PopupProperties(focusable = false),
         onDismissRequest = { selection.hide() },
     ) {
@@ -156,9 +169,11 @@ internal fun SelectionMenu(
                         .clickable { selection.take(clipboard) { onMark(it, i) } },
                 )
                 Item(stringResource(R.string.note_add)) { selection.take(clipboard) { onNote(it) } }
-                Item(stringResource(R.string.copy)) { selection.copyToClipboard() }
+                Item(stringResource(R.string.copy)) { selection.copyToClipboard(clipboard) }
                 Item(stringResource(R.string.share)) {
-                    selection.take(clipboard) { t -> context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t), null)) }
+                    selection.take(clipboard) { t ->
+                        try { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t.take(100_000)), null)) } catch (_: Exception) {}
+                    }
                 }
                 for ((label, component) in apps) Item(label) {
                     selection.take(clipboard) { t ->
