@@ -161,4 +161,13 @@
     <string name="read_turn_curl">Paper curl</string>
     <string name="read_turn_none">None</string>
     <string name="read_volume_keys">Volume keys turn pages</string>
+    <string name="note_add">Note</string>
+    <string name="note_title">Note</string>
+    <string name="note_hint">Your thoughts…</string>
+    <string name="note_save">Save</string>
+    <string name="note_delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="book_notes">Notes</string>
+    <string name="notes_export">Export notes</string>
+    <string name="note_edit">Edit note</string>
 </resources>

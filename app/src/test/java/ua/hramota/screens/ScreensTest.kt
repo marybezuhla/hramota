@@ -320,7 +320,13 @@ class ScreensTest {
     @Test fun viewerBookDark() = shot("13-viewer-book-dark") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}) }
     @Config(fontScale = 1.6f)
     @Test fun viewerBookLargeFont() = shot("13-viewer-book-large-font") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}) }
-    @Test fun viewerBookContents() = shot("13-viewer-book-contents") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, startInOverview = true, bookmarks = setOf(3)) }
+    private val bookNotes = listOf(
+        ua.hramota.data.Note(2, 0, 2, 26, 0, "Початок, який хочеться перечитати.", at = 1),
+        ua.hramota.data.Note(3, 0, 3, 46, 2, at = 2),
+    )
+    @Test fun viewerBookContents() = shot("13-viewer-book-contents") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, startInOverview = true, bookmarks = setOf(3), notes = bookNotes) }
+    @Test fun viewerBookNotes() = shot("13-viewer-book-notes") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, notes = bookNotes) }
+    @Test fun viewerBookNotesNight() = shot("13-viewer-book-notes-night") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, notes = bookNotes, readSettings = ua.hramota.data.AppSettings(readPaper = "night")) }
     @Test fun viewerBookScroll() = shot("13-viewer-book-scroll") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, readSettings = ua.hramota.data.AppSettings(readPaged = false)) }
     @Test fun viewerBookSepia() = shot("13-viewer-book-sepia") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, readSettings = ua.hramota.data.AppSettings(readPaper = "sepia")) }
     @Test fun viewerBookNight() = shot("13-viewer-book-night") { ViewerScreen("Казка про млин.epub", ViewerState.Reader(book()), onBack = {}, readSettings = ua.hramota.data.AppSettings(readPaper = "night")) }

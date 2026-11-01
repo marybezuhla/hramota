@@ -195,9 +195,26 @@ class ViewerActivity : ComponentActivity() {
                                     }
                                     Unit
                                 } else null,
+                                // Notes as text, sent where the person chooses
+                                (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
+                                    getString(R.string.notes_export) to {
+                                        val text = ua.hramota.ui.notesText(book, name, e!!.notes)
+                                        startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                            .putExtra(android.content.Intent.EXTRA_SUBJECT, book.title.ifEmpty { name }).putExtra(android.content.Intent.EXTRA_TEXT, text), null))
+                                        Unit
+                                    }
+                                },
                             )
                         }.orEmpty(),
                         readSettings = settings,
+                        notes = docId?.let { entries[it]?.notes }.orEmpty(),
+                        onNote = { n ->
+                            docId?.let { id ->
+                                if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
+                                library.putNote(id, n)
+                            }
+                        },
+                        onRemoveNote = { at -> docId?.let { library.removeNote(it, at) } },
                         onReadSettings = { change -> ua.hramota.data.Settings.get(this@ViewerActivity).update(change) },
                     )
                 }

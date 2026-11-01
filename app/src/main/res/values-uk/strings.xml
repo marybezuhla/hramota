@@ -169,4 +169,13 @@
     <string name="read_turn_curl">Загин паперу</string>
     <string name="read_turn_none">Без анімації</string>
     <string name="read_volume_keys">Гортати кнопками гучності</string>
+    <string name="note_add">Нотатка</string>
+    <string name="note_title">Нотатка</string>
+    <string name="note_hint">Ваша думка…</string>
+    <string name="note_save">Зберегти</string>
+    <string name="note_delete">Видалити</string>
+    <string name="cancel">Скасувати</string>
+    <string name="book_notes">Нотатки</string>
+    <string name="notes_export">Експортувати нотатки</string>
+    <string name="note_edit">Змінити нотатку</string>
 </resources>

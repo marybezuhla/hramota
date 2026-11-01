@@ -112,8 +112,8 @@ class BookLook(val settings: AppSettings, val paper: Paper, private val language
     }
 
     /** The text as set on the page: the language's rules on where a line may not break. */
-    fun text(block: BookBlock.Text, hits: List<SearchHit>?, current: SearchHit?): AnnotatedString =
-        styledBlock(block, Typography.typeset(block.text, Typography.languageOf(block.text, bookLang)), hits, current)
+    fun text(block: BookBlock.Text, hits: List<SearchHit>?, current: SearchHit?, marks: List<Triple<Int, Int, Color>> = emptyList()): AnnotatedString =
+        styledBlock(block, Typography.typeset(block.text, Typography.languageOf(block.text, bookLang)), hits, current, marks)
 
     private fun kindStyle(kind: BookBlock.Kind, flush: Boolean): TextStyle = when (kind) {
         BookBlock.Kind.HEADING1 -> body.copy(fontSize = body.fontSize * 1.45f, lineHeight = 1.25.em, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, hyphens = Hyphens.None)
@@ -162,10 +162,14 @@ class BookLook(val settings: AppSettings, val paper: Paper, private val language
 private fun lerpColor(a: Color, b: Color, t: Float) = Color(a.red + (b.red - a.red) * t, a.green + (b.green - a.green) * t, a.blue + (b.blue - a.blue) * t, 1f)
 
 /** The block's text with its bold, italic and raised parts, and found matches marked. */
-internal fun styledBlock(b: BookBlock.Text, shown: String, hits: List<SearchHit>?, current: SearchHit?): AnnotatedString {
-    if (b.spans.isEmpty() && hits.isNullOrEmpty()) return AnnotatedString(shown)
+internal fun styledBlock(b: BookBlock.Text, shown: String, hits: List<SearchHit>?, current: SearchHit?, marks: List<Triple<Int, Int, Color>> = emptyList()): AnnotatedString {
+    if (b.spans.isEmpty() && hits.isNullOrEmpty() && marks.isEmpty()) return AnnotatedString(shown)
     return buildAnnotatedString {
         append(shown)
+        for ((s0, e0, c) in marks) {
+            val a = s0.coerceIn(0, shown.length); val e = e0.coerceIn(a, shown.length)
+            if (a < e) addStyle(SpanStyle(background = c), a, e)
+        }
         for (s in b.spans) {
             val a = s.start.coerceIn(0, b.text.length); val e = s.end.coerceIn(a, b.text.length)
             if (a < e) addStyle(SpanStyle(

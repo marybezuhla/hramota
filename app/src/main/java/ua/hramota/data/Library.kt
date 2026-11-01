@@ -12,6 +12,9 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 
+/** A marked passage, from a place in one block to a place in another, with its colour and an optional note. */
+data class Note(val block: Int, val start: Int, val endBlock: Int, val end: Int, val color: Int, val text: String = "", val at: Long = 0)
+
 /**
  * What Hramota remembers about a document, by its content (not its name or place): the same file
  * downloaded again a year later opens with its bookmarks and where reading stopped.
@@ -32,6 +35,7 @@ data class LibraryEntry(
     val bookmarks: Set<Int> = emptySet(),
     val onShelf: Boolean = false,
     val openedAt: Long = 0,
+    val notes: List<Note> = emptyList(),
 )
 
 /**
@@ -60,6 +64,14 @@ class Library private constructor(private val context: Context) {
         e.copy(bookmarks = set.take(MAX_BOOKMARKS).toSet())
     }
 
+    /** Adds a note, or replaces the one made at the same moment ([Note.at] is its identity). */
+    fun putNote(id: String, note: Note) = update(id) { e ->
+        e ?: return@update null
+        e.copy(notes = (e.notes.filter { it.at != note.at } + note).sortedWith(compareBy({ it.block }, { it.start })).take(MAX_NOTES))
+    }
+
+    fun removeNote(id: String, at: Long) = update(id) { it?.copy(notes = it.notes.filter { n -> n.at != at }) }
+
     fun setPosition(id: String, position: Int, total: Int) = update(id) { it?.copy(position = position.coerceAtLeast(0), total = total.coerceAtLeast(0)) }
 
     /** Forgets everything about a document, and deletes the copy kept inside Hramota. */
@@ -81,6 +93,12 @@ class Library private constructor(private val context: Context) {
                 position = o.optInt("position"), total = o.optInt("total"),
                 bookmarks = o.optJSONArray("bookmarks")?.let { a -> (0 until a.length()).map { a.getInt(it) }.toSet() } ?: emptySet(),
                 onShelf = o.optBoolean("shelf"), openedAt = o.optLong("opened"),
+                notes = o.optJSONArray("notes")?.let { a ->
+                    (0 until minOf(a.length(), MAX_NOTES)).mapNotNull { k ->
+                        val n = a.optJSONObject(k) ?: return@mapNotNull null
+                        Note(n.optInt("b"), n.optInt("s"), n.optInt("eb"), n.optInt("e"), n.optInt("c"), n.optString("t").take(MAX_NOTE_TEXT), n.optLong("at"))
+                    }
+                } ?: emptyList(),
             )
             e.id to e
         }
@@ -93,6 +111,9 @@ class Library private constructor(private val context: Context) {
             e.uri?.let { put("uri", it) }; e.copy?.let { put("copy", it) }
             put("position", e.position); put("total", e.total)
             put("bookmarks", JSONArray(e.bookmarks.sorted())); put("shelf", e.onShelf); put("opened", e.openedAt)
+            if (e.notes.isNotEmpty()) put("notes", JSONArray().apply {
+                for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
+            })
         })
         val out = file.startWrite()
         try { out.write(json.toString().toByteArray()); file.finishWrite(out) } catch (e: Exception) { file.failWrite(out) }
@@ -100,6 +121,8 @@ class Library private constructor(private val context: Context) {
 
     companion object {
         const val MAX_BOOKMARKS = 1000
+        const val MAX_NOTES = 5000
+        const val MAX_NOTE_TEXT = 10_000
         @Volatile private var instance: Library? = null
         fun get(context: Context): Library = instance ?: synchronized(this) { instance ?: Library(context.applicationContext).also { instance = it } }
 
