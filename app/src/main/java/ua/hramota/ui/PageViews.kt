@@ -179,7 +179,11 @@ fun ZoomablePages(
         ) {
             Text(
                 // "…" while a long document is still being laid out
-                stringResource(R.string.page_of, current, pages.pageCount) + if (pages.complete) "" else "…",
+                stringResource(R.string.page_of, current, pages.pageCount) + when {
+                    pages.cutShort -> " · " + stringResource(R.string.pages_cut)
+                    pages.complete -> ""
+                    else -> "…"
+                },
                 color = MaterialTheme.colorScheme.inverseOnSurface,
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),

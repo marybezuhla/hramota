@@ -127,4 +127,5 @@
     <string name="settings_privacy_statement">Грамота не має доступу до інтернету й не просить жодних дозволів. Вона бачить лише файли, які ви відкрили, і нічого не зберігає поза цим телефоном.</string>
     <string name="settings_licenses">Ліцензії</string>
     <string name="licenses_text">Грамота — GPL-3.0.\n\nPDFium — BSD 3-Clause (Google, автори PDFium).\npdfium-binaries — MIT (Benoît Blanchon).\n\nШрифти Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX і Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
+    <string name="pages_cut">не всі сторінки: забракло пам\'яті</string>
 </resources>

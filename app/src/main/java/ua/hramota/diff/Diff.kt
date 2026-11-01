@@ -46,15 +46,18 @@ object Diff {
             // A run of removals and additions: pair up edited paragraphs, keep the rest as is.
             val removed = ArrayList<String>()
             val added = ArrayList<String>()
+            // Paragraphs from a gap too large to match are shown removed and added, not paired by chance
+            var unmatched = false
             while (i < ops.size && ops[i] !is Op.Keep) {
                 when (val o = ops[i]) {
-                    is Op.Del -> removed += o.a
-                    is Op.Ins -> added += o.b
+                    is Op.Del -> { removed += o.a; if (o.unmatched) unmatched = true }
+                    is Op.Ins -> { added += o.b; if (o.unmatched) unmatched = true }
                     is Op.Keep -> Unit
                 }
                 i++
             }
-            pairRun(removed, added, blocks)
+            if (unmatched) { removed.forEach { blocks += Block.Removed(it) }; added.forEach { blocks += Block.Added(it) } }
+            else pairRun(removed, added, blocks)
         }
         val changes = blocks.indices.filter { blocks[it] !is Block.Same }
         return Comparison(blocks, changes, coarse)
@@ -85,10 +88,12 @@ object Diff {
     private fun paragraphOps(a: List<String>, b: List<String>): Pair<List<Op<String>>, Boolean> {
         val ops = ArrayList<Op<String>>(maxOf(a.size, b.size) + 16)
         var coarse = false
+        // One budget of exact-match cells for the whole comparison, however many gaps there are
+        var budget = MAX_CELLS * 4
 
-        fun replace(a0: Int, a1: Int, b0: Int, b1: Int) {
-            for (k in a0 until a1) ops += Op.Del(a[k])
-            for (k in b0 until b1) ops += Op.Ins(b[k])
+        fun replace(a0: Int, a1: Int, b0: Int, b1: Int, unmatched: Boolean = false) {
+            for (k in a0 until a1) ops += Op.Del(a[k], unmatched)
+            for (k in b0 until b1) ops += Op.Ins(b[k], unmatched)
         }
 
         fun solve(a0: Int, a1: Int, b0: Int, b1: Int, depth: Int) {
@@ -100,8 +105,9 @@ object Diff {
             else {
                 val anchors = if (depth < MAX_DEPTH) anchors(a, b, s0, s1, t0, t1) else IntArray(0)
                 if (anchors.isEmpty()) {
-                    val exact = lcsOps(a.subList(s0, s1), b.subList(t0, t1)) { x, y -> x == y }
-                    if (exact != null) ops += exact else { coarse = true; replace(s0, s1, t0, t1) }
+                    val cells = (s1 - s0).toLong() * (t1 - t0)
+                    val exact = if (cells <= budget) lcsOps(a.subList(s0, s1), b.subList(t0, t1)) { x, y -> x == y } else null
+                    if (exact != null) { ops += exact; budget -= cells } else { coarse = true; replace(s0, s1, t0, t1, unmatched = true) }
                 } else {
                     var pa = s0; var pb = t0
                     for (k in anchors.indices step 2) {
@@ -194,8 +200,8 @@ object Diff {
 
     private sealed interface Op<T> {
         data class Keep<T>(val a: T, val b: T) : Op<T>
-        data class Del<T>(val a: T) : Op<T>
-        data class Ins<T>(val b: T) : Op<T>
+        data class Del<T>(val a: T, val unmatched: Boolean = false) : Op<T>
+        data class Ins<T>(val b: T, val unmatched: Boolean = false) : Op<T>
     }
 
     /**

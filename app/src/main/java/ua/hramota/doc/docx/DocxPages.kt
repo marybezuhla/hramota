@@ -41,6 +41,7 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
     /** Why layout stopped early, if it did (shown instead of a silent end). */
     @Volatile var failure: Throwable? = null
         private set
+    override val cutShort: Boolean get() = done && failure != null
 
     private fun add(page: LaidOutPage) {
         synchronized(laidOut) { laidOut += page }

@@ -119,6 +119,19 @@ fun ViewerScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val current by remember { derivedStateOf { list.firstVisibleItemIndex } }
+    // After rotation the saved page may not be laid out yet: go there once it is
+    var savedPage by rememberSaveable { mutableIntStateOf(0) }
+    var restored by remember { mutableStateOf(false) }
+    val laidPages = (state as? ViewerState.Paged)?.pages
+    LaunchedEffect(current, laidPages?.pageCount, laidPages?.complete) {
+        if (laidPages == null) return@LaunchedEffect
+        if (!restored) {
+            when {
+                savedPage <= current || (laidPages.complete && savedPage >= laidPages.pageCount) -> restored = true
+                savedPage < laidPages.pageCount -> { list.scrollToItem(savedPage); restored = true }
+            }
+        } else savedPage = current
+    }
     val textPages = (state as? ViewerState.Paged)?.pages as? TextPages
     // The reading view, plain text and tables scroll in their own list
     val textList = rememberLazyListState()
@@ -155,9 +168,15 @@ fun ViewerScreen(
             // A document still being laid out: wait for its next pages
             if (p >= source.count) { if (source.complete && p >= source.count) break; delay(150); continue }
             val end = minOf(source.count, p + batch)
-            val texts = (p until end).map { source.text(it) }
+            val start = p
+            // A page comes from its engine on its own thread; paragraphs and rows are joined here, off the main thread
+            val texts = if (inPages) listOf(source.text(p)) else null
             withContext(Dispatchers.Default) {
-                for ((k, t) in texts.withIndex()) for (r in Search.find(t, query)) found += SearchHit(p + k, r.first, r.last + 1)
+                for (i in start until end) {
+                    val t = texts?.get(i - start) ?: source.text(i)
+                    for (r in Search.find(t, query)) { found += SearchHit(i, r.first, r.last + 1); if (found.size >= MAX_HITS) break }
+                    if (found.size >= MAX_HITS) break
+                }
             }
             p = end
             if (!inPages || p % 8 == 0 || p >= source.count || found.size >= MAX_HITS) hits = found.toList()
