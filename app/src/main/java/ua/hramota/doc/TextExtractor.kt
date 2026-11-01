@@ -19,7 +19,7 @@ enum class Format(val label: String) {
     PPTX("PPTX"), PPT("PPT"), ODP("ODP"), RTF("RTF"), UNKNOWN("");
 
     /** Formats whose text can be read and compared now. */
-    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV || this == XLSX || this == XLS || this == PPTX
+    val hasText: Boolean get() = this == DOCX || this == ODT || this == TXT || this == MARKDOWN || this == DOC || this == CSV || this == XLSX || this == XLS || this == PPTX || this == PPT
 
     companion object {
         fun detect(name: String?, mime: String?): Format {
@@ -103,6 +103,7 @@ object TextExtractor {
         Format.XLSX -> sheetText(ua.hramota.doc.sheet.XlsxReader.read(input))
         Format.XLS -> sheetText(ua.hramota.doc.sheet.XlsReader.read(input))
         Format.PPTX -> ua.hramota.doc.slides.PptxReader.read(input).paragraphs { "#$it" }
+        Format.PPT -> ua.hramota.doc.slides.PptReader.read(input).paragraphs { "#$it" }
         else -> throw IOException("No text reader for $format")
     }
 

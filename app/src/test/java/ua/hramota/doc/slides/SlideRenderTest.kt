@@ -23,11 +23,11 @@ class SlideRenderTest {
 
     @Test fun rendersPptx() {
         val out = File("build/render-slides").apply { mkdirs() }
-        for (file in dir().listFiles { f -> f.name.endsWith(".pptx") }!!) {
-            val deck = file.inputStream().use { PptxReader.read(it) }
+        for (file in dir().listFiles { f -> f.name.endsWith(".pptx") || f.name.endsWith(".ppt") }!!) {
+            val deck = file.inputStream().use { if (file.name.endsWith(".ppt")) PptReader.read(it) else PptxReader.read(it) }
             val pages = SlidePages(deck, fonts)
             for (i in 0 until pages.pageCount) {
-                File(out, "${file.nameWithoutExtension}-${i + 1}.png").outputStream().use { pages.draw(i, 1600)!!.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                File(if (file.name.endsWith(".ppt")) File("build/render-slides-ppt").apply { mkdirs() } else out, "${file.nameWithoutExtension}-${i + 1}.png").outputStream().use { pages.draw(i, 1600)!!.compress(Bitmap.CompressFormat.PNG, 100, it) }
             }
         }
     }
@@ -47,5 +47,19 @@ class SlideRenderTest {
         assertTrue(deck.slides[2].shapes.any { it is SlideShape.Picture })
         assertTrue(pages.pageText(3).contains("слайди"))
         assertTrue(pages.boxes(1, 0, 5).isNotEmpty())
+    }
+
+    // The same presentation saved as .ppt by LibreOffice: the same slides and text
+    @Test fun pptLikePptx() = runBlocking {
+        val ppt = File(dir(), "01-project.ppt").inputStream().use { PptReader.read(it) }
+        val pptx = File(dir(), "01-project.pptx").inputStream().use { PptxReader.read(it) }
+        assertEquals(pptx.slides.size, ppt.slides.size)
+        assertEquals(pptx.width, ppt.width, 2f)
+        val a = SlidePages(ppt, fonts); val b = SlidePages(pptx, fonts)
+        for (i in 0 until ppt.slides.size) {
+            fun words(t: String) = t.split(Regex("[\\s•–]+")).filter { it.isNotBlank() }.sorted()
+            assertEquals("slide ${i + 1}", words(b.pageText(i)), words(a.pageText(i)))
+        }
+        assertTrue(ppt.slides[2].shapes.any { it is SlideShape.Picture })
     }
 }

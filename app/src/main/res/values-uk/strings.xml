@@ -17,7 +17,7 @@
     <string name="back">Назад</string>
     <string name="open_failed">Не вдалося відкрити файл. Можливо, він пошкоджений або доступ до нього закінчився.</string>
     <string name="unsupported_title">Цей формат поки не підтримується</string>
-    <string name="unsupported_body">Файли %1$s з\'являться згодом. Поки Грамота відкриває PDF, DOCX, DOC, XLSX, XLS, PPTX, ODT, CSV, TXT і Markdown.</string>
+    <string name="unsupported_body">Файли %1$s з\'являться згодом. Поки Грамота відкриває PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, CSV, TXT і Markdown.</string>
     <string name="simplified_note">Спрощений перегляд: лише текст. Точний вигляд сторінок — у роботі.</string>
     <string name="mode_reading">Читання</string>
     <string name="mode_pages">Сторінки</string>
