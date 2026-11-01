@@ -89,6 +89,7 @@ class ScreensTest {
         RecentFile("content://demo/4", "Meeting notes.odt", now - 5 * 86_400_000L),
     )
 
+    @Composable
     private fun home(list: List<RecentFile>, prompt: String? = null) =
         HomeScreen(list, prompt, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {})
 
