@@ -56,7 +56,16 @@ data class ThemeFonts(val minor: String = "Calibri", val major: String = "Calibr
  */
 object DocxReader {
     const val MAX_PART = 64L * 1024 * 1024
+    /** Styles, numbering, theme, settings and relationships are small in real documents. */
+    const val MAX_SMALL_PART = 8L * 1024 * 1024
     const val MAX_MEDIA_TOTAL = 96L * 1024 * 1024
+    /** Paragraphs and table cells read; a longer document shows its first part. */
+    const val MAX_BLOCKS = 100_000
+    /** Tables inside tables, and wrappers (links, insertions) inside a paragraph. */
+    const val MAX_TABLE_DEPTH = 16
+    const val MAX_INLINE_DEPTH = 64
+    /** Columns of a table, as in Word. */
+    const val MAX_COLUMNS = 63
 
     fun read(input: InputStream): DocxDocument {
         val parts = HashMap<String, ByteArray>()
@@ -67,8 +76,9 @@ object DocxReader {
                 val e = zip.nextEntry ?: break
                 val name = e.name
                 when {
-                    name == "word/document.xml" || name == "word/styles.xml" || name == "word/numbering.xml" ||
-                        name == "word/theme/theme1.xml" || name == "word/_rels/document.xml.rels" || name == "word/settings.xml" -> parts[name] = readLimited(zip, MAX_PART)
+                    name == "word/document.xml" -> parts[name] = readLimited(zip, MAX_PART)
+                    name == "word/styles.xml" || name == "word/numbering.xml" || name == "word/theme/theme1.xml" ||
+                        name == "word/_rels/document.xml.rels" || name == "word/settings.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
                     name.startsWith("word/media/") -> {
                         val bytes = readLimited(zip, MAX_PART)
                         mediaTotal += bytes.size
@@ -78,6 +88,7 @@ object DocxReader {
             }
         }
         val doc = parts["word/document.xml"] ?: throw IOException("word/document.xml not found")
+        parts.values.forEach(Xml::checkNoDoctype)
         val styles = Styles.parse(parts["word/styles.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) })
         val numbering = Numbering.parse(parts["word/numbering.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) })
         val theme = parts["word/theme/theme1.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
@@ -103,8 +114,9 @@ object DocxReader {
                         val node = Xml.subtree(p)
                         when (node.name) {
                             "sectPr" -> page = pageSetup(node)
-                            else -> body.blocks(node, blocks)
+                            else -> body.blocks(node, blocks, 0)
                         }
+                        if (body.count > MAX_BLOCKS) break
                     }
                 }
                 XmlPullParser.END_DOCUMENT -> break
@@ -123,13 +135,17 @@ object DocxReader {
         val sz = s.child("pgSz")
         val m = s.child("pgMar")
         val d = PageSetup()
+        // Page sides from 1 to 22 inches (Word's limits); margins leave at least half an inch for text
+        val w = sz?.attr("w")?.toIntOrNull()?.coerceIn(1440, 31680) ?: d.width
+        val h = sz?.attr("h")?.toIntOrNull()?.coerceIn(1440, 31680) ?: d.height
+        fun margin(v: String?, def: Int, side: Int) = (v?.toIntOrNull()?.let { kotlin.math.abs(it) } ?: def).coerceIn(0, (side - 720) / 2)
         return PageSetup(
-            width = sz?.attr("w")?.toIntOrNull() ?: d.width,
-            height = sz?.attr("h")?.toIntOrNull() ?: d.height,
-            top = m?.attr("top")?.toIntOrNull()?.let { kotlin.math.abs(it) } ?: d.top,
-            bottom = m?.attr("bottom")?.toIntOrNull()?.let { kotlin.math.abs(it) } ?: d.bottom,
-            left = m?.attr("left")?.toIntOrNull() ?: m?.attr("start")?.toIntOrNull() ?: d.left,
-            right = m?.attr("right")?.toIntOrNull() ?: m?.attr("end")?.toIntOrNull() ?: d.right,
+            width = w,
+            height = h,
+            top = margin(m?.attr("top"), d.top, h),
+            bottom = margin(m?.attr("bottom"), d.bottom, h),
+            left = margin(m?.attr("left") ?: m?.attr("start"), d.left, w),
+            right = margin(m?.attr("right") ?: m?.attr("end"), d.right, w),
         )
     }
 
@@ -149,12 +165,16 @@ object DocxReader {
 
     /** Turns body elements into blocks, resolving styles and numbering. */
     private class Body(val styles: Styles, val numbering: Numbering, val rels: Map<String, String>) {
-        fun blocks(node: XmlNode, out: MutableList<Block>) {
+        /** Paragraphs and cells read so far, against [MAX_BLOCKS]. */
+        var count = 0
+
+        fun blocks(node: XmlNode, out: MutableList<Block>, depth: Int) {
+            if (count > MAX_BLOCKS || depth > MAX_TABLE_DEPTH) return
             when (node.name) {
-                "p" -> out += para(node)
-                "tbl" -> out += table(node)
+                "p" -> { count++; out += para(node) }
+                "tbl" -> out += table(node, depth + 1)
                 // Content controls wrap ordinary paragraphs and tables
-                "sdt" -> node.child("sdtContent")?.children?.forEach { blocks(it, out) }
+                "sdt" -> node.child("sdtContent")?.children?.forEach { blocks(it, out, depth + 1) }
             }
         }
 
@@ -190,16 +210,17 @@ object DocxReader {
             }
             val markProps = baseRun.with(RunProps.parse(p.path("pPr", "rPr")))
             val inlines = ArrayList<Inline>()
-            collectRuns(p, baseRun, inlines)
+            collectRuns(p, baseRun, inlines, 0)
             return Block.Para(props, markProps, inlines, label, labelProps)
         }
 
-        private fun collectRuns(parent: XmlNode, base: RunProps, out: MutableList<Inline>) {
+        private fun collectRuns(parent: XmlNode, base: RunProps, out: MutableList<Inline>, depth: Int) {
+            if (depth > MAX_INLINE_DEPTH) return
             for (c in parent.children) when (c.name) {
                 "r" -> run(c, base, out)
                 // Inserted text in tracked changes is part of the current text; deleted text is not
-                "hyperlink", "ins", "smartTag", "fldSimple", "customXml", "bdo", "dir" -> collectRuns(c, base, out)
-                "sdt" -> c.child("sdtContent")?.let { collectRuns(it, base, out) }
+                "hyperlink", "ins", "smartTag", "fldSimple", "customXml", "bdo", "dir" -> collectRuns(c, base, out, depth + 1)
+                "sdt" -> c.child("sdtContent")?.let { collectRuns(it, base, out, depth + 1) }
             }
         }
 
@@ -229,40 +250,44 @@ object DocxReader {
             val cx = ext.attr("cx")?.toLongOrNull() ?: return null
             val cy = ext.attr("cy")?.toLongOrNull() ?: return null
             val embed = holder.find("blip")?.attr("embed") ?: return null
-            return Inline.Image(embed, cx / 12700f, cy / 12700f)
+            // Sizes in EMU (12 700 per point), no larger than the largest page
+            return Inline.Image(embed, (cx / 12700f).coerceIn(0f, 1584f), (cy / 12700f).coerceIn(0f, 1584f))
         }
 
-        fun table(t: XmlNode): Block.Table {
+        fun table(t: XmlNode, depth: Int): Block.Table {
             val tblPr = t.child("tblPr")
             val styleId = tblPr?.child("tblStyle")?.attr("val")
             tableStyles += styleId
-            try { return tableBody(t, tblPr, styleId) } finally { tableStyles.removeAt(tableStyles.size - 1) }
+            try { return tableBody(t, tblPr, styleId, depth) } finally { tableStyles.removeAt(tableStyles.size - 1) }
         }
 
-        private fun tableBody(t: XmlNode, tblPr: XmlNode?, styleId: String?): Block.Table {
+        private fun tableBody(t: XmlNode, tblPr: XmlNode?, styleId: String?, depth: Int): Block.Table {
             val direct = tblPr?.child("tblBorders")?.children?.map { it.attr("val") }
             val borders = if (direct != null && direct.isNotEmpty()) direct.any { it != null && it != "nil" && it != "none" } else styles.tableHasBorders(styleId)
-            val cols = t.child("tblGrid")?.all("gridCol")?.map { it.attr("w")?.toIntOrNull() ?: 0 }.orEmpty()
-            val indent = tblPr?.child("tblInd")?.attr("w")?.toIntOrNull() ?: 0
-            val rows = t.all("tr").map { tr ->
+            val cols = t.child("tblGrid")?.all("gridCol")?.take(MAX_COLUMNS)
+                ?.map { (it.attr("w")?.toIntOrNull() ?: 0).coerceIn(0, ParaProps.MAX_LEN) }.orEmpty()
+            val indent = (tblPr?.child("tblInd")?.attr("w")?.toIntOrNull() ?: 0).coerceIn(-ParaProps.MAX_LEN, ParaProps.MAX_LEN)
+            // Rows stop with the block limit too: a table cannot hold millions of rows in memory
+            val rows = t.all("tr").asSequence().takeWhile { count <= MAX_BLOCKS }.map { tr ->
                 val trh = tr.path("trPr", "trHeight")
                 Row(
-                    cells = tr.all("tc").map { tc ->
+                    cells = tr.all("tc").take(MAX_COLUMNS).map { tc ->
                         val pr = tc.child("tcPr")
                         val vm = pr?.child("vMerge")
                         val inner = ArrayList<Block>()
-                        for (c in tc.children) blocks(c, inner)
+                        count++
+                        for (c in tc.children) blocks(c, inner, depth)
                         Cell(
-                            span = pr?.child("gridSpan")?.attr("val")?.toIntOrNull() ?: 1,
+                            span = (pr?.child("gridSpan")?.attr("val")?.toIntOrNull() ?: 1).coerceIn(1, MAX_COLUMNS),
                             mergedAbove = vm != null && vm.attr("val") != "restart",
                             blocks = inner,
                             shading = pr?.child("shd")?.attr("fill")?.let(::hexColor),
                         )
                     },
-                    height = trh?.attr("val")?.toIntOrNull(),
+                    height = trh?.attr("val")?.toIntOrNull()?.coerceIn(0, ParaProps.MAX_LEN),
                     exact = trh?.attr("hRule") == "exact",
                 )
-            }
+            }.toList()
             return Block.Table(cols, rows, borders, indent)
         }
     }

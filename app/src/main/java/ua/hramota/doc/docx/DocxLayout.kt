@@ -240,12 +240,15 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         pp.tabs?.forEach { stops += tw(it) - origin }
         if (f < 0) stops += l - origin
         val lastCustom = stops.maxOrNull() ?: 0f
-        var d = tw(DEFAULT_TAB)
-        while (d - origin < layoutWidth + tw(DEFAULT_TAB)) {
-            if (d - origin > lastCustom + 1f) stops += d - origin
-            d += tw(DEFAULT_TAB)
+        // Default stops from the first one past the line start, at most 64 of them
+        val step = tw(DEFAULT_TAB)
+        var d = (kotlin.math.floor(max(origin, 0f) / step) + 1) * step
+        var added = 0
+        while (d - origin < layoutWidth + step && added < 64) {
+            if (d - origin > lastCustom + 1f) { stops += d - origin; added++ }
+            d += step
         }
-        stops.filter { it > 0f }.forEach { text.setSpan(TabStopSpan.Standard(it.roundToInt()), 0, text.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE) }
+        stops.filter { it > 0f }.take(128).forEach { text.setSpan(TabStopSpan.Standard(it.roundToInt()), 0, text.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE) }
 
         text.setSpan(WordLines(metrics, pp.line, pp.lineRule), 0, text.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
 
@@ -288,10 +291,12 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     }
 
     private fun tableRows(t: Block.Table): List<LaidRow> {
-        val cols = if (t.columns.isNotEmpty() && t.columns.sum() > 0) t.columns.map { tw(it) } else {
-            val n = t.rows.maxOfOrNull { r -> r.cells.sumOf { it.span } } ?: 1
-            List(n) { contentWidth / n }
-        }
+        val spans = (t.rows.maxOfOrNull { r -> r.cells.sumOf { it.span } } ?: 1).coerceIn(1, DocxReader.MAX_COLUMNS)
+        val grid = if (t.columns.isNotEmpty() && t.columns.sum() > 0) t.columns.map { tw(it) } else List(spans) { contentWidth / spans }
+        // Cells may span past the grid: extra columns get the last width
+        val cols = if (grid.size >= spans) grid else grid + List(spans - grid.size) { grid.lastOrNull() ?: (contentWidth / spans) }
+        // Left edge of every column, computed once (a row is then linear, not quadratic)
+        val edges = FloatArray(cols.size + 1).also { e -> for (i in cols.indices) e[i + 1] = e[i] + cols[i] }
         val margin = tw(CELL_MARGIN)
         // Before Word 2013 the table's edge sits one cell margin left of the text, so cell text lines up with it
         val x0 = left + tw(t.indent) - if (doc.compatibilityMode < 15) margin else 0f
@@ -304,9 +309,11 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             var height = 0f
             val contents = ArrayList<Pair<Float, List<PageItem>>>()
             for (cell in row.cells) {
-                val cx = x0 + cols.take(col).sum()
-                val cw = cols.drop(col).take(cell.span).sum()
-                col += cell.span
+                if (col >= cols.size) break
+                val end = minOf(col + cell.span, cols.size)
+                val cx = x0 + edges[col]
+                val cw = edges[end] - edges[col]
+                col = end
                 val inner = ArrayList<PageItem>()
                 // Borders take room inside the row
                 var y = inset
@@ -344,10 +351,10 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     }
 
     /** Paragraphs of a cell; a table inside a cell is read row by row for now. */
-    private fun flatten(blocks: List<Block>): List<Block.Para> = blocks.flatMap { b ->
+    private fun flatten(blocks: List<Block>, depth: Int = 0): List<Block.Para> = if (depth > DocxReader.MAX_TABLE_DEPTH) emptyList() else blocks.flatMap { b ->
         when (b) {
             is Block.Para -> listOf(b)
-            is Block.Table -> b.rows.flatMap { r -> r.cells.flatMap { flatten(it.blocks) } }
+            is Block.Table -> b.rows.flatMap { r -> r.cells.flatMap { flatten(it.blocks, depth + 1) } }
         }
     }
 
@@ -407,8 +414,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     private val placeholderPaint = Paint().apply { color = 0xFFE8E8E8.toInt() }
 }
 
-/** Draws laid-out pages. */
-object PagePainter {
+/** Draws laid-out pages; one per document, so paints are never shared between windows. */
+class PagePainter {
     private val fill = Paint()
     private val rule = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF000000.toInt(); style = Paint.Style.STROKE }
 

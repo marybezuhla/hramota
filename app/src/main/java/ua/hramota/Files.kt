@@ -45,7 +45,8 @@ fun appFonts(context: Context): Fonts = fonts ?: synchronized(Fonts::class.java)
 /** The document's text as paragraphs, for the reading view. */
 fun DocxDocument.readingText(): List<Paragraph> {
     val out = ArrayList<Paragraph>()
-    fun add(blocks: List<Block>) {
+    fun add(blocks: List<Block>, depth: Int = 0) {
+        if (depth > 16) return
         for (b in blocks) when (b) {
             is Block.Para -> out += Paragraph(
                 (b.label?.let { "$it " } ?: "") + b.inlines.joinToString("") { i ->
@@ -53,7 +54,7 @@ fun DocxDocument.readingText(): List<Paragraph> {
                 },
                 TextExtractor.headingLevel(b.props.styleId),
             )
-            is Block.Table -> b.rows.forEach { r -> r.cells.forEach { add(it.blocks) } }
+            is Block.Table -> b.rows.forEach { r -> r.cells.forEach { add(it.blocks, depth + 1) } }
         }
     }
     add(blocks)

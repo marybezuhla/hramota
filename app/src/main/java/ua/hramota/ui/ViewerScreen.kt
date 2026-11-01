@@ -146,7 +146,7 @@ private fun PageDocument(pages: Pages) {
             items(pages.pageCount, key = { it }) { index ->
                 var image by remember(index, widthPx) { mutableStateOf<ImageBitmap?>(null) }
                 LaunchedEffect(index, widthPx) { image = pages.render(index, widthPx) }
-                Box(Modifier.fillMaxWidth().aspectRatio(1f / pages.aspect(index)).background(Color.White)) {
+                Box(Modifier.fillMaxWidth().aspectRatio(safeRatio(pages.aspect(index))).background(Color.White)) {
                     image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
                 }
             }
@@ -165,3 +165,6 @@ private fun PageDocument(pages: Pages) {
         }
     }
 }
+
+/** Width / height for a page, never zero, negative or infinite, whatever the file says. */
+private fun safeRatio(aspect: Float): Float = (1f / aspect).takeIf { it.isFinite() && it > 0f }?.coerceIn(0.25f, 4f) ?: (1f / 1.414f)

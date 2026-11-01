@@ -45,6 +45,10 @@ class CompareActivity : ComponentActivity() {
                                 CompareState.Ready(Diff.compare(first, second))
                             } catch (e: Exception) {
                                 CompareState.Failed
+                            } catch (e: OutOfMemoryError) {
+                                CompareState.Failed
+                            } catch (e: StackOverflowError) {
+                                CompareState.Failed
                             }
                         }
                     }

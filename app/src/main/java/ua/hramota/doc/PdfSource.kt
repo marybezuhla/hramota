@@ -22,9 +22,9 @@ class PdfSource private constructor(
     private val aspects: FloatArray,
 ) : Pages, Closeable {
     private val lock = Mutex()
-    private val cache = object : LinkedHashMap<Long, ImageBitmap>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ImageBitmap>?) = size > CACHE_PAGES
-    }
+    // Kept by size in bytes, not count: a very tall page is one big bitmap
+    private val cache = LinkedHashMap<Long, ImageBitmap>(16, 0.75f, true)
+    private var cacheBytes = 0L
     private var closed = false
 
     override val pageCount: Int get() = aspects.size
@@ -37,11 +37,20 @@ class PdfSource private constructor(
             val w = widthPx.coerceAtMost(MAX_WIDTH)
             val key = index.toLong() shl 32 or w.toLong()
             cache[key]?.let { return@withLock it }
-            val h = (w * aspects[index]).toInt().coerceIn(1, MAX_WIDTH * 4)
+            val h = (w * aspects[index]).toInt().coerceIn(1, MAX_WIDTH * 2)
             val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
             renderer.openPage(index).use { it.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) }
-            bitmap.asImageBitmap().also { cache[key] = it }
+            bitmap.asImageBitmap().also {
+                cache[key] = it
+                cacheBytes += w.toLong() * h * 4
+                val iter = cache.entries.iterator()
+                while (cacheBytes > CACHE_BYTES && cache.size > 1 && iter.hasNext()) {
+                    val old = iter.next().value
+                    cacheBytes -= old.width.toLong() * old.height * 4
+                    iter.remove()
+                }
+            }
         }
     }
 
@@ -52,6 +61,7 @@ class PdfSource private constructor(
                 if (closed) return@withLock
                 closed = true
                 cache.clear()
+                cacheBytes = 0
                 renderer.close()
                 fd.close()
             }
@@ -59,7 +69,7 @@ class PdfSource private constructor(
     }
 
     companion object {
-        private const val CACHE_PAGES = 6
+        private const val CACHE_BYTES = 48L * 1024 * 1024
         private const val MAX_WIDTH = 2048
 
         /** Opens the PDF and reads every page's proportions, so scrolling never jumps. */
@@ -69,10 +79,18 @@ class PdfSource private constructor(
             } catch (e: Exception) {
                 fd.close(); throw e
             }
-            val aspects = FloatArray(renderer.pageCount) { i ->
-                renderer.openPage(i).use { p -> if (p.width > 0) p.height.toFloat() / p.width else 1.414f }
+            try {
+                val aspects = FloatArray(renderer.pageCount) { i ->
+                    renderer.openPage(i).use { p ->
+                        val a = if (p.width > 0) p.height.toFloat() / p.width else 1.414f
+                        // A page no taller than 4 widths and no flatter than a quarter of one
+                        if (a.isFinite()) a.coerceIn(0.25f, 4f) else 1.414f
+                    }
+                }
+                return PdfSource(fd, renderer, aspects)
+            } catch (e: Throwable) {
+                renderer.close(); fd.close(); throw e
             }
-            return PdfSource(fd, renderer, aspects)
         }
     }
 }
