@@ -252,8 +252,6 @@ class Library private constructor(private val context: Context) {
         return try { Vault.writeSmall(context, "library.json", bytes); true } catch (_: Exception) { false }
     }
 
-    /** Writes the memory now and says whether it is on disk (before something older is let go). Off the main thread. */
-    fun saveNow(): Boolean = synchronized(this) { writeBytes(serialize(state.value)) }
 
     /** Seals every remembered file (locked storage turned on, unlocked): memory, shelves, covers, copies, recents. */
     fun sealAll() = convert(seal = true)
