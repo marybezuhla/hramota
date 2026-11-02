@@ -13,20 +13,21 @@ import java.io.InputStream
  * frozen panes. Formulas show their saved result; nothing is calculated or run.
  */
 object XlsReader {
-    fun read(input: InputStream): Workbook {
+    /** [withHidden]: hidden sheets too (for converting the whole workbook); the viewer shows only the visible ones. */
+    fun read(input: InputStream, withHidden: Boolean = false): Workbook {
         val file = DocReader.readAll(input)
         val ole = OleFile(file)
         val names = ole.names
         val stream = ole.stream("Workbook") ?: ole.stream("Book")?.let { throw IOException("Excel 5/95 is not supported") }
             ?: throw IOException("Not an Excel workbook")
-        return Biff(stream).read(Inspection(
+        return Biff(stream, withHidden).read(Inspection(
             macros = names.any { it == "_VBA_PROJECT_CUR" || it == "VBA" },
             embedded = names.filter { it.startsWith("MBD") }.map { "OLE $it" }.take(100),
         ))
     }
 }
 
-private class Biff(private val s: ByteArray) {
+private class Biff(private val s: ByteArray, private val withHidden: Boolean = false) {
     private fun u8(at: Int): Int { if (at < 0 || at >= s.size) throw IOException("Read past end"); return s[at].toInt() and 0xFF }
     private fun u16(at: Int) = DocReader.u16(s, at)
     private fun i32(at: Int) = DocReader.i32(s, at)
@@ -61,7 +62,7 @@ private class Biff(private val s: ByteArray) {
     private val strings = ArrayList<String>()
 
     fun read(inspection: Inspection): Workbook {
-        val sheetsAt = ArrayList<Pair<String, Int>>()
+        val sheetsAt = ArrayList<Triple<String, Int, Boolean>>()
         for (r in records(0)) {
             when (r.type) {
                 0x002F -> throw EncryptedDocumentException()
@@ -76,22 +77,23 @@ private class Biff(private val s: ByteArray) {
                 0x041E -> if (r.len >= 5) formats[u16(r.at)] = string(r.at + 2, r.at + r.len, wide = true).first.take(NumberFormat.MAX_CODE)
                 0x00E0 -> if (r.len >= 20) xfs += intArrayOf(u16(r.at), u16(r.at + 2), u8(r.at + 6), i32(r.at + 10), i32(r.at + 14), u16(r.at + 18))
                 0x0092 -> palette = IntArray(minOf(u16(r.at), 56, (r.len - 2) / 4)) { k -> (u8(r.at + 2 + k * 4) shl 16) or (u8(r.at + 3 + k * 4) shl 8) or u8(r.at + 4 + k * 4) }
-                0x0085 -> if (r.len >= 8 && u8(r.at + 5) == 0 && u8(r.at + 4) == 0) {
-                    sheetsAt += string(r.at + 6, r.at + r.len, wide = false).first to i32(r.at)
+                0x0085 -> if (r.len >= 8 && u8(r.at + 5) == 0 && (u8(r.at + 4) == 0 || withHidden)) {
+                    sheetsAt += Triple(string(r.at + 6, r.at + r.len, wide = false).first, i32(r.at), u8(r.at + 4) != 0)
                 }
                 0x00FC -> sst(r)
             }
         }
         val styles = xfs.map(::style).ifEmpty { listOf(CellStyle.DEFAULT) }
         val budget = intArrayOf(SheetLimits.MAX_CELLS)
-        val sheets = sheetsAt.take(SheetLimits.MAX_SHEETS).mapNotNull { (name, at) ->
-            if (at < 0 || at >= s.size) return@mapNotNull null
+        var complete = sheetsAt.size <= SheetLimits.MAX_SHEETS
+        val sheets = sheetsAt.take(SheetLimits.MAX_SHEETS).mapNotNull { (name, at, hidden) ->
+            if (at < 0 || at >= s.size) { complete = false; return@mapNotNull null }
             val b = SheetBuilder(name, budget)
-            try { sheet(at, b) } catch (e: IOException) { /* a damaged sheet keeps what was read */ }
-            b.build(styles, date1904)
+            try { sheet(at, b) } catch (e: IOException) { /* a damaged sheet keeps what was read */ complete = false }
+            b.build(styles, date1904, hidden = hidden).also { if (b.cut) complete = false }
         }
-        if (sheets.isEmpty()) throw IOException("No sheets")
-        return Workbook(sheets, inspection)
+        if (sheets.none { !it.hidden }) throw IOException("No sheets")
+        return Workbook(sheets, inspection, complete)
     }
 
     private fun color(index: Int): Int? = when (index) {

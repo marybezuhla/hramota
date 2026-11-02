@@ -34,28 +34,32 @@ class SheetBuilder(private val name: String, private val budget: IntArray) {
 
     /** False once the workbook's cell limit is reached. */
     val open: Boolean get() = budget[0] > 0
+    /** Something was left out to stay within the limits. */
+    var cut = false
 
     fun number(row: Int, col: Int, style: Int, value: Double) = put(row, col, style, value, null)
     fun text(row: Int, col: Int, style: Int, value: String) = put(row, col, style, 0.0, value.take(SheetLimits.MAX_TEXT))
     /** A cell whose text is shared string number [index], known once the shared strings are read. */
     fun shared(row: Int, col: Int, style: Int, index: Int) = put(row, col, style, index.toDouble(), SHARED)
     /** An empty cell that still shows its fill or borders; it has its own allowance, so formatted empty areas never crowd out data. */
-    fun blank(row: Int, col: Int, style: Int) { if (blanks > 0) { blanks--; put(row, col, style, 0.0, "", counted = false) } }
+    fun blank(row: Int, col: Int, style: Int) { if (blanks > 0) { blanks--; put(row, col, style, 0.0, "", counted = false) } else cut = true }
     private var blanks = 1_000_000
     private var sizes = 200_000
 
     /** Sets a column width or row height, within an allowance (a file cannot make millions of them). */
-    fun width(col: Int, w: Float) { if (col in 0 until SheetLimits.MAX_COLS && sizes-- > 0) widths[col] = w }
-    fun height(row: Int, h: Float) { if (row in 0 until SheetLimits.MAX_ROWS && sizes-- > 0) heights[row] = h }
+    fun width(col: Int, w: Float) { if (col in 0 until SheetLimits.MAX_COLS) { if (sizes-- > 0) widths[col] = w else cut = true } }
+    fun height(row: Int, h: Float) { if (row in 0 until SheetLimits.MAX_ROWS) { if (sizes-- > 0) heights[row] = h else cut = true } }
 
     private fun put(row: Int, col: Int, style: Int, number: Double, text: String?, counted: Boolean = true) {
-        if (row !in 0 until SheetLimits.MAX_ROWS || col !in 0 until SheetLimits.MAX_COLS || budget[0] <= 0) return
+        if (row !in 0 until SheetLimits.MAX_ROWS || col !in 0 until SheetLimits.MAX_COLS) return
+        if (budget[0] <= 0) { cut = true; return }
         if (counted) budget[0]--
         val r = rows.getOrPut(row) { RowCells() }
         r.add(col, style, number, text)
     }
 
-    fun build(styles: List<CellStyle>, date1904: Boolean, strings: List<String> = emptyList(), title: String = name): Sheet {
+    fun build(styles: List<CellStyle>, date1904: Boolean, strings: List<String> = emptyList(), title: String = name, hidden: Boolean = false): Sheet {
+        if (merges.size > 10_000) cut = true
         // Empty cells that show nothing (no fill, no borders) are dropped below
         val out = rows.entries.sortedBy { it.key }.map { (index, r) ->
             for (i in 0 until r.size) if (r.texts[i] === SHARED) r.texts[i] = strings.getOrNull(r.numbers[i].toInt()) ?: ""
@@ -71,7 +75,7 @@ class SheetBuilder(private val name: String, private val budget: IntArray) {
                 Array(order.size) { r.texts[order[it]] },
             )
         }
-        return Sheet(title, out.filter { it.cols.isNotEmpty() }, styles, widths, defaultWidth, heights, defaultHeight, merges.take(10_000), frozenRows, frozenCols, date1904)
+        return Sheet(title, out.filter { it.cols.isNotEmpty() }, styles, widths, defaultWidth, heights, defaultHeight, merges.take(10_000), frozenRows, frozenCols, date1904, hidden)
     }
 }
 

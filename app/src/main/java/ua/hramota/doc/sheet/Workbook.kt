@@ -60,11 +60,16 @@ class Sheet(
     val frozenRows: Int,
     val frozenCols: Int,
     val date1904: Boolean,
+    /** Hidden in the workbook (read only when converting, so it is not lost). */
+    val hidden: Boolean = false,
 ) {
     val rowCount: Int = (rows.lastOrNull()?.index ?: -1) + 1
     val colCount: Int = (rows.maxOfOrNull { r -> r.cols.lastOrNull() ?: -1 } ?: -1).let { c -> maxOf(c, merges.maxOfOrNull { it.right } ?: -1) } + 1
 
     fun width(col: Int): Float = widths[col] ?: defaultWidth
+    /** Columns and rows with a size of their own (also beyond the last cell). */
+    val sizedCols: Set<Int> get() = widths.keys
+    val sizedRows: Set<Int> get() = heights.keys
     fun height(row: Int): Float = heights[row] ?: defaultHeight
 
     /** The stored row with this index, or null. */
@@ -88,11 +93,12 @@ class Sheet(
     fun isNumber(row: SheetRow, k: Int): Boolean = row.texts[k] == null
 
     /** The same sheet with other rows (after editing): sizes, styles and merges stay. */
-    fun withRows(newRows: List<SheetRow>) = Sheet(name, newRows, styles, widths, defaultWidth, heights, defaultHeight, merges, frozenRows, frozenCols, date1904)
+    fun withRows(newRows: List<SheetRow>) = Sheet(name, newRows, styles, widths, defaultWidth, heights, defaultHeight, merges, frozenRows, frozenCols, date1904, hidden)
 }
 
 /** A workbook: its sheets, and what the inspector found in the file. */
-class Workbook(val sheets: List<Sheet>, val inspection: Inspection = Inspection())
+/** [complete] is false when a limit or damage left part of the file unread. */
+class Workbook(val sheets: List<Sheet>, val inspection: Inspection = Inspection(), val complete: Boolean = true)
 
 /** Limits so a damaged or hostile file cannot exhaust memory. */
 object SheetLimits {

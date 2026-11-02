@@ -124,20 +124,48 @@ object EditSaving {
         return File(copy.parentFile, "$newId.$ext" + if (sealed) Vault.SUFFIX else "")
     }
 
-    /** Writes the edited document as a new file the person chose. Off the main thread. */
+    /**
+     * Writes the edited document into a file the person chose. Off the main thread. A new, empty file
+     * is just written (and removed again when that fails); an existing one the person chose to
+     * replace is kept first, as for a save into the file itself.
+     */
     fun saveCopy(context: Context, maker: Maker, source: Uri, target: Uri): Outcome {
         val made = temp(context, "edit", maker.ext)
-        // A file picker may hand back a file that already exists: only a new, empty one is ever removed
-        val wasEmpty = try { context.contentResolver.openInputStream(target)?.use { it.read() < 0 } == true } catch (e: Exception) { false }
+        val wasEmpty = isEmpty(context, target)
         try {
-            val ok = build(context, maker, source, made) && try { writeChecked(io(context, target)) { made.inputStream() } } catch (e: Exception) { false }
-            if (!ok) {
-                if (wasEmpty) try { android.provider.DocumentsContract.deleteDocument(context.contentResolver, target) } catch (_: Exception) {}
+            if (!build(context, maker, source, made)) {
+                if (wasEmpty) remove(context, target)
                 return Outcome(Result.FAILED)
             }
-            return Outcome(Result.COPY_SAVED, copy = target)
+            if (wasEmpty) {
+                val ok = try { writeChecked(io(context, target)) { made.inputStream() } } catch (e: Exception) { false }
+                if (!ok) { remove(context, target); return Outcome(Result.FAILED) }
+                return Outcome(Result.COPY_SAVED, copy = target)
+            }
+            // Under lock the old content could only be kept plain: not written until the storage is open
+            if (Vault.sealing(context) && Vault.key() == null) return Outcome(Result.LOCKED)
+            val rescue = Rescue.create(context, ua.hramota.data.Recents.displayName(context, target), maker.ext)
+            val written = try { writeWhole(io(context, target), made, rescue) } finally { Rescue.done(rescue) }
+            return when (written) {
+                Write.DONE -> { rescue.delete(); Outcome(Result.COPY_SAVED, copy = target) }
+                // The chosen file's old content stays in Hramota, offered on the home screen
+                Write.BROKEN -> Outcome(Result.FAILED)
+                else -> { rescue.delete(); Outcome(Result.FAILED) }
+            }
         } finally { made.delete() }
     }
+
+    /** True for a file with nothing in it (as a file picker makes a new one). */
+    fun isEmpty(context: Context, uri: Uri): Boolean =
+        try { context.contentResolver.openInputStream(uri)?.use { it.read() < 0 } == true } catch (e: Exception) { false }
+
+    /** Removes a file the picker made (only ever called for one that was empty when chosen). */
+    fun remove(context: Context, uri: Uri) {
+        try { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) } catch (_: Exception) {}
+    }
+
+    /** Removes a file the picker made, only while it is still empty (a file chosen from those already there stays). Off the main thread. */
+    fun removeIfEmpty(context: Context, uri: Uri) { if (isEmpty(context, uri)) remove(context, uri) }
 
     /** Writes a kept original (from a save that did not finish) into a file the person chose. */
     fun saveRescue(context: Context, rescue: Rescue, target: Uri): Boolean = try {

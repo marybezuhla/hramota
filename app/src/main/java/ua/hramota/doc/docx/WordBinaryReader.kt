@@ -589,6 +589,7 @@ private class Parser(file: ByteArray) {
             page = page, blocks = builder.blocks, media = builder.media, fonts = ThemeFonts(),
             rels = builder.media.keys.associateWith { it },
             compatibilityMode = 12, inspection = inspection, headersFooters = hf,
+            complete = !builder.full && builder.size <= DocReader.MAX_CHARS && ccpText < DocReader.MAX_CHARS,
         )
     }
 

@@ -59,8 +59,11 @@ object XlsxWriter {
         return b.toString()
     }
 
-    private fun sheet(sh: Sheet, styleOf: (Int) -> Int): String {
-        val b = StringBuilder(HEAD + "<worksheet xmlns=\"$S\" xmlns:r=\"$R\">")
+    private fun num(f: Float) = "%.2f".format(java.util.Locale.ROOT, f)
+
+    /** Writes one sheet straight into the package ([b] goes to the open entry), so big sheets never sit whole in memory. */
+    private fun sheet(sh: Sheet, b: Appendable, styleOf: (Int) -> Int) {
+        b.append(HEAD + "<worksheet xmlns=\"$S\" xmlns:r=\"$R\">")
         if (sh.frozenRows > 0 || sh.frozenCols > 0) {
             val top = columnName(sh.frozenCols) + (sh.frozenRows + 1)
             b.append("<sheetViews><sheetView workbookViewId=\"0\"><pane")
@@ -69,17 +72,26 @@ object XlsxWriter {
             val pane = when { sh.frozenRows > 0 && sh.frozenCols > 0 -> "bottomRight"; sh.frozenRows > 0 -> "bottomLeft"; else -> "topRight" }
             b.append(" topLeftCell=\"$top\" activePane=\"$pane\" state=\"frozen\"/></sheetView></sheetViews>")
         }
-        b.append("<sheetFormatPr defaultRowHeight=\"${sh.defaultHeight}\" defaultColWidth=\"${"%.2f".format(java.util.Locale.ROOT, sh.defaultWidth / 5.25f)}\"/>")
-        val cols = (0 until minOf(sh.colCount, 16_384)).filter { sh.width(it) != sh.defaultWidth }
+        b.append("<sheetFormatPr defaultRowHeight=\"${num(sh.defaultHeight)}\" defaultColWidth=\"${num(sh.defaultWidth / 5.25f)}\"/>")
+        val cols = sh.sizedCols.filter { it in 0 until SheetLimits.MAX_COLS && sh.width(it) != sh.defaultWidth }.sorted()
         if (cols.isNotEmpty()) {
             b.append("<cols>")
-            for (c in cols) b.append("<col min=\"${c + 1}\" max=\"${c + 1}\" width=\"${"%.2f".format(java.util.Locale.ROOT, sh.width(c) / 5.25f)}\"${if (sh.width(c) == 0f) " hidden=\"1\"" else ""} customWidth=\"1\"/>")
+            for (c in cols) b.append("<col min=\"${c + 1}\" max=\"${c + 1}\" width=\"${num(sh.width(c) / 5.25f)}\"${if (sh.width(c) == 0f) " hidden=\"1\"" else ""} customWidth=\"1\"/>")
             b.append("</cols>")
         }
         b.append("<sheetData>")
+        // Rows with cells, and empty rows that keep a height of their own (or are hidden), in order
+        val sized = sh.sizedRows.filter { it in 0 until SheetLimits.MAX_ROWS && sh.height(it) != sh.defaultHeight && sh.row(it) == null }.sorted()
+        var e = 0
+        fun rowStart(index: Int) {
+            val h = sh.height(index)
+            b.append("<row r=\"${index + 1}\"")
+            if (h == 0f) b.append(" hidden=\"1\"") else if (h != sh.defaultHeight) b.append(" ht=\"${num(h)}\" customHeight=\"1\"")
+        }
+        fun emptyRowsBefore(limit: Int) { while (e < sized.size && sized[e] < limit) { rowStart(sized[e++]); b.append("/>") } }
         for (row in sh.rows) {
-            val h = sh.height(row.index)
-            b.append("<row r=\"${row.index + 1}\"").append(if (h != sh.defaultHeight) " ht=\"$h\" customHeight=\"1\"" else "").append(">")
+            emptyRowsBefore(row.index)
+            rowStart(row.index); b.append(">")
             for (k in row.cols.indices) {
                 val ref = columnName(row.cols[k]) + (row.index + 1)
                 val s = styleOf(row.styles[k]).let { if (it != 0) " s=\"$it\"" else "" }
@@ -92,53 +104,78 @@ object XlsxWriter {
             }
             b.append("</row>")
         }
+        emptyRowsBefore(Int.MAX_VALUE)
         b.append("</sheetData>")
-        if (sh.merges.isNotEmpty()) {
-            b.append("<mergeCells count=\"${sh.merges.size}\">")
-            for (m in sh.merges) b.append("<mergeCell ref=\"${columnName(m.left)}${m.top + 1}:${columnName(m.right)}${m.bottom + 1}\"/>")
+        // Excel refuses a merge of one cell, merges that overlap, and ones outside the sheet
+        val taken = ArrayList<Merge>()
+        for (m in sh.merges) {
+            if (m.top < 0 || m.left < 0 || m.bottom >= SheetLimits.MAX_ROWS || m.right >= SheetLimits.MAX_COLS || m.bottom < m.top || m.right < m.left) continue
+            if (m.top == m.bottom && m.left == m.right) continue
+            if (taken.any { o -> m.left <= o.right && o.left <= m.right && m.top <= o.bottom && o.top <= m.bottom }) continue
+            taken += m
+        }
+        if (taken.isNotEmpty()) {
+            b.append("<mergeCells count=\"${taken.size}\">")
+            for (m in taken) b.append("<mergeCell ref=\"${columnName(m.left)}${m.top + 1}:${columnName(m.right)}${m.bottom + 1}\"/>")
             b.append("</mergeCells>")
         }
         b.append("</worksheet>")
-        return b.toString()
     }
+
+    /** Names Excel accepts: at most 31 characters, none of []:*?/\, no apostrophe at either end, not "History", each different. */
+    internal fun sheetNames(names: List<String>): List<String> {
+        val used = HashSet<String>()
+        return names.mapIndexed { i, name ->
+            val clean = esc(name).let { unescape(it) }
+                .replace(Regex("[\\[\\]:*?/\\\\]"), " ").trim().trim('\'').trim().take(31).trimEnd('\'')
+                .let { if (it.isBlank() || it.equals("History", ignoreCase = true)) "Sheet${i + 1}" else it }
+            var n = clean
+            var k = 2
+            while (!used.add(n.lowercase(java.util.Locale.ROOT))) {
+                val suffix = " (${k++})"
+                n = clean.take(31 - suffix.length).trimEnd('\'') + suffix
+            }
+            n
+        }
+    }
+
+    private fun unescape(s: String) = s.replace("&quot;", "\"").replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
     /** Writes [wb] as an XLSX package to [out]. */
     fun write(wb: Workbook, out: OutputStream) {
-        // One list of looks for all sheets (each sheet keeps its own numbering when read)
+        // One list of looks for all sheets (each sheet keeps its own numbering when read); filled while the sheets are written
         val looks = ArrayList<CellStyle>()
         val index = HashMap<CellStyle, Int>()
         looks += CellStyle.DEFAULT; index[CellStyle.DEFAULT] = 0
-        val sheets = wb.sheets.map { sh ->
-            sheet(sh) { i -> val st = sh.styles.getOrNull(i) ?: CellStyle.DEFAULT; index.getOrPut(st) { looks += st; looks.size - 1 } }
-        }
-        val names = HashSet<String>()
-        val sheetNames = wb.sheets.mapIndexed { i, sh ->
-            // Excel's rules for sheet names: 31 characters, none of []:*?/\, each different
-            var n = sh.name.replace(Regex("[\\[\\]:*?/\\\\]"), " ").take(31).ifBlank { "Sheet${i + 1}" }
-            var k = 2
-            while (!names.add(n.lowercase())) n = n.take(27) + " (${k++})"
-            n
-        }
-        val workbook = HEAD + "<workbook xmlns=\"$S\" xmlns:r=\"$R\"><sheets>" +
-            sheetNames.mapIndexed { i, n -> "<sheet name=\"${esc(n)}\" sheetId=\"${i + 1}\" r:id=\"rId${i + 1}\"/>" }.joinToString("") + "</sheets></workbook>"
+        val sheetNames = sheetNames(wb.sheets.map { it.name })
+        // The first visible sheet is the one shown when the file opens
+        val first = wb.sheets.indexOfFirst { !it.hidden }.coerceAtLeast(0)
+        val date1904 = wb.sheets.any { it.date1904 }
+        val workbook = HEAD + "<workbook xmlns=\"$S\" xmlns:r=\"$R\">" + (if (date1904) "<workbookPr date1904=\"1\"/>" else "") +
+            (if (first > 0) "<bookViews><workbookView activeTab=\"$first\" firstSheet=\"$first\"/></bookViews>" else "") + "<sheets>" +
+            sheetNames.mapIndexed { i, n -> "<sheet name=\"${esc(n)}\" sheetId=\"${i + 1}\"${if (wb.sheets[i].hidden) " state=\"hidden\"" else ""} r:id=\"rId${i + 1}\"/>" }.joinToString("") + "</sheets></workbook>"
         val rels = HEAD + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
-            sheets.indices.joinToString("") { "<Relationship Id=\"rId${it + 1}\" Type=\"$R/worksheet\" Target=\"worksheets/sheet${it + 1}.xml\"/>" } +
+            wb.sheets.indices.joinToString("") { "<Relationship Id=\"rId${it + 1}\" Type=\"$R/worksheet\" Target=\"worksheets/sheet${it + 1}.xml\"/>" } +
             "<Relationship Id=\"rIdStyles\" Type=\"$R/styles\" Target=\"styles.xml\"/></Relationships>"
         val types = HEAD + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
             "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" +
             "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" +
-            sheets.indices.joinToString("") { "<Override PartName=\"/xl/worksheets/sheet${it + 1}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" } + "</Types>"
-        val stylesXml = styles(looks)
-        ZipOutputStream(out).let { z ->
-            fun put(name: String, text: String) { z.putNextEntry(ZipEntry(name)); z.write(text.toByteArray(Charsets.UTF_8)); z.closeEntry() }
-            put("[Content_Types].xml", types)
-            put("_rels/.rels", HEAD + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"$R/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>")
-            put("xl/workbook.xml", workbook)
-            put("xl/_rels/workbook.xml.rels", rels)
-            put("xl/styles.xml", stylesXml)
-            for ((i, s) in sheets.withIndex()) put("xl/worksheets/sheet${i + 1}.xml", s)
-            z.finish(); z.flush()
+            wb.sheets.indices.joinToString("") { "<Override PartName=\"/xl/worksheets/sheet${it + 1}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" } + "</Types>"
+        val z = ZipOutputStream(out)
+        val w = java.io.OutputStreamWriter(z, Charsets.UTF_8).buffered(1 shl 16)
+        fun put(name: String, text: String) { z.putNextEntry(ZipEntry(name)); w.write(text); w.flush(); z.closeEntry() }
+        put("[Content_Types].xml", types)
+        put("_rels/.rels", HEAD + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"$R/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>")
+        put("xl/workbook.xml", workbook)
+        put("xl/_rels/workbook.xml.rels", rels)
+        for ((i, sh) in wb.sheets.withIndex()) {
+            z.putNextEntry(ZipEntry("xl/worksheets/sheet${i + 1}.xml"))
+            sheet(sh, w) { k -> val st = sh.styles.getOrNull(k) ?: CellStyle.DEFAULT; index.getOrPut(st) { looks += st; looks.size - 1 } }
+            w.flush(); z.closeEntry()
         }
+        // The styles last: only now are all the looks known (the order of parts in a package does not matter)
+        put("xl/styles.xml", styles(looks))
+        z.finish(); z.flush()
     }
 }

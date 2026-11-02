@@ -66,18 +66,27 @@ class MainActivity : ComponentActivity() {
     private fun onCreated(uri: Uri?, kind: String) {
         if (uri == null) return
         lifecycleScope.launch {
-            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                try {
+            val app = applicationContext
+            val sheetName = getString(R.string.new_sheet_name)
+            // null: written; otherwise what to say
+            val problem = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                // A file chosen from those already there is never written over with an empty document
+                if (!EditSaving.isEmpty(app, uri)) return@withContext R.string.create_exists
+                val ok = try {
                     val bytes = if (kind == "docx") ua.hramota.doc.Templates.docx(java.util.Locale.getDefault().toLanguageTag())
-                        else ua.hramota.doc.Templates.xlsx(getString(R.string.new_sheet_name))
-                    contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) } != null
+                        else ua.hramota.doc.Templates.xlsx(sheetName)
+                    EditSaving.writeChecked(object : EditSaving.Io {
+                        override fun read() = app.contentResolver.openInputStream(uri)
+                        override fun write(mode: String) = app.contentResolver.openOutputStream(uri, mode)
+                    }) { bytes.inputStream() }
                 } catch (e: Exception) { false }
+                if (!ok) { EditSaving.remove(app, uri); R.string.create_failed } else null
             }
-            if (!ok) { android.widget.Toast.makeText(this@MainActivity, getString(R.string.create_failed), android.widget.Toast.LENGTH_LONG).show(); return@launch }
-            val name = Recents.displayName(this@MainActivity, uri)
+            if (problem != null) { android.widget.Toast.makeText(this@MainActivity, getString(problem), android.widget.Toast.LENGTH_LONG).show(); return@launch }
+            val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Recents.displayName(app, uri) }
             val intent = Intent(this@MainActivity, ViewerActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                .putExtra(ViewerActivity.EXTRA_NAME, name).putExtra(ViewerActivity.EXTRA_EDIT, true)
+                .putExtra(ViewerActivity.EXTRA_NAME, name).putExtra(ViewerActivity.EXTRA_EDIT, true).putExtra(ViewerActivity.EXTRA_TOKEN, ViewerActivity.TOKEN)
             recents.add(uri, name)
             startActivity(intent)
         }
@@ -95,7 +104,8 @@ class MainActivity : ComponentActivity() {
         if (target == null) return@registerForActivityResult
         if (r == null) {
             // Nothing to put in it: the empty file just made is removed
-            try { if (contentResolver.openInputStream(target)?.use { it.read() < 0 } == true) android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+            val app = applicationContext
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { EditSaving.removeIfEmpty(app, target) }
             return@registerForActivityResult
         }
         lifecycleScope.launch {
@@ -243,7 +253,8 @@ class MainActivity : ComponentActivity() {
         pendingBackup = null
         if (pending == null) {
             // The window was made again while the file was chosen: the password is gone, so no half-made file stays
-            if (uri != null) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
+            val app = applicationContext
+            if (uri != null) lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { EditSaving.removeIfEmpty(app, uri) }
             ua.hramota.data.Vault.release()
             return
         }
@@ -251,10 +262,12 @@ class MainActivity : ComponentActivity() {
         if (uri == null) { pw.fill(' '); ua.hramota.data.Vault.release(); return }
         busy = Triple(getString(R.string.backup_writing), 0, 0)
         lifecycleScope.launch {
+            var wasEmpty = false
             val reason = try {
                 ua.hramota.data.Vault.work.withLock {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
+                            wasEmpty = EditSaving.isEmpty(this@MainActivity, uri)
                             val out = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("No file")
                             out.use { ua.hramota.data.Backup.write(this@MainActivity, it, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) } }
                             null
@@ -262,7 +275,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             } finally { pw.fill(' '); ua.hramota.data.Vault.release() }
-            if (reason != null) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
+            // Only a file made for this backup is removed again (one chosen from those already there stays)
+            if (reason != null && wasEmpty) { val app = applicationContext; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { EditSaving.remove(app, uri) } }
             busy = null
             android.widget.Toast.makeText(this@MainActivity, getString(when (reason) {
                 null -> R.string.backup_written

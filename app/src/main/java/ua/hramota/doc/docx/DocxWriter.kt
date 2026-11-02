@@ -58,7 +58,7 @@ object DocxWriter {
         b.size > 3 && b[0] == 'G'.code.toByte() && b[1] == 'I'.code.toByte() -> "gif"
         b.size > 2 && b[0] == 'B'.code.toByte() && b[1] == 'M'.code.toByte() -> "bmp"
         b.size > 44 && String(b, 40, 4, Charsets.ISO_8859_1) == " EMF" -> "emf"
-        b.size > 4 && ((b[0] == 0xD7.toByte() && b[1] == 0xCD.toByte()) || (b[0] == 1.toByte() && b[1] == 0.toByte() && b[2] == 9.toByte())) -> "wmf"
+        b.size > 4 && ((b[0] == 0xD7.toByte() && b[1] == 0xCD.toByte()) || ((b[0] == 1.toByte() || b[0] == 2.toByte()) && b[1] == 0.toByte() && b[2] == 9.toByte())) -> "wmf"
         else -> null
     }
 
@@ -80,7 +80,7 @@ object DocxWriter {
         return if (b.length == "<w:rPr></w:rPr>".length) "" else b.toString()
     }
 
-    private fun pPr(p: ParaProps, label: Boolean): String {
+    private fun pPr(p: ParaProps, label: Boolean, mark: String = ""): String {
         val b = StringBuilder("<w:pPr>")
         if (p.keepNext == true) b.append("<w:keepNext/>")
         if (p.pageBreakBefore == true) b.append("<w:pageBreakBefore/>")
@@ -104,19 +104,20 @@ object DocxWriter {
         }
         if (p.contextual == true) b.append("<w:contextualSpacing/>")
         p.align?.let { a -> val v = when (a) { "justify", "distribute" -> "both"; "start" -> "left"; "end" -> "right"; else -> a }; b.append("<w:jc w:val=\"${esc(v)}\"/>") }
-        b.append("</w:pPr>")
+        // The paragraph mark's own look (last in pPr): an empty line keeps its height
+        b.append(mark).append("</w:pPr>")
         return if (b.length == "<w:pPr></w:pPr>".length) "" else b.toString()
     }
 
-    private fun blocks(list: List<Block>, part: Part, rels: MutableList<Pair<String, String>>, out: StringBuilder, minor: String) {
+    private fun blocks(list: List<Block>, part: Part, rels: MutableList<Pair<String, String>>, out: Appendable, minor: String) {
         for (bl in list) when (bl) {
             is Block.Para -> para(bl, part, rels, out, minor)
             is Block.Table -> table(bl, part, rels, out, minor)
         }
     }
 
-    private fun para(p: Block.Para, part: Part, rels: MutableList<Pair<String, String>>, b: StringBuilder, minor: String) {
-        b.append("<w:p>").append(pPr(p.props, p.label != null))
+    private fun para(p: Block.Para, part: Part, rels: MutableList<Pair<String, String>>, b: Appendable, minor: String) {
+        b.append("<w:p>").append(pPr(p.props, p.label != null, rPr(p.mark, minor)))
         p.label?.takeIf { it.isNotEmpty() }?.let { b.append("<w:r>").append(rPr(p.labelProps ?: p.mark, minor)).append("<w:t xml:space=\"preserve\">${esc(it)}</w:t><w:tab/></w:r>") }
         for (i in p.inlines) when (i) {
             is Inline.Text -> if (i.text.isNotEmpty()) b.append("<w:r>").append(rPr(i.props, minor)).append("<w:t xml:space=\"preserve\">${esc(i.text)}</w:t></w:r>")
@@ -135,18 +136,33 @@ object DocxWriter {
                     .append("<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$cx\" cy=\"$cy\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>")
             }
         }
-        // The paragraph mark keeps the paragraph's own text size (an empty line keeps its height)
         b.append("</w:p>")
     }
 
-    private fun table(t: Block.Table, part: Part, rels: MutableList<Pair<String, String>>, b: StringBuilder, minor: String) {
+    private fun table(t: Block.Table, part: Part, rels: MutableList<Pair<String, String>>, b: Appendable, minor: String) {
+        // Word needs a row to hold a cell and a table to hold a row
+        val rows = t.rows.filter { it.cells.isNotEmpty() }
+        if (rows.isEmpty()) return
+        val spans = rows.maxOf { r -> r.cells.sumOf { it.span.coerceAtLeast(1) } }.coerceIn(1, DocxReader.MAX_COLUMNS)
+        // Without a known grid the columns share the text width, and Word fits them to the content
+        val fixed = t.columns.isNotEmpty() && t.columns.sum() > 0
+        val columns = if (fixed) t.columns.map { it.coerceAtLeast(1) } + List((spans - t.columns.size).coerceAtLeast(0)) { t.columns.last().coerceAtLeast(1) }
+            else List(spans) { 9000 / spans }
         val border = if (t.borders) "<w:tblBorders>" + listOf("top", "left", "bottom", "right", "insideH", "insideV").joinToString("") { "<w:$it w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>" } + "</w:tblBorders>" else ""
         b.append("<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/>")
         if (t.indent != 0) b.append("<w:tblInd w:w=\"${t.indent}\" w:type=\"dxa\"/>")
-        b.append(border).append("<w:tblLayout w:type=\"fixed\"/></w:tblPr><w:tblGrid>")
-        for (c in t.columns) b.append("<w:gridCol w:w=\"${c.coerceAtLeast(1)}\"/>")
+        b.append(border).append("<w:tblLayout w:type=\"${if (fixed) "fixed" else "autofit"}\"/></w:tblPr><w:tblGrid>")
+        for (c in columns) b.append("<w:gridCol w:w=\"$c\"/>")
         b.append("</w:tblGrid>")
-        for (row in t.rows) {
+        // Where each cell starts in the grid, row by row: a merge goes on with the cell in the same column below
+        val starts = rows.map { r -> var col = 0; IntArray(r.cells.size) { k -> col.also { col += r.cells[k].span.coerceAtLeast(1) } } }
+        val below = rows.indices.map { ri ->
+            if (ri + 1 >= rows.size) emptySet() else {
+                val next = rows[ri + 1]
+                starts[ri + 1].indices.filter { next.cells[it].mergedAbove }.map { starts[ri + 1][it] }.toHashSet()
+            }
+        }
+        for ((ri, row) in rows.withIndex()) {
             b.append("<w:tr>")
             if (row.height != null || row.cantSplit) {
                 b.append("<w:trPr>")
@@ -154,36 +170,33 @@ object DocxWriter {
                 row.height?.let { b.append("<w:trHeight w:val=\"$it\" w:hRule=\"${if (row.exact) "exact" else "atLeast"}\"/>") }
                 b.append("</w:trPr>")
             }
-            var col = 0
             for ((k, cell) in row.cells.withIndex()) {
                 val span = cell.span.coerceAtLeast(1)
-                val width = t.columns.drop(col).take(span).sum()
-                col += span
+                val col = starts[ri][k]
+                var width = 0
+                for (c in col until minOf(col + span, columns.size)) width += columns[c]
                 b.append("<w:tc><w:tcPr><w:tcW w:w=\"${width.coerceAtLeast(1)}\" w:type=\"dxa\"/>")
                 if (span > 1) b.append("<w:gridSpan w:val=\"$span\"/>")
-                if (cell.mergedAbove) b.append("<w:vMerge/>")
-                else if (t.rows.getOrNull(t.rows.indexOf(row) + 1)?.cells?.getOrNull(k)?.mergedAbove == true) b.append("<w:vMerge w:val=\"restart\"/>")
+                if (cell.mergedAbove && ri > 0) b.append("<w:vMerge/>")
+                else if (col in below[ri]) b.append("<w:vMerge w:val=\"restart\"/>")
                 cell.shading?.let { b.append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"${hex(it)}\"/>") }
                 b.append("</w:tcPr>")
-                val inner = StringBuilder()
-                blocks(cell.blocks, part, rels, inner, minor)
+                blocks(cell.blocks, part, rels, b, minor)
                 // A cell ends with a paragraph (Word requires one)
-                if (cell.blocks.lastOrNull() !is Block.Para) inner.append("<w:p/>")
-                b.append(inner).append("</w:tc>")
+                if (cell.blocks.lastOrNull() !is Block.Para) b.append("<w:p/>")
+                b.append("</w:tc>")
             }
             b.append("</w:tr>")
         }
         b.append("</w:tbl>")
     }
 
-    /** Writes [doc] as a DOCX package to [out]. */
+    /** Writes [doc] as a DOCX package to [out]; the body goes straight into the package, so a long document never sits whole in memory. */
     fun write(doc: DocxDocument, out: OutputStream, lang: String) {
         val part = Part(doc)
         val minor = doc.fonts.minor
         val docRels = ArrayList<Pair<String, String>>()
-        val body = StringBuilder()
-        blocks(doc.blocks, part, docRels, body, minor)
-        // Headers and footers, each a part of its own with its own pictures
+        // Headers and footers first (small), each a part of its own with its own pictures: the section refers to them
         val hf = doc.headersFooters
         val extraParts = ArrayList<Pair<String, String>>()
         val refs = StringBuilder()
@@ -208,7 +221,14 @@ object DocxWriter {
         val sect = "<w:sectPr>$refs<w:pgSz w:w=\"${pg.width}\" w:h=\"${pg.height}\"${if (pg.width > pg.height) " w:orient=\"landscape\"" else ""}/>" +
             "<w:pgMar w:top=\"${pg.top}\" w:right=\"${pg.right}\" w:bottom=\"${pg.bottom}\" w:left=\"${pg.left}\" w:header=\"${pg.header}\" w:footer=\"${pg.footer}\" w:gutter=\"0\"/>" +
             (if (hf.firstPage) "<w:titlePg/>" else "") + "</w:sectPr>"
-        val document = HEAD + "<w:document $NS><w:body>$body$sect</w:body></w:document>"
+        val z = ZipOutputStream(out)
+        val w = java.io.OutputStreamWriter(z, Charsets.UTF_8).buffered(1 shl 16)
+        fun put(name: String, text: String) { z.putNextEntry(ZipEntry(name)); w.write(text); w.flush(); z.closeEntry() }
+        z.putNextEntry(ZipEntry("word/document.xml"))
+        w.write(HEAD + "<w:document $NS><w:body>")
+        blocks(doc.blocks, part, docRels, w, minor)
+        w.write("$sect</w:body></w:document>")
+        w.flush(); z.closeEntry()
         val types = StringBuilder(HEAD + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>")
         for (ext in part.mediaBytes.keys.map { it.substringAfterLast('.') }.distinct()) {
@@ -217,14 +237,14 @@ object DocxWriter {
         }
         types.append("<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>")
         types.append("<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>")
-        if (hf.evenPages) types.append("<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/>")
+        types.append("<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/>")
         for ((name, _) in extraParts) if (!name.endsWith(".rels")) {
             val k = if (name.substringAfterLast('/').startsWith("header")) "header" else "footer"
             types.append("<Override PartName=\"/$name\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.$k+xml\"/>")
         }
         types.append("</Types>")
         val docRelsXml = StringBuilder(HEAD + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rIdStyles\" Type=\"$R/styles\" Target=\"styles.xml\"/>")
-        if (hf.evenPages) docRelsXml.append("<Relationship Id=\"rIdSettings\" Type=\"$R/settings\" Target=\"settings.xml\"/>")
+        docRelsXml.append("<Relationship Id=\"rIdSettings\" Type=\"$R/settings\" Target=\"settings.xml\"/>")
         for ((id, target) in docRels) {
             if (target.startsWith("#")) {
                 val (kind, name) = target.removePrefix("#").split(':')
@@ -237,17 +257,16 @@ object DocxWriter {
             "<w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/><w:lang w:val=\"${esc(lang)}\"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr/></w:pPrDefault></w:docDefaults>" +
             "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>" +
             "<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:tblPr><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style></w:styles>"
-        ZipOutputStream(out).let { z ->
-            fun put(name: String, data: ByteArray) { z.putNextEntry(ZipEntry(name)); z.write(data); z.closeEntry() }
-            put("[Content_Types].xml", types.toString().toByteArray())
-            put("_rels/.rels", (HEAD + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"$R/officeDocument\" Target=\"word/document.xml\"/></Relationships>").toByteArray())
-            put("word/document.xml", document.toByteArray())
-            put("word/styles.xml", styles.toByteArray())
-            put("word/_rels/document.xml.rels", docRelsXml.toString().toByteArray())
-            if (hf.evenPages) put("word/settings.xml", (HEAD + "<w:settings xmlns:w=\"$W\"><w:evenAndOddHeaders/></w:settings>").toByteArray())
-            for ((name, text) in extraParts) put(name, text.toByteArray())
-            for ((path, bytes) in part.mediaBytes) put("word/$path", bytes)
-            z.finish(); z.flush()
-        }
+        // The Word version the layout follows (an old DOC keeps its own, so pages break as before)
+        val settings = HEAD + "<w:settings xmlns:w=\"$W\">" + (if (hf.evenPages) "<w:evenAndOddHeaders/>" else "") +
+            "<w:compat>" + (if (doc.addSpacing) "<w:doNotUseHTMLParagraphAutoSpacing/>" else "") + "<w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"${doc.compatibilityMode.coerceIn(11, 15)}\"/></w:compat></w:settings>"
+        put("[Content_Types].xml", types.toString())
+        put("_rels/.rels", HEAD + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"$R/officeDocument\" Target=\"word/document.xml\"/></Relationships>")
+        put("word/styles.xml", styles)
+        put("word/settings.xml", settings)
+        put("word/_rels/document.xml.rels", docRelsXml.toString())
+        for ((name, text) in extraParts) put(name, text)
+        for ((path, bytes) in part.mediaBytes) { w.flush(); z.putNextEntry(ZipEntry("word/$path")); z.write(bytes); z.closeEntry() }
+        z.finish(); z.flush()
     }
 }

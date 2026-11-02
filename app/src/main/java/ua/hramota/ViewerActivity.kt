@@ -73,6 +73,8 @@ class ViewerActivity : ComponentActivity() {
         var confirmDrop by mutableStateOf<String?>(null)
         // A PDF whose notes are being written into a file: into this one, or a copy
         var savingNotes by mutableStateOf<PdfiumPages?>(null)
+        // "docx" or "xlsx": what a conversion carries over is said before the place is chosen
+        var convertAsk by mutableStateOf<String?>(null)
         // A DOCX being edited lives through turning the phone
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
 
@@ -166,7 +168,8 @@ class ViewerActivity : ComponentActivity() {
                     }
                     // A document just made opens ready to edit (once: not again when the window is made again)
                     LaunchedEffect(state) {
-                        if (!intent.getBooleanExtra(EXTRA_EDIT, false) || held.autoEdited) return@LaunchedEffect
+                        // Only when Hramota itself asked (another app cannot open a file straight into editing)
+                        if (!intent.getBooleanExtra(EXTRA_EDIT, false) || intent.getStringExtra(EXTRA_TOKEN) != TOKEN || held.autoEdited) return@LaunchedEffect
                         when {
                             format == Format.DOCX && state is ViewerState.Paged -> { held.autoEdited = true; startEditing(uri) }
                             format == Format.XLSX && state is ViewerState.Sheets -> { held.autoEdited = true; startSheetEditing(uri, (state as ViewerState.Sheets).workbook) }
@@ -209,6 +212,22 @@ class ViewerActivity : ComponentActivity() {
                                     saveCopy.launch(name.substringBeforeLast('.', name) + " " + getString(R.string.pdf_with_notes_suffix) + ".pdf")
                                 }) { androidx.compose.material3.Text(getString(R.string.pdf_as_copy)) }
                             },
+                        )
+                    }
+                    convertAsk?.let { kind ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { convertAsk = null },
+                            title = { androidx.compose.material3.Text(getString(if (kind == "docx") R.string.save_as_docx else R.string.save_as_xlsx)) },
+                            text = { androidx.compose.material3.Text(getString(if (kind == "docx") R.string.convert_note_doc else R.string.convert_note_xls)) },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    convertAsk = null
+                                    held.converting = true
+                                    val base = name.substringBeforeLast('.', name)
+                                    if (kind == "docx") saveAsDocx.launch("$base.docx") else saveAsXlsx.launch("$base.xlsx")
+                                }) { androidx.compose.material3.Text(getString(R.string.convert_go)) }
+                            },
+                            dismissButton = { androidx.compose.material3.TextButton(onClick = { convertAsk = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
                         )
                     }
                     confirmDrop?.let { id ->
@@ -262,8 +281,8 @@ class ViewerActivity : ComponentActivity() {
                                 // Excel workbooks: cells and formulas
                                 (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
                                 // Old Word and Excel files: kept as new ones, which can then be edited
-                                if (format == Format.DOC && state is ViewerState.Paged) getString(R.string.save_as_docx) to { held.converting = true; saveAsDocx.launch(name.substringBeforeLast('.', name) + ".docx"); Unit } else null,
-                                if (format == Format.XLS && state is ViewerState.Sheets) getString(R.string.save_as_xlsx) to { held.converting = true; saveAsXlsx.launch(name.substringBeforeLast('.', name) + ".xlsx"); Unit } else null,
+                                if (format == Format.DOC && state is ViewerState.Paged) getString(R.string.save_as_docx) to { convertAsk = "docx"; Unit } else null,
+                                if (format == Format.XLS && state is ViewerState.Sheets) getString(R.string.save_as_xlsx) to { convertAsk = "xlsx"; Unit } else null,
                                 // PowerPoint: the slides' text
                                 if (format == Format.PPTX && state is ViewerState.Paged) getString(R.string.edit_open) to { startSlideEditing(uri); Unit } else null,
                                 // Word comments: read, answered with new ones, removed (in the editing view)
@@ -342,13 +361,15 @@ class ViewerActivity : ComponentActivity() {
         if (target == null) return@registerForActivityResult
         val id = currentId ?: return@registerForActivityResult
         lifecycleScope.launch {
+            var wasEmpty = false
             val ok = withContext(Dispatchers.IO) {
                 try {
+                    wasEmpty = EditSaving.isEmpty(applicationContext, target)
                     val notes = Library.get(applicationContext).get(id)?.notes.orEmpty()
                     contentResolver.openFileDescriptor(target, "wt")?.use { pdf.saveNotes(notes, ::noteArgb, it) } == true
                 } catch (e: Exception) { false }
             }
-            if (!ok) try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+            if (!ok && wasEmpty) { val app = applicationContext; withContext(Dispatchers.IO) { EditSaving.remove(app, target) } }
             android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.pdf_notes_saved else R.string.pdf_copy_not_saved), android.widget.Toast.LENGTH_LONG).show()
         }
     }
@@ -464,33 +485,40 @@ class ViewerActivity : ComponentActivity() {
         val waiting = held.converting
         held.converting = false
         val source = intent.data
-        if (target == null || source == null) return
-        if (!waiting) { try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}; return }
+        if (target == null) return
         val app = applicationContext
+        // Nothing waiting (the window was made again meanwhile): a file the picker just made is removed, a chosen one stays
+        if (!waiting || source == null) { held.scope.launch(Dispatchers.IO) { EditSaving.removeIfEmpty(app, target) }; return }
+        var incomplete = false
+        val maker = object : EditSaving.Maker {
+            override val ext = kind
+            override fun write(source: java.io.InputStream, out: java.io.OutputStream) {
+                if (kind == "docx") {
+                    val doc = WordBinaryReader.read(source)
+                    // Part of the document was not read (too long): a new file without it would lose it
+                    if (!doc.complete) { incomplete = true; throw java.io.IOException("Not read whole") }
+                    ua.hramota.doc.docx.DocxWriter.write(doc, out, java.util.Locale.getDefault().toLanguageTag())
+                } else {
+                    val wb = XlsReader.read(source, withHidden = true)
+                    if (!wb.complete) { incomplete = true; throw java.io.IOException("Not read whole") }
+                    ua.hramota.doc.sheet.XlsxWriter.write(wb, out)
+                }
+            }
+            override fun check(made: java.io.InputStream) { if (kind == "docx") DocxReader.read(made) else XlsxReader.read(made) }
+        }
+        held.saving = true
+        // The storage stays open meanwhile: locking would empty the folder the work is done in
+        ua.hramota.data.Vault.hold()
         held.scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                val temp = java.io.File(java.io.File(app.cacheDir, "open").apply { mkdirs() }, "convert-${System.nanoTime()}.$kind")
-                try {
-                    temp.outputStream().buffered().use { out ->
-                        app.contentResolver.openInputStream(source)?.use { input ->
-                            if (kind == "docx") ua.hramota.doc.docx.DocxWriter.write(WordBinaryReader.read(input), out, java.util.Locale.getDefault().toLanguageTag())
-                            else ua.hramota.doc.sheet.XlsxWriter.write(XlsReader.read(input), out)
-                        } ?: return@withContext false
-                    }
-                    // The new file must open as a document before it is put in place
-                    temp.inputStream().buffered().use { if (kind == "docx") DocxReader.read(it) else XlsxReader.read(it) }
-                    EditSaving.writeChecked(object : EditSaving.Io {
-                        override fun read() = app.contentResolver.openInputStream(target)
-                        override fun write(mode: String) = app.contentResolver.openOutputStream(target, mode)
-                    }) { temp.inputStream() }
-                } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false } finally { temp.delete() }
+            val outcome = try { withContext(Dispatchers.IO) { EditSaving.saveCopy(app, maker, source, target) } } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
+            finally { ua.hramota.data.Vault.release(); held.saving = false }
+            val message = when (outcome.result) {
+                EditSaving.Result.COPY_SAVED -> R.string.convert_done
+                EditSaving.Result.LOCKED -> R.string.edit_locked_storage
+                else -> if (incomplete) R.string.convert_incomplete else R.string.convert_failed
             }
-            if (!ok) {
-                try { android.provider.DocumentsContract.deleteDocument(app.contentResolver, target) } catch (_: Exception) {}
-                android.widget.Toast.makeText(app, app.getString(R.string.convert_failed), android.widget.Toast.LENGTH_LONG).show()
-                return@launch
-            }
-            android.widget.Toast.makeText(app, app.getString(R.string.convert_done), android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(app, app.getString(message), android.widget.Toast.LENGTH_LONG).show()
+            if (outcome.result != EditSaving.Result.COPY_SAVED) return@launch
             startActivity(android.content.Intent(app, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
                 .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
@@ -508,7 +536,8 @@ class ViewerActivity : ComponentActivity() {
         if (target == null) return
         // Nothing waiting (the edits are gone): the empty file just made is removed
         if (!waiting || maker == null || uri == null) {
-            try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+            val app = applicationContext
+            held.scope.launch(Dispatchers.IO) { EditSaving.removeIfEmpty(app, target) }
             return
         }
         held.saving = true

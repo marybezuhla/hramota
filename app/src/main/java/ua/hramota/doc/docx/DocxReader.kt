@@ -70,6 +70,8 @@ class DocxDocument(
     val compatibilityMode: Int = 15,
     val inspection: Inspection = Inspection(),
     val headersFooters: HeadersFooters = HeadersFooters(),
+    /** False when a limit left the end of the document unread. */
+    val complete: Boolean = true,
 ) {
     fun picture(rel: String): ByteArray? = rels[rel]?.let { media[it] }
 }
