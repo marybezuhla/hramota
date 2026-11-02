@@ -269,4 +269,7 @@
     <string name="edit_saved">Saved</string>
     <string name="edit_not_saved">Couldn’t save. The changes are still here.</string>
     <string name="edit_saved_copy">This file can’t be changed, so a copy with the changes was saved.</string>
+    <string name="edit_original_broken">Couldn’t write into the file, and its earlier content couldn’t be put back either. Save the edited version as a copy now.</string>
+    <string name="edit_not_written">Couldn’t write into this file; it was left as it was. Save the changes as a copy.</string>
+    <string name="edit_save_copy_hint">This file can’t be changed here. Choose where to save a copy with your changes.</string>
 </resources>

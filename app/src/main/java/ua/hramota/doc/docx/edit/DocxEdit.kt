@@ -75,7 +75,7 @@ class DocxEdit private constructor(
     private var styles: Styles = parseStyles()
     private var numbering: ua.hramota.doc.docx.XmlNode? = numberingXml?.let { tree(it) }
     private var ourBullets: String? = null
-    private var ourNumbers: String? = null
+    private var ourNumberAbstract: String? = null
 
     val canStyle: Boolean get() = stylesXml != null
 
@@ -96,7 +96,7 @@ class DocxEdit private constructor(
     /** The look of one character: what the person set, else the run, its character style and the paragraph style. */
     fun look(p: EditPara, m: RunStyle): Look {
         val e = explicit(m.rPr)
-        val base = styles.paragraph(styleOf(p.pPr)).second.with(styles.character(e.font))
+        val base = runOfStyle(styleOf(p.pPr), e.font)
         return Look(
             bold = m.bold ?: e.bold ?: base.bold ?: false,
             italic = m.italic ?: e.italic ?: base.italic ?: false,
@@ -131,14 +131,29 @@ class DocxEdit private constructor(
 
     private fun pprKids(pPr: String): List<Elem> = if (pPr.isEmpty()) emptyList() else XmlScan.children(pPr, XmlScan.children(pPr, 0, pPr.length).first())
 
-    private fun styleOf(pPr: String): String? = pprKids(pPr).firstOrNull { it.local == "pStyle" }?.attrs?.get("$w:val")
+    /** A paragraph's style and list, read once per distinct pPr (most paragraphs share a few). */
+    private class Info(val style: String?, val num: Pair<String, Int>?)
+    private val infoCache = HashMap<String, Info>()
 
-    private fun numOf(pPr: String): Pair<String, Int>? {
-        val n = pprKids(pPr).firstOrNull { it.local == "numPr" } ?: return null
-        val kids = XmlScan.children(pPr, n)
-        val id = kids.firstOrNull { it.local == "numId" }?.attrs?.get("$w:val") ?: return null
-        return id to (kids.firstOrNull { it.local == "ilvl" }?.attrs?.get("$w:val")?.toIntOrNull()?.coerceIn(0, 8) ?: 0)
+    private fun info(pPr: String): Info = infoCache.getOrPut(pPr) {
+        val kids = try { pprKids(pPr) } catch (e: Exception) { emptyList() }
+        val style = kids.firstOrNull { it.local == "pStyle" }?.attrs?.get("$w:val")
+        val num = kids.firstOrNull { it.local == "numPr" }?.let { n ->
+            val nk = XmlScan.children(pPr, n)
+            nk.firstOrNull { it.local == "numId" }?.attrs?.get("$w:val")?.let { id -> id to (nk.firstOrNull { it.local == "ilvl" }?.attrs?.get("$w:val")?.toIntOrNull()?.coerceIn(0, 8) ?: 0) }
+        }
+        if (infoCache.size > 50_000) infoCache.clear()
+        Info(style, num)
     }
+
+    private fun styleOf(pPr: String): String? = info(pPr).style
+
+    private fun numOf(pPr: String): Pair<String, Int>? = info(pPr).num
+
+    // What a paragraph style gives its text, worked out once per style
+    private val styleRun = HashMap<String?, RunProps>()
+    private fun runOfStyle(style: String?, charStyle: String?): RunProps =
+        styleRun.getOrPut(style + "\u0000" + charStyle) { styles.paragraph(style).second.with(styles.character(charStyle)) }
 
     // --- Changes ---
 
@@ -228,15 +243,20 @@ class DocxEdit private constructor(
         stylesXml = s.substring(0, root.closeStart) + def + s.substring(root.closeStart)
         changedParts["word/styles.xml"] = stylesXml!!
         styles = parseStyles()
+        styleRun.clear()
         return id
     }
 
+    /** A list of our own: one for all bullets; each new numbered list counts from 1 (a list of its own over the same levels). */
     private fun ourList(kind: ListKind): String? {
-        (if (kind == ListKind.BULLET) ourBullets else ourNumbers)?.let { return it }
+        if (kind == ListKind.BULLET) ourBullets?.let { return it }
+        if (kind == ListKind.NUMBER) ourNumberAbstract?.let { return addNum(it) }
         var s = numberingXml ?: run {
             // No numbering in the document yet: a part of its own, known to the package
             val rels = relsXml ?: return null
             val types = typesXml ?: return null
+            // Numbering kept under another name: not added a second time
+            if ("relationships/numbering\"" in rels) return null
             val relsEnd = rels.lastIndexOf("</Relationships>").takeIf { it > 0 } ?: return null
             val typesEnd = types.lastIndexOf("</Types>").takeIf { it > 0 } ?: return null
             var rid = "rIdHramota1"; var k = 2
@@ -267,7 +287,20 @@ class DocxEdit private constructor(
         numberingXml = s
         changedParts["word/numbering.xml"] = s
         numbering = tree(s)
-        if (kind == ListKind.BULLET) ourBullets = numId.toString() else ourNumbers = numId.toString()
+        if (kind == ListKind.BULLET) ourBullets = numId.toString() else ourNumberAbstract = abstractId.toString()
+        return numId.toString()
+    }
+
+    private fun addNum(abstractId: String): String? {
+        var s = numberingXml ?: return null
+        val root = XmlScan.children(s, 0, s.length).firstOrNull { it.local == "numbering" } ?: return null
+        val kids = XmlScan.children(s, root)
+        val numId = (kids.filter { it.local == "num" }.mapNotNull { it.attrs["$w:numId"]?.toIntOrNull() }.maxOrNull() ?: 0) + 1
+        val at = kids.firstOrNull { it.local == "numIdMacAtCleanup" }?.start ?: root.closeStart
+        s = s.substring(0, at) + "<$w:num $w:numId=\"$numId\"><$w:abstractNumId $w:val=\"$abstractId\"/></$w:num>" + s.substring(at)
+        numberingXml = s
+        changedParts["word/numbering.xml"] = s
+        numbering = tree(s)
         return numId.toString()
     }
 
@@ -340,6 +373,7 @@ class DocxEdit private constructor(
      */
     fun save(list: List<EditPara>, source: InputStream, out: OutputStream) {
         val doc = documentXml(list).toByteArray(Charsets.UTF_8)
+        val changedParts = HashMap(this.changedParts)
         val written = HashSet<String>()
         var total = 0L
         ZipInputStream(source).use { zip ->
@@ -454,7 +488,7 @@ class DocxEdit private constructor(
             for (c in XmlScan.children(xml, e)) {
                 if (!c.name.startsWith("$w:")) { editable = false; continue }
                 when (c.local) {
-                    "pPr" -> pPr = xml.substring(c.start, c.end)
+                    "pPr" -> { pPr = xml.substring(c.start, c.end); if ("PrChange" in pPr) editable = false }
                     "proofErr" -> {}
                     "bookmarkStart" -> head.append(xml, c.start, c.end)
                     "bookmarkEnd" -> tail.append(xml, c.start, c.end)
@@ -463,7 +497,7 @@ class DocxEdit private constructor(
                         for (rc in XmlScan.children(xml, c)) {
                             if (!rc.name.startsWith("$w:")) { editable = false; continue }
                             val ch: String? = when (rc.local) {
-                                "rPr" -> { rPr = xml.substring(rc.start, rc.end); null }
+                                "rPr" -> { rPr = xml.substring(rc.start, rc.end); if ("PrChange" in rPr) editable = false; null }
                                 "t" -> if (rc.empty) "" else XmlScan.unescape(xml.substring(rc.openEnd, rc.closeStart))
                                 "tab" -> "\t"
                                 "br" -> if (rc.attrs["$w:type"].let { it == null || it == "textWrapping" } && rc.attrs["$w:clear"] == null) LINE.toString() else { editable = false; null }

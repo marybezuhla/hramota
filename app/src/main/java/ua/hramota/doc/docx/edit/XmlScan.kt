@@ -116,8 +116,8 @@ object XmlScan {
                     val ent = s.substring(i + 1, semi)
                     val ch: String? = when {
                         ent == "amp" -> "&"; ent == "lt" -> "<"; ent == "gt" -> ">"; ent == "quot" -> "\""; ent == "apos" -> "'"
-                        ent.startsWith("#x") || ent.startsWith("#X") -> ent.substring(2).toIntOrNull(16)?.takeIf { Character.isValidCodePoint(it) }?.let { String(Character.toChars(it)) }
-                        ent.startsWith("#") -> ent.substring(1).toIntOrNull()?.takeIf { Character.isValidCodePoint(it) }?.let { String(Character.toChars(it)) }
+                        ent.startsWith("#x") || ent.startsWith("#X") -> ent.substring(2).toIntOrNull(16)?.let(::char)
+                        ent.startsWith("#") -> ent.substring(1).toIntOrNull()?.let(::char)
                         else -> null
                     }
                     if (ch != null) { b.append(ch); i = semi + 1; continue }
@@ -128,10 +128,16 @@ object XmlScan {
         return b.toString()
     }
 
+    /** A numbered character, if XML can hold it (no halves of surrogate pairs). */
+    private fun char(cp: Int): String? = if (Character.isValidCodePoint(cp) && cp !in 0xD800..0xDFFF) String(Character.toChars(cp)) else null
+
     /** Text for XML, in elements or in quoted values; characters XML cannot hold are left out. */
     fun escape(s: String): String {
         val b = StringBuilder(s.length + 16)
-        for (c in s) when {
+        for ((k, c) in s.withIndex()) when {
+            // Half of a surrogate pair without its other half cannot be written as UTF-8
+            c.isHighSurrogate() -> if (k + 1 < s.length && s[k + 1].isLowSurrogate()) b.append(c)
+            c.isLowSurrogate() -> if (k > 0 && s[k - 1].isHighSurrogate()) b.append(c)
             c == '&' -> b.append("&amp;")
             c == '<' -> b.append("&lt;")
             c == '>' -> b.append("&gt;")

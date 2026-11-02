@@ -111,7 +111,9 @@ class EditorState(val edit: DocxEdit) {
         val group = typingIn != null && typingIn == lastTypedKey && now - lastTyped < 1500
         if (!group) {
             undoStack += paras
-            if (undoStack.size > 200) undoStack.removeAt(0)
+            // Each step keeps the paragraph list (shared paragraphs, not copies): fewer steps for long documents
+            val cap = (2_000_000 / maxOf(paras.size, 1)).coerceIn(20, 200)
+            while (undoStack.size > cap) undoStack.removeAt(0)
         }
         lastTyped = now; lastTypedKey = typingIn ?: -1L
         redoStack.clear()
@@ -138,7 +140,8 @@ class EditorState(val edit: DocxEdit) {
     }
 
     /** New text of paragraph [i] as typed: the formatting follows the text it was typed after. */
-    fun typed(i: Int, text: String, cursor: Int) {
+    fun typed(key: Long, text: String, cursor: Int) {
+        val i = indexOf(key); if (i < 0) return
         val p = paras[i]
         if (text == p.text) return
         val old = p.text
@@ -172,7 +175,8 @@ class EditorState(val edit: DocxEdit) {
     }
 
     /** Backspace at the start of paragraph [i]: joined to the one before, if they can be one. */
-    fun joinWithPrevious(i: Int): Boolean {
+    fun joinWithPrevious(key: Long): Boolean {
+        val i = indexOf(key)
         if (i <= 0) return false
         val a = paras[i - 1]; val b = paras[i]
         if (!edit.canJoin(a, b)) return false
@@ -194,8 +198,11 @@ class EditorState(val edit: DocxEdit) {
         val i = indexOf(focused); if (i < 0) return Look()
         pending?.let { return edit.look(paras[i], it) }
         val s = selection
+        val p = paras[i]
         if (s.collapsed) return look(i, s.start - 1)
-        val looks = (s.min until s.max).map { look(i, it) }
+        // Each distinct formatting looked at once, however long the selection
+        val looks = p.marks.subList(s.min.coerceIn(0, p.marks.size), s.max.coerceIn(0, p.marks.size)).distinct().map { edit.look(p, it) }
+        if (looks.isEmpty()) return look(i, s.start)
         return Look(looks.all { it.bold }, looks.all { it.italic }, looks.all { it.underline }, looks.all { it.strike })
     }
 
@@ -289,7 +296,7 @@ fun DocxEditorScreen(
                 },
             )
         },
-        bottomBar = { EditToolbar(state) },
+        bottomBar = { EditToolbar(state, enabled = !saving) },
     ) { padding ->
         val listState = rememberLazyListState()
         LazyColumn(
@@ -352,37 +359,57 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
         // The text always comes from the paragraph (undo, splits and joins change it from outside)
         val current = if (value.text == ZW + p.text) value else TextFieldValue(ZW + p.text, TextRange(value.selection.start.coerceIn(1, p.text.length + 1), value.selection.end.coerceIn(1, p.text.length + 1)))
         val focus = remember { FocusRequester() }
+        // Set while what the keyboard sends is based on text this field no longer shows (see onValueChange)
+        val stale = remember(p.key) { BooleanArray(1) }
+        stale[0] = false
         LaunchedEffect(state.moveTo) {
             val (key, at) = state.moveTo ?: return@LaunchedEffect
             if (key != p.key) return@LaunchedEffect
             value = TextFieldValue(ZW + p.text, TextRange(at + 1))
+            state.focused = p.key
+            state.selection = TextRange(at, at)
             state.moveTo = null
             try { focus.requestFocus() } catch (_: Exception) {}
         }
         BasicTextField(
             value = current,
             onValueChange = { v ->
+                // After a split, a join or a refusal the field's own copy of the text is out of date until it is
+                // shown again: what the keyboard sends meanwhile is based on the old text and is not applied
+                if (stale[0]) return@BasicTextField
+                val before = current.text
                 var text = v.text
                 var sel = v.selection
-                val zw = text.indexOf(ZW)
-                if (zw < 0) {
-                    // The mark before the text was deleted: Backspace at the start
-                    if (!state.joinWithPrevious(i)) value = TextFieldValue(ZW + p.text, TextRange(1))
-                    return@BasicTextField
-                }
-                if (zw > 0) {
-                    // Typed before the mark: it is moved back to the very start
-                    text = ZW + text.removeRange(zw, zw + 1)
-                    fun shift(x: Int) = if (x <= zw) x + 1 else x
+                if (!text.startsWith(ZW)) {
+                    // The change touched the very start, where the hidden mark is: where did it go?
+                    var pre = 0
+                    while (pre < before.length && pre < text.length && before[pre] == text[pre]) pre++
+                    var suf = 0
+                    while (suf < before.length - pre && suf < text.length - pre && before[before.length - 1 - suf] == text[text.length - 1 - suf]) suf++
+                    val removed = before.length - pre - suf
+                    if (removed > 0) {
+                        // The mark was deleted: Backspace at the start joins this paragraph to the one before
+                        stale[0] = true
+                        if (!state.joinWithPrevious(p.key)) value = TextFieldValue(ZW + p.text, TextRange(1))
+                        return@BasicTextField
+                    }
+                    // Typed before the mark: the mark goes back to the very start
+                    val inserted = text.length - before.length
+                    text = ZW + text.substring(0, inserted) + text.substring(inserted + 1)
+                    fun shift(x: Int) = if (x <= inserted) x + 1 else x
                     sel = TextRange(shift(sel.start), shift(sel.end))
                 }
                 val plain = text.substring(1)
                 sel = TextRange(sel.start.coerceIn(1, text.length), sel.end.coerceIn(1, text.length))
                 val textChanged = plain != p.text
                 if (!textChanged && sel != current.selection) state.pending = null
-                value = TextFieldValue(text, sel, if (zw == 0) v.composition else null)
+                value = TextFieldValue(text, sel, if (text == v.text) v.composition else null)
                 state.selection = TextRange(sel.start - 1, sel.end - 1)
-                if (textChanged) state.typed(i, plain, sel.end - 1)
+                if (textChanged) {
+                    // Enter (a line end) splits the paragraph: this field shows its first part next
+                    if ('\n' in plain) stale[0] = true
+                    state.typed(p.key, plain, sel.end - 1)
+                }
             },
             textStyle = style,
             // Nothing changes while the file is being written
@@ -400,9 +427,9 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
 }
 
 @Composable
-private fun EditToolbar(state: EditorState) {
+private fun EditToolbar(state: EditorState, enabled: Boolean) {
     val i = state.indexOf(state.focused)
-    val active = i >= 0 && state.paras.getOrNull(i)?.editable == true
+    val active = enabled && i >= 0 && state.paras.getOrNull(i)?.editable == true
     val look = if (active) state.currentLook() else Look()
     val shown = state.shown.getOrNull(i)
     Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
@@ -412,8 +439,8 @@ private fun EditToolbar(state: EditorState) {
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Tool("↶", stringResource(R.string.edit_undo), enabled = state.canUndo) { state.undo() }
-                Tool("↷", stringResource(R.string.edit_redo), enabled = state.canRedo) { state.redo() }
+                Tool("↶", stringResource(R.string.edit_undo), enabled = enabled && state.canUndo) { state.undo() }
+                Tool("↷", stringResource(R.string.edit_redo), enabled = enabled && state.canRedo) { state.redo() }
                 Tool("B", stringResource(R.string.edit_bold), active, look.bold, TextStyle(fontWeight = FontWeight.Bold)) { state.toggle(EditorState.Mark.BOLD) }
                 Tool("I", stringResource(R.string.edit_italic), active, look.italic, TextStyle(fontStyle = FontStyle.Italic)) { state.toggle(EditorState.Mark.ITALIC) }
                 Tool("U", stringResource(R.string.edit_underline), active, look.underline, TextStyle(textDecoration = TextDecoration.Underline)) { state.toggle(EditorState.Mark.UNDERLINE) }

@@ -277,4 +277,7 @@
     <string name="edit_saved">Збережено</string>
     <string name="edit_not_saved">Не вдалося зберегти. Зміни лишилися тут.</string>
     <string name="edit_saved_copy">Цей файл не можна змінити, тож збережено копію зі змінами.</string>
+    <string name="edit_original_broken">Не вдалося записати у файл, і повернути його попередній вміст теж не вдалося. Збережіть змінений документ як копію зараз.</string>
+    <string name="edit_not_written">Не вдалося записати в цей файл; він лишився як був. Збережіть зміни як копію.</string>
+    <string name="edit_save_copy_hint">Цей файл тут не можна змінити. Виберіть, де зберегти копію зі змінами.</string>
 </resources>
