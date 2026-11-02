@@ -521,7 +521,7 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
 }
 
 @Composable
-private fun Tool(label: String, description: String, enabled: Boolean = true, on: Boolean = false, style: TextStyle = TextStyle(), onClick: () -> Unit) {
+internal fun Tool(label: String, description: String, enabled: Boolean = true, on: Boolean = false, style: TextStyle = TextStyle(), onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Box(
         Modifier.padding(2.dp)

@@ -214,6 +214,12 @@ class ViewerActivity : ComponentActivity() {
                     val editor = held.editor
                     // A save finished (perhaps while the window was being made again): said and acted on here
                     held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
+                    held.slides?.let { slideEditor ->
+                        val pages = (state as? ViewerState.Paged)?.pages
+                        ua.hramota.ui.SlideEditorScreen(name, slideEditor, held.saving, onSave = { saveEdits(uri, docId, name) }, onClose = { held.slides = null },
+                            thumbnail = pages?.let { pg -> { i: Int, w: Int -> pg.render(i, w) } }, aspect = pages?.let { 1f / it.aspect(0) } ?: (16f / 9f))
+                        return@Surface
+                    }
                     held.sheet?.let { sheetEditor ->
                         ua.hramota.ui.SheetEditorScreen(name, sheetEditor, held.saving, onSave = { saveEdits(uri, docId, name) }, onClose = { held.sheet = null })
                         return@Surface
@@ -247,6 +253,8 @@ class ViewerActivity : ComponentActivity() {
                                 if (format == Format.DOCX && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
                                 // Excel workbooks: cells and formulas
                                 (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
+                                // PowerPoint: the slides' text
+                                if (format == Format.PPTX && state is ViewerState.Paged) getString(R.string.edit_open) to { startSlideEditing(uri); Unit } else null,
                                 // Word comments: read, answered with new ones, removed (in the editing view)
                                 (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 }?.let { n ->
                                     getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
@@ -350,6 +358,20 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
+    /** Opens the PPTX for editing its text (off the main thread). */
+    private fun startSlideEditing(uri: android.net.Uri) {
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        val app = applicationContext
+        held.scope.launch {
+            val edit = withContext(Dispatchers.IO) {
+                try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.slides.edit.PptxEdit.open(it.buffered()) }?.let { ua.hramota.ui.SlideEditorState(it) } }
+                catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+            }
+            if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
+            else held.slides = edit
+        }
+    }
+
     /** Opens the XLSX for editing (off the main thread), shown as the workbook already read. */
     private fun startSheetEditing(uri: android.net.Uri, workbook: ua.hramota.doc.sheet.Workbook) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
@@ -390,7 +412,7 @@ class ViewerActivity : ComponentActivity() {
         when (o.result) {
             EditSaving.Result.SAVED -> {
                 say(R.string.edit_saved)
-                held.editor = null; held.sheet = null
+                held.editor = null; held.sheet = null; held.slides = null
                 // Shown again from the saved file
                 o.newId?.let { reopen(it) } ?: recreate()
             }
@@ -399,13 +421,17 @@ class ViewerActivity : ComponentActivity() {
                 held.copyPending = true
                 held.copyReason = o.result
                 val base = name.substringBeforeLast('.', name)
-                if (held.sheet != null) saveSheetCopy.launch("$base.xlsx") else saveEditCopy.launch("$base.docx")
+                when {
+                    held.sheet != null -> saveSheetCopy.launch("$base.xlsx")
+                    held.slides != null -> saveSlidesCopy.launch("$base.pptx")
+                    else -> saveEditCopy.launch("$base.docx")
+                }
             }
             EditSaving.Result.FAILED -> say(R.string.edit_not_saved)
             EditSaving.Result.LOCKED -> say(R.string.edit_locked_storage)
             EditSaving.Result.COPY_SAVED -> {
                 say(if (held.copyReason == EditSaving.Result.NOT_ALLOWED) R.string.edit_saved_copy else R.string.edit_saved_copy_plain)
-                held.editor = null; held.sheet = null
+                held.editor = null; held.sheet = null; held.slides = null
                 // The copy is opened in place of the original
                 o.copy?.let { target ->
                     startActivity(android.content.Intent(this, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
@@ -418,6 +444,7 @@ class ViewerActivity : ComponentActivity() {
 
     // A copy of the edits saved where the person chooses (the file itself could not be changed)
     private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target -> onCopyTarget(target) }
+    private val saveSlidesCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.presentationml.presentation")) { target -> onCopyTarget(target) }
     private val saveSheetCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { target -> onCopyTarget(target) }
 
     private fun onCopyTarget(target: android.net.Uri?) {
@@ -583,9 +610,10 @@ class ViewerActivity : ComponentActivity() {
     class EditHolder : androidx.lifecycle.ViewModel() {
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
         var sheet by mutableStateOf<ua.hramota.ui.SheetEditorState?>(null)
+        var slides by mutableStateOf<ua.hramota.ui.SlideEditorState?>(null)
 
         /** What saving needs from whichever editor is open (taken now: later typing is not part of it). */
-        fun maker(): EditSaving.Maker? = editor?.let { EditSaving.docx(it.edit, it.paras) } ?: sheet?.maker()
+        fun maker(): EditSaving.Maker? = editor?.let { EditSaving.docx(it.edit, it.paras) } ?: sheet?.maker() ?: slides?.maker()
         var saving by mutableStateOf(false)
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
         /** Why the edits went into a copy (what is said when it is saved). */

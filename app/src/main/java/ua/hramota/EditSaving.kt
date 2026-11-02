@@ -282,7 +282,7 @@ object EditSaving {
                 val label = File(dir(context), "$stem.txt$suffix")
                 val bytes = name.take(200).toByteArray(Charsets.UTF_8)
                 label.writeBytes(if (key != null) Sealed.seal(key, bytes, "$stem.txt") else bytes)
-                val file = File(dir(context), "$stem.${if (ext == "xlsx") "xlsx" else "docx"}$suffix")
+                val file = File(dir(context), "$stem.${if (ext == "xlsx" || ext == "pptx") ext else "docx"}$suffix")
                 inUse += file.path
                 return Rescue(file, label, key, File(context.cacheDir, "open"))
             }
@@ -297,7 +297,7 @@ object EditSaving {
                 val files = dir(context).listFiles().orEmpty()
                 // A copy that was never finished holds nothing worth offering
                 files.filter { it.name.endsWith(".part") }.forEach { it.delete() }
-                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.(docx|xlsx)(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
+                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.(docx|xlsx|pptx)(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
                 fun stem(f: File) = f.name.removeSuffix(Vault.SUFFIX).substringBeforeLast('.')
                 // Labels whose copy never came to be (not of a save under way)
                 files.filter { it.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && files.none { k -> !k.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && stem(k) == stem(it) } }.forEach { it.delete() }

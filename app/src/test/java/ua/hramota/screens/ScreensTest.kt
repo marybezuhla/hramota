@@ -323,6 +323,12 @@ class ScreensTest {
     @Test fun sheetEditorScreen() = shot("14-edit-xlsx") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
     @Config(qualifiers = "+night")
     @Test fun sheetEditorDark() = shot("14-edit-xlsx-dark") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 1) }
+    @Test fun slideEditorScreen() = shot("15-edit-pptx") {
+        val st = androidx.compose.runtime.remember {
+            ua.hramota.ui.SlideEditorState(ua.hramota.doc.slides.edit.PptxEdit.open(File(javaClass.classLoader!!.getResource("slides/01-project.pptx")!!.toURI()).inputStream()))
+        }
+        ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", st, saving = false, onSave = {}, onClose = {})
+    }
     @Test fun editorEnglish() = shot("13-edit-docx-en") { ua.hramota.ui.DocxEditorScreen("Contract.docx", androidx.compose.runtime.remember { editor("05-flow.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Test fun homeShelf() = shot("12-home-shelf") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)

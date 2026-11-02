@@ -299,4 +299,9 @@
     <string name="edit_locked_storage">Сховище під замком закрите. Відімкніть Грамоту й збережіть знову.</string>
     <string name="rescue_delete_sure">Видалити назавжди</string>
     <string name="sheet_edit_hint">Значення або =формула</string>
+    <string name="slide_box_title">Заголовок</string>
+    <string name="slide_box_subtitle">Підзаголовок</string>
+    <string name="slide_box_text">Текст</string>
+    <string name="slide_box_table">Таблиця</string>
+    <string name="slide_locked_paragraph">Цей абзац поки не можна змінити: у ньому номер слайда, поле дати, формула або щось подібне. Він лишиться як є.</string>
 </resources>

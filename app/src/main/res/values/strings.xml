@@ -291,4 +291,9 @@
     <string name="edit_locked_storage">The locked storage is closed. Unlock Hramota and save again.</string>
     <string name="rescue_delete_sure">Delete for good</string>
     <string name="sheet_edit_hint">Value or =formula</string>
+    <string name="slide_box_title">Title</string>
+    <string name="slide_box_subtitle">Subtitle</string>
+    <string name="slide_box_text">Text</string>
+    <string name="slide_box_table">Table</string>
+    <string name="slide_locked_paragraph">This paragraph can’t be edited yet: it holds a slide number, a date field, an equation or something similar. It stays as it is.</string>
 </resources>
