@@ -17,7 +17,7 @@
     <string name="back">Назад</string>
     <string name="open_failed">Не вдалося відкрити файл. Можливо, він пошкоджений або доступ до нього закінчився.</string>
     <string name="unsupported_title">Цей формат поки не підтримується</string>
-    <string name="unsupported_body">Файли %1$s з\'являться згодом. Поки Грамота відкриває PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, CSV, TXT і Markdown.</string>
+    <string name="unsupported_body">Файли %1$s з\'являться згодом. Поки Грамота відкриває PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, EPUB, FB2, ODT, CSV, TXT і Markdown.</string>
     <string name="simplified_note">Спрощений перегляд: лише текст. Точний вигляд сторінок — у роботі.</string>
     <string name="mode_reading">Текст</string>
     <string name="mode_pages">Сторінки</string>
@@ -120,7 +120,7 @@
     <string name="settings_remember_hint">Лише на цьому телефоні. Якщо вимкнути, нові файли не додаються</string>
     <string name="settings_secure">Ховати від знімків екрана</string>
     <string name="settings_secure_hint">Знімки, запис екрана й мініатюра в «Нещодавніх» нічого не покажуть</string>
-    <string name="settings_clear">Забути всі документи: нещодавні, закладки, місця читання</string>
+    <string name="settings_clear">Забути всі документи й видалити збережені в Грамоті копії</string>
     <string name="settings_cleared">Очищено</string>
     <string name="settings_about">Про застосунок</string>
     <string name="settings_version">Грамота %1$s</string>
@@ -194,7 +194,7 @@
     <string name="lock_body">Документи, полиці й нотатки відкриються, щойно телефон підтвердить, що це ви.</string>
     <string name="unlock">Відімкнути</string>
     <string name="unlock_title">Відімкнути Грамоту</string>
-    <string name="unlock_subtitle">PIN, графічний ключ, пароль або відбиток телефону</string>
+    <string name="unlock_subtitle">PIN, графічний ключ, пароль або відбиток пальця</string>
     <string name="backup_section">Резервна копія</string>
     <string name="backup_section_hint">Один зашифрований файл із закладками, нотатками, місцями читання, полицями й налаштуваннями, а за бажанням — і з документами, збереженими в Грамоті. Збережіть його куди завгодно; відновлення поєднує копію з тим, що є, і нічого не видаляє.</string>
     <string name="backup_create">Створити резервну копію</string>
@@ -224,4 +224,10 @@
     <string name="backup_not_backup">Це не резервна копія Грамоти</string>
     <string name="backup_no_space">Бракує місця на телефоні</string>
     <string name="backup_locked">Грамота тим часом замкнулася: відімкніть і спробуйте ще раз</string>
+    <string name="clear_confirm_title">Забути всі документи?</string>
+    <string name="clear_confirm">Грамота забуде список нещодавніх, закладки, нотатки, місця читання й полиці та видалить збережені в ній документи разом з обкладинками. Документів в інших місцях телефону це не торкнеться.</string>
+    <string name="forget_confirm">Забути «%1$s»? Закладки, нотатки й місце читання буде забуто, а копію в Грамоті — видалено.</string>
+    <string name="drop_confirm">Прибрати «%1$s» з Грамоти? Копію в Грамоті буде видалено, а закладки й нотатки лишаться для оригінального файлу.</string>
+    <string name="forget_go">Забути</string>
+    <string name="drop_go">Прибрати</string>
 </resources>

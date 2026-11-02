@@ -63,6 +63,8 @@ class PdfiumPages private constructor(
 
     /** True once shared memory failed for this document; pages then come in parts over Binder. */
     @Volatile private var inParts = false
+    /** The isolated engine died on this document: nothing from it is tried anywhere else. */
+    @Volatile private var engineDied = false
     /** Why a page could not be drawn; shown on the page (screen state, so it appears as soon as it is known). */
     override var problem: String? by androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
@@ -70,13 +72,17 @@ class PdfiumPages private constructor(
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
         lock.withLock {
             if (closed || index !in 0 until pageCount || widthPx <= 0) return@withLock null
-            if (!binder.isBinderAlive) { problem = "engine stopped"; return@withLock null }
+            if (engineDied || !binder.isBinderAlive) { engineDied = true; problem = "engine stopped"; return@withLock null }
             val w = widthPx.coerceAtMost(MAX_WIDTH)
             val key = index.toLong() shl 32 or w.toLong()
             cache[key]?.let { return@withLock it }
             val h = (w * aspect(index)).toInt().coerceIn(1, MAX_WIDTH * 2)
             val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: viaParts(index, w, h)
-            bitmap?.asImageBitmap()?.also { remember(key, it, w, h) } ?: viaSystem(index, w)?.also { remember(key, it, w, h) }
+            if (bitmap == null && !binder.isBinderAlive) engineDied = true
+            // The phone's own engine only for a page the living isolated engine could not draw on this
+            // phone; a file that crashed the isolated engine is never handed to an engine in this process
+            bitmap?.asImageBitmap()?.also { remember(key, it, w, h) }
+                ?: (if (engineDied) null else viaSystem(index, w)?.also { remember(key, it, w, h) })
         }
     }
 
@@ -89,7 +95,7 @@ class PdfiumPages private constructor(
         val s = system ?: try {
             reopen?.invoke()?.let { ua.hramota.doc.PdfSource.open(it) }?.also { system = it }
         } catch (e: Exception) { null } ?: run { systemFailed = true; return null }
-        return try { s.render(index, w) } catch (e: Exception) { problem = (problem ?: "") + " / system: $e"; null }
+        return try { s.render(index, w) } catch (e: Exception) { problem = "system: ${e.javaClass.simpleName}"; null }
     }
 
     private fun viaSharedMemory(index: Int, w: Int, h: Int): Bitmap? {
@@ -99,7 +105,7 @@ class PdfiumPages private constructor(
                 d.writeInt(index); d.writeInt(w); d.writeInt(h)
                 d.writeInt(1); memory.writeToParcel(d, 0)
             }) { it.readInt() to it.readString() }
-            if (result == null) { problem = "engine stopped"; return null }
+            if (result == null) { engineDied = true; problem = "engine stopped"; return null }
             when (result.first) {
                 PdfEngineService.R_OK -> Unit
                 PdfEngineService.R_TRANSPORT -> { inParts = true; problem = result.second; return null }
@@ -126,7 +132,8 @@ class PdfiumPages private constructor(
     /** The page drawn in the engine's own memory and fetched in parts: slower, works everywhere. */
     private fun viaParts(index: Int, w: Int, h: Int): Bitmap? {
         val status = call(PdfEngineService.RENDER_KEEP, { d -> d.writeInt(index); d.writeInt(w); d.writeInt(h) }) { it.readInt() }
-        if (status != PdfEngineService.R_OK) { problem = (problem?.let { "$it; " } ?: "") + "parts: ${status ?: "engine stopped"}"; return null }
+        if (status == null) { engineDied = true; problem = "engine stopped"; return null }
+        if (status != PdfEngineService.R_OK) { problem = "parts: $status"; return null }
         val total = w * h * 4
         val buffer = java.nio.ByteBuffer.allocate(total)
         while (buffer.position() < total) {

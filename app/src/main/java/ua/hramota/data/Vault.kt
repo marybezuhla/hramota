@@ -142,6 +142,8 @@ object Vault {
         val iv = cipher.iv
         key = SecretKeySpec(raw, "AES")
         raw.fill(0)
+        // Open from this moment, even if sealing stops part way (it can be tried again; nothing is lost)
+        openState.value = true
         withContext(Dispatchers.IO) {
             // The wrapped key first: from now on sealed files can always be opened again
             val f = AtomicFile(File(activity.filesDir, FILE))

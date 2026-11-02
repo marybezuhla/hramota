@@ -58,6 +58,15 @@ fun SettingsScreen(
 ) {
     var licenses by rememberSaveable { mutableStateOf(false) }
     var cleared by rememberSaveable { mutableStateOf(false) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    // Forgetting everything deletes kept documents too: said plainly, and asked first
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false },
+        title = { Text(stringResource(R.string.clear_confirm_title)) },
+        text = { Text(stringResource(R.string.clear_confirm)) },
+        confirmButton = { TextButton(onClick = { confirmClear = false; onClearRecent(); cleared = true }) { Text(stringResource(R.string.forget_go), color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.cancel)) } },
+    )
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         TopBar(title = stringResource(R.string.settings), onBack = onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -104,7 +113,7 @@ fun SettingsScreen(
                 stringResource(if (vaultPossible || vault) R.string.vault_hint else R.string.vault_no_lock),
                 vault, enabled = vaultPossible || vault,
             ) { v -> onVault(v) }
-            Row(Modifier.fillMaxWidth().clickable { onClearRecent(); cleared = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
+            Row(Modifier.fillMaxWidth().clickable { confirmClear = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
                 Text(
                     stringResource(if (cleared) R.string.settings_cleared else R.string.settings_clear),
                     style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary,

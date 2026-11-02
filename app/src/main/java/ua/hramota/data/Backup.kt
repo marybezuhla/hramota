@@ -201,6 +201,7 @@ object Backup {
     }
 
     private fun restoreCover(context: Context, staging: File, stageKey: SecretKeySpec, id: String) {
+        if (!Library.ID.matches(id)) return
         val c = File(staging, "covers/$id.png")
         if (!c.exists() || Shelf.hasCover(context, id)) return
         try {
@@ -245,6 +246,7 @@ object Backup {
         val sealing = Vault.sealing(context)
         val key = Vault.key()
         if (sealing && key == null) return null
+        if (!Library.ID.matches(id)) return null
         val suffix = if (sealing) Vault.SUFFIX else ""
         var target = File(Library.copiesDir(context), "$id." + ext(staged.name) + suffix)
         // A file of that name held by another document is never taken over

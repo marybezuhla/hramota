@@ -255,6 +255,7 @@ class MainActivity : ComponentActivity() {
     private fun openViewer(uri: Uri, name: String) {
         // Each file in its own window: the viewer is declared with documentLaunchMode="intoExisting"
         val intent = Intent(this, ViewerActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(ViewerActivity.EXTRA_NAME, name)
+            .putExtra(ViewerActivity.EXTRA_TOKEN, ViewerActivity.TOKEN)
         try {
             startActivity(intent)
             recents.add(uri, name)
