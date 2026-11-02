@@ -15,7 +15,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ua.hramota.data.Bookmarks
 import ua.hramota.data.Recents
 import ua.hramota.ui.HomeScreen
 import androidx.activity.compose.BackHandler
@@ -96,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         settings = settings,
                         version = appVersion(),
                         onChange = { Settings.get(this).update(it) },
-                        onClearRecent = { recents.clear(); Bookmarks(applicationContext).clearAll(); ua.hramota.data.Library.get(applicationContext).clearAll() },
+                        onClearRecent = { recents.clear(); ua.hramota.data.Library.get(applicationContext).clearAll() },
                         onBack = { showSettings = false },
                         vault = vaultOn,
                         vaultPossible = ua.hramota.data.Vault.canUse(this),

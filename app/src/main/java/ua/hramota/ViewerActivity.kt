@@ -15,7 +15,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import ua.hramota.data.Bookmarks
 import ua.hramota.data.Library
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -88,19 +87,14 @@ class ViewerActivity : ComponentActivity() {
                         }
                         // The temporary copy of a sealed document is removed when this window goes
                         withContext(Dispatchers.IO) { Library.fingerprint(this@ViewerActivity, uri) }?.let { id ->
-                            val old = Bookmarks(applicationContext)
-                            val oldMarks = old.pages(uri.toString())
                             library.update(id) { e ->
                                 when {
                                     e != null && ownCopy -> e.copy(openedAt = System.currentTimeMillis())
-                                    e != null -> e.copy(title = name, uri = uri.toString(), openedAt = System.currentTimeMillis(), bookmarks = e.bookmarks.ifEmpty { oldMarks })
-                                    remember || oldMarks.isNotEmpty() -> LibraryEntry(id, name, format.label, uri.toString(), bookmarks = oldMarks, openedAt = System.currentTimeMillis())
+                                    e != null -> e.copy(title = name, uri = uri.toString(), openedAt = System.currentTimeMillis())
+                                    remember -> LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis())
                                     else -> null
                                 }
                             }
-                            // Bookmarks kept by address before are now kept with the document
-                            // The old bookmarks go only once the new memory holding them is surely on disk
-                            if (oldMarks.isNotEmpty() && library.get(id) != null && withContext(Dispatchers.IO) { library.saveNow() }) old.remove(uri.toString())
                             startPosition = library.get(id)?.position ?: 0
                             docId = id
                         }
