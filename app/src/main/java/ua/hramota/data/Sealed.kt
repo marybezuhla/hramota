@@ -81,4 +81,98 @@ object Sealed {
         while (n < buf.size) { val k = input.read(buf, n, buf.size - n); if (k < 0) break; n += k }
         return n
     }
+
+    /** Sealing as data is written (for a backup built on the fly); [close] seals the last segment. */
+    class SealingStream(private val key: SecretKey, private val out: OutputStream) : OutputStream() {
+        private val prefix = ByteArray(8).also(random::nextBytes)
+        private var buf = ByteArray(SEGMENT)
+        private var n = 0
+        private var counter = 0L
+        private var closed = false
+
+        init { out.write(MAGIC); out.write(prefix) }
+
+        override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            var o = off; var l = len
+            while (l > 0) {
+                // A full segment is sealed only when more data comes, so the last one can be marked
+                if (n == SEGMENT) { segment(last = false); n = 0 }
+                val k = minOf(l, SEGMENT - n)
+                System.arraycopy(b, o, buf, n, k)
+                n += k; o += k; l -= k
+            }
+        }
+
+        private fun segment(last: Boolean) {
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG * 8, nonce(prefix, counter)))
+            c.updateAAD(byteArrayOf(if (last) 1 else 0))
+            out.write(c.doFinal(buf, 0, n))
+            counter++
+            if (counter > 0xFFFFFFFFL) throw IOException("File too large")
+        }
+
+        override fun flush() = out.flush()
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            segment(last = true)
+            buf.fill(0)
+            out.close()
+        }
+    }
+
+    /** Opening as data is read; a damaged file throws [IOException] before any of its damaged part is given out. */
+    class OpeningStream(private val key: SecretKey, private val input: InputStream) : InputStream() {
+        private var prefix = ByteArray(0)
+        private var plain = ByteArray(0)
+        private var pos = 0
+        private var next: ByteArray? = null
+        private var nextLen = 0
+        private var counter = 0L
+        private var done = false
+
+        init {
+            val head = ByteArray(12)
+            if (readFully(input, head) != 12 || !head.copyOfRange(0, 4).contentEquals(MAGIC)) throw IOException("Not a sealed file")
+            prefix = head.copyOfRange(4, 12)
+            next = ByteArray(SEGMENT + TAG); nextLen = readFully(input, next!!)
+        }
+
+        private fun fill(): Boolean {
+            if (done) return false
+            val cur = next!!; val n = nextLen
+            if (n < TAG) throw IOException("Damaged sealed file")
+            val following = ByteArray(SEGMENT + TAG)
+            val m = if (n < SEGMENT + TAG) 0 else readFully(input, following)
+            val last = m == 0
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG * 8, nonce(prefix, counter)))
+            c.updateAAD(byteArrayOf(if (last) 1 else 0))
+            plain = try { c.doFinal(cur, 0, n) } catch (e: AEADBadTagException) { throw IOException("Damaged sealed file", e) }
+            pos = 0
+            counter++
+            if (last) done = true else { next = following; nextLen = m }
+            return true
+        }
+
+        override fun read(): Int {
+            while (pos >= plain.size) if (!fill()) return -1
+            return plain[pos++].toInt() and 0xFF
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            while (pos >= plain.size) if (!fill()) return -1
+            val k = minOf(len, plain.size - pos)
+            System.arraycopy(plain, pos, b, off, k)
+            pos += k
+            return k
+        }
+
+        override fun close() = input.close()
+    }
 }

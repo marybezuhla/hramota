@@ -188,4 +188,25 @@
     <string name="unlock">Unlock</string>
     <string name="unlock_title">Unlock Hramota</string>
     <string name="unlock_subtitle">The phone’s PIN, pattern, password or fingerprint</string>
+    <string name="backup_section">Backup</string>
+    <string name="backup_section_hint">One encrypted file with bookmarks, notes, reading places, shelves and settings, and the documents kept in Hramota if you choose. Save it wherever you like; restoring joins it with what is here and deletes nothing.</string>
+    <string name="backup_create">Create a backup</string>
+    <string name="backup_restore">Restore from a backup</string>
+    <string name="backup_memory_always">Bookmarks, notes, reading places, shelves and settings always go in.</string>
+    <string name="backup_with_documents">Add documents</string>
+    <string name="backup_selected">%1$d of %2$d · %3$s</string>
+    <string name="backup_password">Password</string>
+    <string name="backup_password_again">Password again</string>
+    <string name="backup_password_short">At least 8 characters</string>
+    <string name="backup_password_differs">The passwords differ</string>
+    <string name="backup_password_hint">Without the password the backup cannot be opened by anyone, you included: write it down.</string>
+    <string name="backup_save">Save…</string>
+    <string name="backup_writing">Writing the backup…</string>
+    <string name="backup_written">Backup saved</string>
+    <string name="backup_failed">Could not write the backup</string>
+    <string name="backup_reading">Reading the backup…</string>
+    <string name="backup_restore_hint">What is in the backup is joined with what is here: nothing is deleted.</string>
+    <string name="backup_wrong">Wrong password, or not a Hramota backup</string>
+    <string name="backup_restore_go">Restore</string>
+    <string name="backup_restored">Restored: %1$d new, %2$d joined, %3$d documents</string>
 </resources>

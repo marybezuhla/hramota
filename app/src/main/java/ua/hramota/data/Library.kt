@@ -80,11 +80,7 @@ class Library private constructor(private val context: Context) {
     private fun loadShelves(): List<ShelfDef> {
         val list = if (Vault.locked(context)) emptyList() else try {
             val json = JSONArray(String(Vault.readSmall(context, "shelves.json") ?: throw java.io.FileNotFoundException()))
-            (0 until minOf(json.length(), MAX_SHELVES)).mapNotNull { i ->
-                val o = json.optJSONObject(i) ?: return@mapNotNull null
-                ShelfDef(o.optString("id").ifEmpty { return@mapNotNull null }, o.optString("name").take(80), o.optString("style").takeIf { it in STYLES } ?: "modern",
-                    o.optDouble("hue", -1.0).toFloat().takeIf { it.isFinite() }?.coerceIn(-1f, 360f) ?: -1f, o.optLong("created"))
-            }
+            (0 until minOf(json.length(), MAX_SHELVES)).mapNotNull { i -> json.optJSONObject(i)?.let(::shelfFrom) }
         } catch (e: Exception) { emptyList() }
         // "All" is always there; its first look follows the old wooden-shelf setting
         return if (list.any { it.id == ShelfDef.ALL }) list.sortedWith(compareBy({ it.id != ShelfDef.ALL }, { it.created }))
@@ -93,7 +89,7 @@ class Library private constructor(private val context: Context) {
 
     private fun saveShelves(list: List<ShelfDef>) {
         val json = JSONArray()
-        for (d in list) json.put(JSONObject().apply { put("id", d.id); put("name", d.name); put("style", d.style); put("hue", d.hue.toDouble()); put("created", d.created) })
+        for (d in list) json.put(shelfJson(d))
         if (Vault.locked(context)) return
         try { Vault.writeSmall(context, "shelves.json", json.toString().toByteArray()) } catch (_: Exception) {}
     }
@@ -170,7 +166,25 @@ class Library private constructor(private val context: Context) {
         return out
     }
 
-    private fun entry(o: JSONObject): LibraryEntry? {
+    internal fun toJson(e: LibraryEntry) = JSONObject().apply {
+        put("id", e.id); put("title", e.title); put("format", e.format)
+        e.uri?.let { put("uri", it) }; e.copy?.let { put("copy", it) }
+        put("position", e.position); put("total", e.total)
+        put("bookmarks", JSONArray(e.bookmarks.sorted())); put("shelf", e.onShelf); put("opened", e.openedAt)
+        if (e.shelves.isNotEmpty()) put("shelves", JSONArray(e.shelves.toList()))
+        if (e.notes.isNotEmpty()) put("notes", JSONArray().apply {
+            for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
+        })
+    }
+
+    internal fun shelfJson(d: ShelfDef) = JSONObject().apply { put("id", d.id); put("name", d.name); put("style", d.style); put("hue", d.hue.toDouble()); put("created", d.created) }
+
+    internal fun shelfFrom(o: JSONObject): ShelfDef? = ShelfDef(
+        o.optString("id").ifEmpty { return null }.take(40), o.optString("name").take(80), o.optString("style").takeIf { it in STYLES } ?: "modern",
+        o.optDouble("hue", -1.0).toFloat().takeIf { it.isFinite() }?.coerceIn(-1f, 360f) ?: -1f, o.optLong("created"),
+    )
+
+    internal fun entry(o: JSONObject): LibraryEntry? {
         val id = o.optString("id").takeIf { it.isNotEmpty() } ?: return null
         return LibraryEntry(
             id = id, title = o.optString("title"), format = o.optString("format"),
@@ -201,16 +215,7 @@ class Library private constructor(private val context: Context) {
     private fun write(map: Map<String, LibraryEntry>) {
 
         val json = JSONArray()
-        for (e in map.values) json.put(JSONObject().apply {
-            put("id", e.id); put("title", e.title); put("format", e.format)
-            e.uri?.let { put("uri", it) }; e.copy?.let { put("copy", it) }
-            put("position", e.position); put("total", e.total)
-            put("bookmarks", JSONArray(e.bookmarks.sorted())); put("shelf", e.onShelf); put("opened", e.openedAt)
-            if (e.shelves.isNotEmpty()) put("shelves", JSONArray(e.shelves.toList()))
-            if (e.notes.isNotEmpty()) put("notes", JSONArray().apply {
-                for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
-            })
-        })
+        for (e in map.values) json.put(toJson(e))
         if (Vault.locked(context)) return
         try { Vault.writeSmall(context, "library.json", json.toString().toByteArray()) } catch (_: Exception) {}
     }
