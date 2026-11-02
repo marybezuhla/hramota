@@ -190,7 +190,7 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
 private fun woodTones(hue: Float): List<Color> = if (hue < 0f) listOf(
     Color(0xFFB98552), Color(0xFFA06C3D), Color(0xFFB4804F), Color(0xFF7A4A22), Color(0xFF5C3517), Color(0xFF3E2410),
 ) else listOf(
-    Color.hsl(hue, 0.32f, 0.52f), Color.hsl(hue, 0.34f, 0.43f), Color.hsl(hue, 0.32f, 0.50f),
+    Color.hsl(hue, 0.36f, 0.44f), Color.hsl(hue, 0.38f, 0.36f), Color.hsl(hue, 0.36f, 0.42f),
     Color.hsl(hue, 0.36f, 0.30f), Color.hsl(hue, 0.38f, 0.23f), Color.hsl(hue, 0.40f, 0.15f),
 )
 
@@ -272,9 +272,13 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
             File(Library.coversDir(context), "${e.id}.png").takeIf { it.exists() }?.let { f -> BitmapFactory.decodeFile(f.path)?.asImageBitmap() }
         }
     }
-    Box(modifier.aspectRatio(0.72f)) {
+    BoxWithConstraints(modifier.aspectRatio(0.72f)) {
         val c = cover
         if (c != null) Image(c, contentDescription = e.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
+        // A small cover has no room for the title: only the format
+        else if (maxWidth < 72.dp) Box(Modifier.fillMaxSize().background(coverColor(e.format)), contentAlignment = Alignment.Center) {
+            Text(e.format, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
         else Box(Modifier.fillMaxSize().background(coverColor(e.format)).padding(8.dp)) {
             Text(e.title.substringBeforeLast('.', e.title), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 16.sp,
                 maxLines = 6, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start, modifier = Modifier.align(Alignment.TopStart).padding(end = 10.dp))
