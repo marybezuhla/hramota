@@ -206,7 +206,7 @@ class Library private constructor(private val context: Context) {
         // Only a content fingerprint: the id names files, so nothing else may get in (from a backup, say)
         val id = o.optString("id").takeIf { ID.matches(it) } ?: return null
         return LibraryEntry(
-            id = id, title = o.optString("title"), format = o.optString("format"),
+            id = id, title = o.optString("title").take(500), format = o.optString("format").filter { it.isLetterOrDigit() }.take(8),
             uri = o.optString("uri").ifEmpty { null }, copy = o.optString("copy").ifEmpty { null },
             position = o.optInt("position").coerceAtLeast(0), total = o.optInt("total").coerceAtLeast(0),
             bookmarks = o.optJSONArray("bookmarks")?.let { a -> (0 until minOf(a.length(), MAX_BOOKMARKS)).map { a.optInt(it) }.filter { it >= 0 }.toSet() } ?: emptySet(),
@@ -264,7 +264,7 @@ class Library private constructor(private val context: Context) {
         loadedSealed = true
         // Memory and shelves: written again in the new form (the old one is removed by the writer)
         writer.submit {}.get()
-        write(state.value)
+        synchronized(this) { write(state.value) }
         saveShelves(shelfState.value)
         for (f in coversDir(context).listFiles().orEmpty()) Shelf.convertFile(key, f, seal)
         for (e in state.value.values) {

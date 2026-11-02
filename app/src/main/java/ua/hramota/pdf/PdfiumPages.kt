@@ -105,7 +105,7 @@ class PdfiumPages private constructor(
                 d.writeInt(index); d.writeInt(w); d.writeInt(h)
                 d.writeInt(1); memory.writeToParcel(d, 0)
             }) { it.readInt() to it.readString() }
-            if (result == null) { engineDied = true; problem = "engine stopped"; return null }
+            if (result == null) { engineDied = !binder.isBinderAlive; problem = "engine stopped"; return null }
             when (result.first) {
                 PdfEngineService.R_OK -> Unit
                 PdfEngineService.R_TRANSPORT -> { inParts = true; problem = result.second; return null }
@@ -132,7 +132,7 @@ class PdfiumPages private constructor(
     /** The page drawn in the engine's own memory and fetched in parts: slower, works everywhere. */
     private fun viaParts(index: Int, w: Int, h: Int): Bitmap? {
         val status = call(PdfEngineService.RENDER_KEEP, { d -> d.writeInt(index); d.writeInt(w); d.writeInt(h) }) { it.readInt() }
-        if (status == null) { engineDied = true; problem = "engine stopped"; return null }
+        if (status == null) { engineDied = !binder.isBinderAlive; problem = "engine stopped"; return null }
         if (status != PdfEngineService.R_OK) { problem = "parts: $status"; return null }
         val total = w * h * 4
         val buffer = java.nio.ByteBuffer.allocate(total)

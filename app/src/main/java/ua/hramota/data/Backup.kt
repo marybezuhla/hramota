@@ -164,9 +164,9 @@ object Backup {
                 val o = list.optJSONObject(k) ?: continue
                 var incoming = (try { library.entry(o) } catch (e: Exception) { null }) ?: continue
                 // Addresses from another phone open nothing here; only document addresses are kept
-                if (incoming.uri?.startsWith("content://") != true) incoming = incoming.copy(uri = null)
+                if (incoming.uri?.startsWith("content://") != true || Shelf.isOwn(context, android.net.Uri.parse(incoming.uri))) incoming = incoming.copy(uri = null)
                 val fileName = o.optString("file").takeIf { it.startsWith("documents/") }
-                val staged = fileName?.let { File(staging, it) }?.takeIf { it.exists() }
+                val staged = fileName?.let { File(staging, it) }?.takeIf { it.exists() && it.canonicalPath.startsWith(staging.canonicalPath + File.separator) }
                 val mine = library.get(incoming.id)
                 var copyPath = mine?.copy?.takeIf { File(it).exists() }
                 if (copyPath == null && staged != null && fileName != null) {

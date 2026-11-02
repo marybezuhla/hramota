@@ -26,7 +26,7 @@ class Recents private constructor(private val context: Context) {
         // The person chose not to keep a list
         if (!Settings.get(context).state.value.rememberRecent) return
         // Hramota's own copies are on the shelf, not in the recent list; nothing is written while locked
-        if (uri.authority == context.packageName + ".files" || Vault.locked(context)) return
+        if (Shelf.isOwn(context, uri) || Vault.locked(context)) return
         try {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
