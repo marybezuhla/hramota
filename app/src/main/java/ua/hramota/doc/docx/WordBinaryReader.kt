@@ -553,7 +553,7 @@ private class Parser(file: ByteArray) {
                 val pieceEnd = i32(clx, plc + (i + 1) * 4)
                 // Pieces after the range are not looked at (as before): a damaged tail does not stop the text
                 if (pieceStart >= to) break
-                if (pieceStart < lastEnd) throw IOException("Pieces out of order")
+                if (pieceStart < lastEnd || pieceEnd < pieceStart) throw IOException("Pieces out of order")
                 lastEnd = pieceEnd
                 if (pieceEnd <= from) continue
                 val cpStart = maxOf(pieceStart, from)

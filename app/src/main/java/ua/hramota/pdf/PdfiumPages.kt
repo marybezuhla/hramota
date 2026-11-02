@@ -195,11 +195,13 @@ class PdfiumPages private constructor(
             if (closed || engineDied) return@withLock false
             // Notes on pages only (one page each), longest call allowed for a big file
             val list = notes.filter { it.block == it.endBlock && it.end > it.start }.take(5000)
+            // One budget for the whole request (well under a message's 1 MB)
+            val perNote = if (list.isEmpty()) 0 else (150_000 / list.size).coerceIn(0, 2000)
             call(PdfEngineService.SAVE_NOTES, { d ->
                 d.writeFileDescriptor(out.fileDescriptor)
                 d.writeInt(list.size)
                 // Each note's words kept short: the whole request must fit one message between processes
-                for (n in list) { d.writeInt(n.block); d.writeInt(n.start); d.writeInt(n.end - n.start); d.writeInt(colors(n.color)); d.writeString(n.text.take(if (list.size > 200) 200 else 2000).ifEmpty { null }) }
+                for (n in list) { d.writeInt(n.block); d.writeInt(n.start); d.writeInt(n.end - n.start); d.writeInt(colors(n.color)); d.writeString(n.text.take(perNote).ifEmpty { null }) }
             }) { it.readInt() } == PdfEngineService.R_OK
         }
     }
