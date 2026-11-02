@@ -305,6 +305,16 @@ class ScreensTest {
     @Test fun comparePickerScreen() = shot("06-compare-pick") { comparePicker("Оберіть попередню версію") }
     @Config(qualifiers = "+night")
     @Test fun comparePickerDark() = shot("06-compare-pick-dark") { comparePicker("Оберіть попередню версію") }
+    private fun editor(name: String) = ua.hramota.ui.EditorState(
+        ua.hramota.doc.docx.edit.DocxEdit.open(File(javaClass.classLoader!!.getResource("docs/$name")!!.toURI()).inputStream()),
+    ).also { s -> s.focused = s.paras.first { it.text.startsWith("Другий") || it.text.length > 30 }.key }
+    @Test fun editorLists() = shot("13-edit-docx") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "+night")
+    @Test fun editorDark() = shot("13-edit-docx-dark") { ua.hramota.ui.DocxEditorScreen("Таблиці.docx", androidx.compose.runtime.remember { editor("04-tables.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(fontScale = 1.5f)
+    @Test fun editorLargeFont() = shot("13-edit-docx-large-font") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
+    @Test fun editorEnglish() = shot("13-edit-docx-en") { ua.hramota.ui.DocxEditorScreen("Contract.docx", androidx.compose.runtime.remember { editor("05-flow.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Test fun homeShelf() = shot("12-home-shelf") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)
     }

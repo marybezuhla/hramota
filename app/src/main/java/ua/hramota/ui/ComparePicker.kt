@@ -51,7 +51,9 @@ fun ComparePickerList(
     val kept = shelf.filter { Format.detect(it.title, null).hasText }
     val keptTitles = kept.map { it.title }.toSet()
     val recent = recents.filter { Format.detect(it.name, null).hasText && it.name !in keptTitles }
-    LazyColumn(Modifier.heightIn(max = 420.dp)) {
+    // "Another file…" stays in sight below the list, however long it is
+    Column {
+    LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 420.dp)) {
         if (kept.isNotEmpty()) {
             item { Head(stringResource(R.string.shelf_edit)) }
             items(kept, key = { "s" + it.id }) { e -> Line(e.title, e.format) { onShelf(e) } }
@@ -63,11 +65,10 @@ fun ComparePickerList(
         if (kept.isEmpty() && recent.isEmpty()) item {
             Text(stringResource(R.string.compare_none_here), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-        item {
-            Text(stringResource(R.string.compare_other_file), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.fillMaxWidth().clickable { onOther() }.padding(vertical = 12.dp))
-        }
+    }
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text(stringResource(R.string.compare_other_file), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.fillMaxWidth().clickable { onOther() }.padding(vertical = 12.dp))
     }
 }
 

@@ -73,6 +73,8 @@ class ViewerActivity : ComponentActivity() {
         var confirmDrop by mutableStateOf<String?>(null)
         // A PDF whose notes are being written into a file: into this one, or a copy
         var savingNotes by mutableStateOf<PdfiumPages?>(null)
+        // A DOCX being edited lives through turning the phone
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
 
         applySecureScreen()
         setContent {
@@ -209,6 +211,13 @@ class ViewerActivity : ComponentActivity() {
                             dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDrop = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
                         )
                     }
+                    val editor = held.editor
+                    if (editor != null) {
+                        ua.hramota.ui.DocxEditorScreen(name, editor, held.saving,
+                            onSave = { saveEdits(editor, uri, docId, name) },
+                            onClose = { held.editor = null })
+                        return@Surface
+                    }
                     ViewerScreen(
                         name, state, onBack = { finishAndRemoveTask() },
                         startInReading = settings.docxReading,
@@ -225,6 +234,8 @@ class ViewerActivity : ComponentActivity() {
                         menu = docId?.let { id ->
                             val e = entries[id]
                             listOfNotNull<Pair<String, () -> Unit>>(
+                                // Word documents can be edited: text, bold and other marks, headings, lists
+                                if (format == Format.DOCX && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
                                 // On the shelf = kept inside Hramota; taking it off keeps bookmarks and notes
                                 if (e?.copy == null) getString(R.string.shelf_save) to {
                                     if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
@@ -309,6 +320,141 @@ class ViewerActivity : ComponentActivity() {
     }
     private var currentId: String? = null
 
+    /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
+    private fun startEditing(uri: android.net.Uri) {
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        lifecycleScope.launch {
+            val edit = withContext(Dispatchers.IO) {
+                try { contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) } }
+                catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+            }
+            if (edit == null) android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
+            else held.editor = ua.hramota.ui.EditorState(edit)
+        }
+    }
+
+    private enum class Saved { DONE, NEEDS_COPY, FAILED }
+
+    /**
+     * Saves the edits: into the kept copy, or into the file itself through the app that holds it. When
+     * that app does not let the file be changed, a copy is offered instead.
+     */
+    private fun saveEdits(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, id: String?, name: String) {
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        if (held.saving) return
+        held.saving = true
+        lifecycleScope.launch {
+            val temp = java.io.File(cacheDir, "edit-${System.nanoTime()}.docx")
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    if (!buildEdited(editor, uri, temp)) return@withContext Saved.FAILED to null
+                    writeEdited(temp, uri, id)
+                }
+                when (result.first) {
+                    Saved.DONE -> {
+                        android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_saved), android.widget.Toast.LENGTH_SHORT).show()
+                        held.editor = null
+                        // Shown again from the saved file
+                        result.second?.let { reopen(it) } ?: recreate()
+                    }
+                    Saved.NEEDS_COPY -> {
+                        pendingEdit = editor
+                        saveEditCopy.launch(name.substringBeforeLast('.', name) + ".docx")
+                    }
+                    Saved.FAILED -> android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_not_saved), android.widget.Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                temp.delete()
+                held.saving = false
+            }
+        }
+    }
+
+    /** The edited document written to [temp] and checked to open as a document. */
+    private fun buildEdited(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, temp: java.io.File): Boolean = try {
+        contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { editor.edit.save(editor.paras, input.buffered(), it) } } ?: false
+        temp.inputStream().buffered().use { DocxReader.read(it) }
+        true
+    } catch (e: Exception) { temp.delete(); false } catch (e: OutOfMemoryError) { temp.delete(); false }
+
+    /** Puts the checked file in place; the document's memory (shelves, bookmarks, notes) moves to its new fingerprint. */
+    private fun writeEdited(temp: java.io.File, uri: android.net.Uri, id: String?): Pair<Saved, String?> {
+        val library = Library.get(applicationContext)
+        val entry = id?.let { library.get(it) }
+        val copy = entry?.copy?.let { java.io.File(it) }
+        try {
+            if (ua.hramota.data.Shelf.isOwn(this, uri)) {
+                if (copy == null || !replaceKeptCopy(copy, temp)) return Saved.FAILED to null
+            } else {
+                if (!writeWhole(uri, temp)) return Saved.NEEDS_COPY to null
+            }
+        } catch (e: SecurityException) { return Saved.NEEDS_COPY to null
+        } catch (e: java.io.FileNotFoundException) { return Saved.NEEDS_COPY to null
+        } catch (e: Exception) { return Saved.FAILED to null }
+        val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return Saved.DONE to null
+        if (entry != null && newId != id) {
+            library.update(newId) { entry.copy(id = newId) }
+            library.update(id) { null }
+            // The first page may look different now: its picture is made again
+            java.io.File(Library.coversDir(this), "$id.png").delete()
+            java.io.File(Library.coversDir(this), "$id.png${ua.hramota.data.Vault.SUFFIX}").delete()
+        }
+        return Saved.DONE to newId
+    }
+
+    /** Writes the whole file through its app and checks it reads back the same; some apps ignore "truncate". */
+    private fun writeWhole(uri: android.net.Uri, temp: java.io.File): Boolean {
+        for (mode in listOf("wt", "rwt")) {
+            val out = contentResolver.openOutputStream(uri, mode) ?: return false
+            out.use { o -> temp.inputStream().use { it.copyTo(o) } }
+            val size = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
+            val same = (size < 0 || size == temp.length()) && contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, temp.length()) && a.read() < 0 } } == true
+            if (same) return true
+        }
+        throw java.io.IOException("Written file differs")
+    }
+
+    /** Replaces a copy kept in Hramota (sealed again if it was) through a file put in place at once. */
+    private fun replaceKeptCopy(copy: java.io.File, temp: java.io.File): Boolean {
+        val part = java.io.File(copy.path + ".part")
+        try {
+            if (copy.name.endsWith(ua.hramota.data.Vault.SUFFIX)) {
+                val key = ua.hramota.data.Vault.key() ?: return false
+                temp.inputStream().buffered().use { input -> part.outputStream().buffered().use { ua.hramota.data.Sealed.seal(key, input, it, copy.name.removeSuffix(ua.hramota.data.Vault.SUFFIX)) } }
+            } else temp.copyTo(part, overwrite = true)
+            if (!part.renameTo(copy)) { part.delete(); return false }
+            return true
+        } catch (e: Exception) { part.delete(); return false }
+    }
+
+    // The edits waiting for the place of their copy
+    private var pendingEdit: ua.hramota.ui.EditorState? = null
+    private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
+        val editor = pendingEdit ?: return@registerForActivityResult
+        pendingEdit = null
+        val uri = intent.data ?: return@registerForActivityResult
+        if (target == null) return@registerForActivityResult
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        held.saving = true
+        lifecycleScope.launch {
+            val temp = java.io.File(cacheDir, "edit-${System.nanoTime()}.docx")
+            val ok = try {
+                withContext(Dispatchers.IO) { buildEdited(editor, uri, temp) && try { writeWhole(target, temp) } catch (e: Exception) { false } }
+            } finally { temp.delete(); held.saving = false }
+            if (!ok) {
+                try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+                android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_not_saved), android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_saved_copy), android.widget.Toast.LENGTH_LONG).show()
+            held.editor = null
+            // The copy is opened in place of the original
+            startActivity(android.content.Intent(this@ViewerActivity, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+            finishAndRemoveTask()
+        }
+    }
+
     /**
      * Writes the notes into the PDF itself: the engine writes a copy with them to a private file, which
      * then replaces the file's content. The document now has other content, so its memory moves to the
@@ -329,17 +475,7 @@ class ViewerActivity : ComponentActivity() {
             if (shownSize <= 0 || temp.length() <= shownSize) return null
             if (contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, shownSize) } } != true) return null
             if (ua.hramota.data.Shelf.isOwn(this, uri) && copy != null) {
-                val key = ua.hramota.data.Vault.key()
-                if (copy.name.endsWith(ua.hramota.data.Vault.SUFFIX)) {
-                    if (key == null) return null
-                    val part = java.io.File(copy.path + ".part")
-                    temp.inputStream().buffered().use { input -> part.outputStream().buffered().use { ua.hramota.data.Sealed.seal(key, input, it, copy.name.removeSuffix(ua.hramota.data.Vault.SUFFIX)) } }
-                    if (!part.renameTo(copy)) { part.delete(); return null }
-                } else {
-                    val part = java.io.File(copy.path + ".part")
-                    temp.copyTo(part, overwrite = true)
-                    if (!part.renameTo(copy)) { part.delete(); return null }
-                }
+                if (!replaceKeptCopy(copy, temp)) return null
             } else {
                 // Checked above to begin with the original: only the addition is written. Some apps that
                 // hold files ignore "append" and keep only what was written: then the whole file is written
@@ -452,6 +588,12 @@ class ViewerActivity : ComponentActivity() {
         // A sealed copy opened for reading is plain only while it is shown
         val uri = intent.data
         if (isFinishing && uri != null) ua.hramota.data.Shelf.closeOpened(this, uri)
+    }
+
+    /** What is being edited, kept while the window is made again (the phone turned). */
+    class EditHolder : androidx.lifecycle.ViewModel() {
+        var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
+        var saving by mutableStateOf(false)
     }
 
     companion object {
