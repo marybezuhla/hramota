@@ -306,7 +306,7 @@ fun DocxEditorScreen(
         ) {
             itemsIndexed(state.paras, key = { _, p -> p.key }) { i, p ->
                 val shown = state.shown.getOrNull(i) ?: return@itemsIndexed
-                EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true })
+                Column { EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true }) }
             }
         }
         // After Enter or a join the cursor's paragraph is brought into view
@@ -344,9 +344,17 @@ private fun textStyleFor(kind: Kind, color: androidx.compose.ui.graphics.Color) 
 private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown, readOnly: Boolean, onLocked: () -> Unit) {
     val color = MaterialTheme.colorScheme.onSurface
     val style = textStyleFor(shown.kind, if (p.editable) color else color.copy(alpha = 0.6f))
-    val top = when (shown.kind) { Kind.H1 -> 18.dp; Kind.H2 -> 14.dp; Kind.H3 -> 10.dp; else -> 4.dp }
-    val cell = if (shown.inTable) Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(horizontal = 8.dp, vertical = 2.dp) else Modifier
-    Row(Modifier.fillMaxWidth().padding(top = top, bottom = 4.dp).then(cell)) {
+    // Table cells: a row begins with a gap and a line, the cells of a row follow closely
+    val top = when {
+        shown.rowStart -> 10.dp
+        shown.cellStart -> 2.dp
+        shown.inTable -> 0.dp
+        else -> when (shown.kind) { Kind.H1 -> 18.dp; Kind.H2 -> 14.dp; Kind.H3 -> 10.dp; else -> 4.dp }
+    }
+    val colors = MaterialTheme.colorScheme
+    val cell = if (shown.inTable) Modifier.background(colors.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 10.dp, vertical = 3.dp) else Modifier
+    if (shown.rowStart) HorizontalDivider(Modifier.padding(top = top), color = colors.outlineVariant)
+    Row(Modifier.fillMaxWidth().padding(top = if (shown.rowStart) 2.dp else top, bottom = if (shown.inTable) 0.dp else 4.dp).then(cell)) {
         shown.marker?.let { m -> Text(m, style = style, modifier = Modifier.width(28.dp)) }
         if (!p.editable) {
             Text(
@@ -461,7 +469,7 @@ private fun Tool(label: String, description: String, enabled: Boolean = true, on
             .background(if (on) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
             .clickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = description }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 11.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = style.copy(fontSize = 18.sp, color = if (enabled) (if (on) colors.onSecondaryContainer else colors.onSurface) else colors.onSurface.copy(alpha = 0.38f)))
@@ -474,7 +482,7 @@ private fun KindMenu(state: EditorState, enabled: Boolean, kind: Kind?) {
     val names = listOf(Kind.NORMAL to R.string.edit_kind_normal, Kind.H1 to R.string.edit_kind_h1, Kind.H2 to R.string.edit_kind_h2, Kind.H3 to R.string.edit_kind_h3)
     Box {
         val current = names.firstOrNull { it.first == kind }?.second ?: R.string.edit_kind_normal
-        Tool(stringResource(current), stringResource(R.string.edit_kind), enabled) { open = true }
+        Tool(stringResource(current) + " ▾", stringResource(R.string.edit_kind), enabled) { open = true }
         DropdownMenu(open, onDismissRequest = { open = false }) {
             for ((k, label) in names) DropdownMenuItem(
                 text = { Text(stringResource(label), style = textStyleFor(k, MaterialTheme.colorScheme.onSurface).copy(fontWeight = if (k == Kind.NORMAL) FontWeight.Normal else FontWeight.Bold)) },

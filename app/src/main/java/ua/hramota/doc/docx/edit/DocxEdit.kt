@@ -48,7 +48,7 @@ class EditPara(
 }
 
 /** What the editor shows for a paragraph besides its text. */
-class Shown(val kind: Kind, val marker: String?, val list: ListKind?, val inTable: Boolean, val base: Look)
+class Shown(val kind: Kind, val marker: String?, val list: ListKind?, val inTable: Boolean, val base: Look, val rowStart: Boolean = false, val cellStart: Boolean = false)
 
 /**
  * A DOCX opened for editing. Only the paragraphs the person changes are written anew; everything else
@@ -65,7 +65,8 @@ class DocxEdit private constructor(
     private var typesXml: String?,
     val paragraphs: List<EditPara>,
 ) {
-    private class Slot(val start: Int, val end: Int, val container: Int)
+    /** Where a paragraph is in the file; [row] is the table row it is in (0 outside tables). */
+    private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0)
 
     private var nextKey = paragraphs.size.toLong() + 1
     fun newKey(): Long = nextKey++
@@ -108,13 +109,18 @@ class DocxEdit private constructor(
     /** Kind, list marker and the paragraph's own look, for each paragraph in order. */
     fun shown(list: List<EditPara>): List<Shown> {
         val nums = numbering?.let { Numbering.parse(it) } ?: Numbering.EMPTY
+        var prevContainer = -1; var prevRow = -1
         return list.map { p ->
             val style = styleOf(p.pPr)
             val (pp, rp) = styles.paragraph(style)
             val num = numOf(p.pPr) ?: pp.numId?.let { it to (pp.numLevel ?: 0) }
             val marker = num?.takeIf { it.first != "0" }?.let { (id, lvl) -> nums.next(id, lvl) }
             val listKind = num?.takeIf { it.first != "0" }?.let { (id, lvl) -> if (nums.level(id, lvl)?.format == "bullet") ListKind.BULLET else ListKind.NUMBER }
-            Shown(kindOf(style), marker, listKind, slots[p.slot].container != 0, Look(rp.bold ?: false, rp.italic ?: false, rp.underline ?: false, rp.strike ?: false))
+            val slot = slots[p.slot]
+            val cellStart = slot.row != 0 && slot.container != prevContainer
+            val rowStart = slot.row != 0 && slot.row != prevRow
+            prevContainer = slot.container; prevRow = slot.row
+            Shown(kindOf(style), marker, listKind, slot.row != 0, Look(rp.bold ?: false, rp.italic ?: false, rp.underline ?: false, rp.strike ?: false), rowStart, cellStart)
         }
     }
 
@@ -461,19 +467,20 @@ class DocxEdit private constructor(
             val slots = ArrayList<Slot>()
             val paras = ArrayList<EditPara>()
             var containers = 0
+            var rows = 0
             val interned = HashMap<String, RunStyle>()
-            fun collect(elems: List<Elem>, container: Int) {
+            fun collect(elems: List<Elem>, container: Int, row: Int) {
                 for (e in elems) {
                     if (!e.name.startsWith("$w:")) continue
                     when (e.local) {
-                        "p" -> { slots += Slot(e.start, e.end, container); paras += paragraph(xml, w, e, slots.size - 1, interned) }
-                        "tbl" -> for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers)
-                        "sdt", "customXml" -> XmlScan.children(xml, e).firstOrNull { it.local == "sdtContent" }?.let { collect(XmlScan.children(xml, it), ++containers) }
-                            ?: if (e.local == "customXml") collect(XmlScan.children(xml, e), ++containers) else Unit
+                        "p" -> { slots += Slot(e.start, e.end, container, row); paras += paragraph(xml, w, e, slots.size - 1, interned) }
+                        "tbl" -> for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") { val r = ++rows; for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers, r) }
+                        "sdt", "customXml" -> XmlScan.children(xml, e).firstOrNull { it.local == "sdtContent" }?.let { collect(XmlScan.children(xml, it), ++containers, row) }
+                            ?: if (e.local == "customXml") collect(XmlScan.children(xml, e), ++containers, row) else Unit
                     }
                 }
             }
-            collect(XmlScan.children(xml, body), 0)
+            collect(XmlScan.children(xml, body), 0, 0)
             return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, styles, numbering, rels, types, paras)
         }
 
