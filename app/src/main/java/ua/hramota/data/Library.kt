@@ -228,7 +228,8 @@ class Library private constructor(private val context: Context) {
 
     private fun save(map: Map<String, LibraryEntry>) {
         if (pending.getAndSet(generation to map) == null) writer.execute {
-            pending.getAndSet(null)?.let { (gen, m) -> if (gen == generation) write(m) }
+            // Checked and written under the same lock a new reading takes: no old state slips in after it
+            pending.getAndSet(null)?.let { (gen, m) -> synchronized(this@Library) { if (gen == generation) write(m) } }
         }
     }
 

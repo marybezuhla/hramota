@@ -18,8 +18,11 @@ class HramotaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Temporary plain copies left by a process that was stopped are removed at once
+        // The PDF engine's sandboxed process has nothing of this to do
+        if (android.os.Process.isIsolated()) return
+        // Temporary copies left by a process that was stopped are removed at once
         ua.hramota.data.Shelf.clearOpened(this)
+        java.io.File(cacheDir, "restore").deleteRecursively()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { started++; main.removeCallbacks(lock) }
             override fun onActivityStopped(activity: Activity) {

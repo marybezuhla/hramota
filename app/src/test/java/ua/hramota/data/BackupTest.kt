@@ -49,4 +49,39 @@ class BackupTest {
         // Joined, never less: both bookmarks, the later place
         assertEquals(setOf(3, 9), library.get("doc2")!!.bookmarks)
     }
+
+    @Test fun refusesChangedOrCutFiles() {
+        val library = Library.get(context)
+        library.update("doc3") { LibraryEntry("doc3", "Лист.txt", "TXT", null, bookmarks = setOf(2), openedAt = 1) }
+        Thread.sleep(200)
+        val out = ByteArrayOutputStream()
+        Backup.write(context, out, "пароль-ґудзик".toCharArray(), emptySet())
+        val bytes = out.toByteArray()
+        fun refused(b: ByteArray) = runCatching { Backup.restore(context, ByteArrayInputStream(b), "пароль-ґудзик".toCharArray()) }.exceptionOrNull() is Backup.Refused
+        // The salt changed in the header
+        assertTrue(refused(bytes.copyOf().also { it[12] = (it[12] + 1).toByte() }))
+        // The iteration count lowered
+        assertTrue(refused(bytes.copyOf().also { it[7] = 0 }))
+        // Cut short
+        assertTrue(refused(bytes.copyOfRange(0, bytes.size - 3)))
+        // Not a backup at all
+        assertTrue(refused("просто текст".toByteArray()))
+        // Whole, it restores
+        assertTrue(runCatching { Backup.restore(context, ByteArrayInputStream(bytes), "пароль-ґудзик".toCharArray()) }.isSuccess)
+    }
+
+    @Test fun neverTakesAnotherDocumentsFile() {
+        val library = Library.get(context)
+        val mine = File(Library.copiesDir(context), "other.txt").apply { writeText("Чужий документ") }
+        library.update("other") { LibraryEntry("other", "Інше.txt", "TXT", null, copy = mine.path) }
+        val src = File(Library.copiesDir(context), "docx1.txt").apply { writeText("Мій документ") }
+        library.update("docx1") { LibraryEntry("docx1", "Мій.txt", "TXT", null, copy = src.path) }
+        Thread.sleep(200)
+        val out = ByteArrayOutputStream()
+        Backup.write(context, out, "довгий пароль".toCharArray(), setOf("docx1"))
+        library.dropCopy("docx1")
+        Backup.restore(context, ByteArrayInputStream(out.toByteArray()), "довгий пароль".toCharArray())
+        assertEquals("Мій документ", File(library.get("docx1")!!.copy!!).readText())
+        assertEquals("Чужий документ", mine.readText())
+    }
 }

@@ -205,7 +205,6 @@
     <string name="backup_failed">Could not write the backup</string>
     <string name="backup_reading">Reading the backup…</string>
     <string name="backup_restore_hint">What is in the backup is joined with what is here: nothing is deleted.</string>
-    <string name="backup_wrong">Wrong password, or not a Hramota backup</string>
     <string name="backup_restore_go">Restore</string>
     <string name="backup_restored">Restored: %1$d new, %2$d joined, %3$d documents</string>
     <string name="vault_failed">That did not work. Nothing was lost; try again.</string>
@@ -213,4 +212,8 @@
     <string name="vault_key_lost">The phone no longer has the key to the locked storage (its screen lock was removed or changed security). What was locked cannot be opened by anyone.</string>
     <string name="vault_start_over">Start afresh</string>
     <string name="vault_start_over_confirm">The locked memory, shelves and kept copies will be deleted. Documents in other places are not touched. If you have a backup, it can be restored after.</string>
+    <string name="backup_wrong">Wrong password, or the backup is damaged</string>
+    <string name="backup_not_backup">This is not a Hramota backup</string>
+    <string name="backup_no_space">Not enough room on the phone</string>
+    <string name="backup_locked">Hramota locked meanwhile: unlock it and try again</string>
 </resources>
