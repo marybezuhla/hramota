@@ -6,9 +6,10 @@ import java.io.IOException
  * An element found in XML text, with where it is: [start] at its "<", [openEnd] after its start tag,
  * [closeStart] at its end tag (equal to [openEnd] when it closes itself) and [end] after it.
  */
-class Elem(val name: String, val start: Int, val openEnd: Int, val closeStart: Int, val end: Int, val attrs: Map<String, String>) {
+class Elem(val name: String, val start: Int, val openEnd: Int, val closeStart: Int, val end: Int, val attrs: Map<String, String>, val selfClosing: Boolean = false) {
     /** Local name, without the prefix. */
     val local: String get() = name.substringAfter(':')
+    /** Nothing inside (written as one tag, or as two with nothing between). */
     val empty: Boolean get() = closeStart == openEnd
 }
 
@@ -51,7 +52,7 @@ object XmlScan {
                         val inner = s.substring(lt + 1, if (selfClosing) gt - 1 else gt)
                         val name = inner.takeWhile { !it.isWhitespace() }
                         val attrs = attributes(inner.substring(name.length))
-                        if (selfClosing) out += Elem(name, lt, gt + 1, gt + 1, gt + 1, attrs)
+                        if (selfClosing) out += Elem(name, lt, gt + 1, gt + 1, gt + 1, attrs, selfClosing = true)
                         else { curName = name; curStart = lt; curOpenEnd = gt + 1; curAttrs = attrs; depth = 1 }
                     } else if (!selfClosing) depth++
                     i = gt + 1

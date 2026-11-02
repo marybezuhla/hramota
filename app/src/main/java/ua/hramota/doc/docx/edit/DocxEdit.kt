@@ -196,7 +196,9 @@ class DocxEdit private constructor(
         val prev = before?.let { numOf(it.pPr) }
         val prevKind = prev?.let { (id, lvl) -> nums?.level(id, lvl)?.format?.let { if (it == "bullet") ListKind.BULLET else ListKind.NUMBER } }
         val (id, lvl) = if (prev != null && prevKind == kind) prev else (ourList(kind) ?: return p) to 0
-        return p.changed(pPr = setChild(p.pPr, "numPr", "<$w:numPr><$w:ilvl $w:val=\"$lvl\"/><$w:numId $w:val=\"${XmlScan.escape(id)}\"/></$w:numPr>", PPR_ORDER))
+        // The list's own indents apply, as in Word (a first-line indent would push the marker inward)
+        val pPr = removeChild(p.pPr, "ind", PPR_ORDER)
+        return p.changed(pPr = setChild(pPr, "numPr", "<$w:numPr><$w:ilvl $w:val=\"$lvl\"/><$w:numId $w:val=\"${XmlScan.escape(id)}\"/></$w:numPr>", PPR_ORDER))
     }
 
     /** The character formatting of [m] with one thing changed. */
@@ -443,7 +445,7 @@ class DocxEdit private constructor(
 
         private fun paragraph(xml: String, w: String, e: Elem, slot: Int, interned: HashMap<String, RunStyle>): EditPara {
             val raw = xml.substring(e.start, e.end)
-            val startTag = xml.substring(e.start, e.openEnd).let { if (e.empty) it.removeSuffix("/>").trimEnd() + ">" else it }
+            val startTag = xml.substring(e.start, e.openEnd).let { if (e.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }
             var pPr = ""
             val head = StringBuilder(); val tail = StringBuilder()
             val text = StringBuilder()
@@ -510,7 +512,7 @@ class DocxEdit private constructor(
             val p = props.ifEmpty { "<$w:$element></$w:$element>" }
             val outer = XmlScan.children(p, 0, p.length).first()
             val inner = if (outer.empty) "" else p.substring(outer.openEnd, outer.closeStart)
-            val start = if (outer.empty) p.substring(0, outer.start) + p.substring(outer.start, outer.end).removeSuffix("/>").trimEnd() + ">" else p.substring(0, outer.openEnd)
+            val start = if (outer.selfClosing) p.substring(0, outer.start) + p.substring(outer.start, outer.end).removeSuffix("/>").trimEnd() + ">" else p.substring(0, outer.openEnd)
             val kids = XmlScan.children(inner, 0, inner.length)
             val rank = order.indexOf(local).let { if (it < 0) order.size else it }
             val b = StringBuilder(start)

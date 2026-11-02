@@ -299,7 +299,7 @@ fun DocxEditorScreen(
         ) {
             itemsIndexed(state.paras, key = { _, p -> p.key }) { i, p ->
                 val shown = state.shown.getOrNull(i) ?: return@itemsIndexed
-                EditParagraph(state, i, p, shown, onLocked = { locked = true })
+                EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true })
             }
         }
         // After Enter or a join the cursor's paragraph is brought into view
@@ -334,7 +334,7 @@ private fun textStyleFor(kind: Kind, color: androidx.compose.ui.graphics.Color) 
 )
 
 @Composable
-private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown, onLocked: () -> Unit) {
+private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown, readOnly: Boolean, onLocked: () -> Unit) {
     val color = MaterialTheme.colorScheme.onSurface
     val style = textStyleFor(shown.kind, if (p.editable) color else color.copy(alpha = 0.6f))
     val top = when (shown.kind) { Kind.H1 -> 18.dp; Kind.H2 -> 14.dp; Kind.H3 -> 10.dp; else -> 4.dp }
@@ -385,6 +385,8 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
                 if (textChanged) state.typed(i, plain, sel.end - 1)
             },
             textStyle = style,
+            // Nothing changes while the file is being written
+            readOnly = readOnly,
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             visualTransformation = Formatting(p, state.edit),
             modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { f ->
