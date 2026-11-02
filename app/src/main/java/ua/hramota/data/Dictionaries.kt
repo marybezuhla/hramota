@@ -160,7 +160,7 @@ object Dictionaries {
             val index = try {
                 cache[d.id] ?: Index.load(d.dir).also {
                     // A few indexes kept in memory; the rest read again when needed
-                    if (cache.size >= 4) cache.clear()
+                    if (cache.size >= 2) cache.clear()
                     cache[d.id] = it
                 }
             } catch (e: Exception) { continue } catch (e: OutOfMemoryError) { cache.clear(); continue }

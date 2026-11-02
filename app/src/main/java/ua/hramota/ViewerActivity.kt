@@ -185,8 +185,9 @@ class ViewerActivity : ComponentActivity() {
                                         lifecycleScope.launch {
                                             val newId = withContext(Dispatchers.IO) { saveNotesInto(pdf, uri, id) }
                                             android.widget.Toast.makeText(this@ViewerActivity, getString(if (newId != null) R.string.pdf_notes_saved else R.string.pdf_notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
-                                            // The file is different now: opened again, so its new notes show and the next save builds on them
-                                            if (newId != null) recreate()
+                                            // The file is different now: opened again (a kept copy through a fresh temporary file),
+                                            // so its new notes show and the next save builds on them
+                                            if (newId != null) reopen(newId)
                                         }
                                     }
                                 }) { androidx.compose.material3.Text(getString(R.string.pdf_into_file)) }
@@ -323,6 +324,10 @@ class ViewerActivity : ComponentActivity() {
             if (!written || temp.length() == 0L) return null
             // A kept copy (possibly sealed) is replaced in Hramota's storage; another file through its app
             val copy = entry.copy?.let { java.io.File(it) }
+            // The engine's output must begin with the document as it is, whatever is replaced
+            val shownSize = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: return null
+            if (shownSize <= 0 || temp.length() <= shownSize) return null
+            if (contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, shownSize) } } != true) return null
             if (ua.hramota.data.Shelf.isOwn(this, uri) && copy != null) {
                 val key = ua.hramota.data.Vault.key()
                 if (copy.name.endsWith(ua.hramota.data.Vault.SUFFIX)) {
@@ -336,15 +341,16 @@ class ViewerActivity : ComponentActivity() {
                     if (!part.renameTo(copy)) { part.delete(); return null }
                 }
             } else {
-                // The engine (not trusted) must have kept the file whole, only adding to its end: the
-                // original's bytes are checked to begin the new file, then only the addition is written
-                val originalSize = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: return null
-                if (originalSize <= 0 || temp.length() <= originalSize) return null
-                val same = contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, originalSize) } } ?: false
-                if (!same) return null
+                // Checked above to begin with the original: only the addition is written. Some apps that
+                // hold files ignore "append" and keep only what was written: then the whole file is written
                 contentResolver.openOutputStream(uri, "wa")?.use { out ->
-                    temp.inputStream().use { input -> input.skip(originalSize); input.copyTo(out) }
+                    temp.inputStream().use { input -> input.skip(shownSize); input.copyTo(out) }
                 } ?: return null
+                val now = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
+                val whole = now == temp.length() && contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, now) } } == true
+                if (!whole) {
+                    contentResolver.openOutputStream(uri, "wt")?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
+                }
             }
             val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return null
             library.update(newId) { entry.copy(id = newId, notes = emptyList()) }
@@ -360,15 +366,32 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
+    private fun reopen(id: String) {
+        val own = ua.hramota.data.Shelf.isOwn(this, intent.data)
+        if (!own) { recreate(); return }
+        val e = Library.get(applicationContext).get(id) ?: run { recreate(); return }
+        lifecycleScope.launch {
+            val fresh = withContext(Dispatchers.IO) { e.copy?.let { ua.hramota.data.Shelf.copyUri(this@ViewerActivity, it, e.title) } } ?: run { recreate(); return@launch }
+            intent.data?.let { ua.hramota.data.Shelf.closeOpened(this@ViewerActivity, it) }
+            startActivity(android.content.Intent(this@ViewerActivity, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(fresh)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(EXTRA_NAME, e.title).putExtra(EXTRA_TOKEN, TOKEN))
+            finishAndRemoveTask()
+        }
+    }
+
     /** True if [b] begins with the first [n] bytes of [a]. */
     private fun sameStart(a: java.io.InputStream, b: java.io.InputStream, n: Long): Boolean {
         val x = ByteArray(64 * 1024); val y = ByteArray(64 * 1024)
+        fun fill(s: java.io.InputStream, buf: ByteArray, want: Int): Int {
+            var k = 0
+            while (k < want) { val r = s.read(buf, k, want - k); if (r < 0) break; k += r }
+            return k
+        }
         var left = n
         while (left > 0) {
             val want = minOf(left, x.size.toLong()).toInt()
-            val ka = a.readNBytes(x, 0, want); val kb = b.readNBytes(y, 0, want)
-            if (ka != want || kb != want) return false
-            if (!java.util.Arrays.equals(x, 0, want, y, 0, want)) return false
+            if (fill(a, x, want) != want || fill(b, y, want) != want) return false
+            for (i in 0 until want) if (x[i] != y[i]) return false
             left -= want
         }
         return true
