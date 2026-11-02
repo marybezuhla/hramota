@@ -32,7 +32,10 @@ class MainActivity : ComponentActivity() {
 
     /** The earlier version, while the newer one is being chosen. */
     private var compareFirst by mutableStateOf<Uri?>(null)
+    private var compareFirstName: String? = null
     private var comparing by mutableStateOf(false)
+    // The list a version to compare is chosen from (shelf, recent files, or another file)
+    private var choosing by mutableStateOf(false)
     private var showSettings by mutableStateOf(false)
     // Locked storage: whether it is on (changes when turned on or off here), and a prompt under way
     private var vaultOn by mutableStateOf(false)
@@ -61,6 +64,8 @@ class MainActivity : ComponentActivity() {
         recents = Recents.get(applicationContext)
         vaultOn = ua.hramota.data.Vault.isOn(this)
         compareFirst = savedInstanceState?.getString(KEY_FIRST)?.let(Uri::parse)
+        compareFirstName = savedInstanceState?.getString(KEY_FIRST_NAME)
+        choosing = savedInstanceState?.getBoolean(KEY_CHOOSING) ?: false
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
         showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
         applySecureScreen()
@@ -82,6 +87,22 @@ class MainActivity : ComponentActivity() {
                     // The shelf holds only documents kept inside Hramota
                     val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
                     BackHandler(showSettings) { showSettings = false }
+                    if (choosing && comparing) ua.hramota.ui.ComparePicker(
+                        getString(if (compareFirst == null) R.string.compare_pick_first else R.string.compare_pick_second),
+                        shelf, files,
+                        onShelf = { e ->
+                            choosing = false
+                            // A kept copy (opened from its seal if need be), or where it came from
+                            lifecycleScope.launch {
+                                val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { e.copy?.let { ua.hramota.data.Shelf.copyUri(this@MainActivity, it, e.title) } }
+                                    ?: e.uri?.let(Uri::parse)
+                                if (uri == null) choosing = true else chosen(uri, e.title)
+                            }
+                        },
+                        onRecent = { r -> choosing = false; chosen(Uri.parse(r.uri), r.name) },
+                        onOther = { choosing = false; pick.launch(arrayOf("*/*")) },
+                        onDismiss = { choosing = false; comparing = false; compareFirst?.let { ua.hramota.data.Shelf.closeOpened(this@MainActivity, it) }; compareFirst = null },
+                    )
                     if (backupDialog) ua.hramota.ui.BackupDialog(shelf, shelves, onCreate = { pw, ids ->
                         backupDialog = false
                         pendingBackup = pw to ids
@@ -113,7 +134,7 @@ class MainActivity : ComponentActivity() {
                             else -> getString(R.string.compare_pick_second)
                         },
                         onOpenFile = { pick.launch(arrayOf("*/*")) },
-                        onCompare = { comparing = true; compareFirst = null; pick.launch(arrayOf("*/*")) },
+                        onCompare = { comparing = true; compareFirst = null; choosing = true },
                         onOpenRecent = { openViewer(Uri.parse(it.uri), it.name) },
                         // The recent list only: bookmarks and the shelf stay with the documents
                         onRemove = { recents.remove(it.uri) },
@@ -250,19 +271,28 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         compareFirst?.let { outState.putString(KEY_FIRST, it.toString()) }
+        compareFirstName?.let { outState.putString(KEY_FIRST_NAME, it) }
+        outState.putBoolean(KEY_CHOOSING, choosing)
         outState.putBoolean(KEY_COMPARING, comparing)
         outState.putBoolean(KEY_SETTINGS, showSettings)
     }
 
     private fun onPicked(uri: Uri?) {
-        if (uri == null) { comparing = false; compareFirst = null; return }
+        // Back from the file picker without a file: the list to choose from comes back
+        if (uri == null) { if (comparing) choosing = true; return }
         val name = Recents.displayName(this, uri)
         recents.add(uri, name)
         if (!comparing) { openViewer(uri, name); return }
+        chosen(uri, name)
+    }
+
+    /** A version chosen for comparing: the first one, then the second (from the list again). */
+    private fun chosen(uri: Uri, name: String) {
         val first = compareFirst
         if (first == null) {
             compareFirst = uri
-            pick.launch(arrayOf("*/*"))
+            compareFirstName = name
+            choosing = true
         } else {
             comparing = false
             compareFirst = null
@@ -270,7 +300,10 @@ class MainActivity : ComponentActivity() {
                 Intent(this, CompareActivity::class.java)
                     .putExtra(CompareActivity.EXTRA_OLDER, first.toString())
                     .putExtra(CompareActivity.EXTRA_NEWER, uri.toString())
+                    .putExtra(CompareActivity.EXTRA_OLDER_NAME, compareFirstName ?: "")
+                    .putExtra(CompareActivity.EXTRA_NEWER_NAME, name)
             )
+            compareFirstName = null
         }
     }
 
@@ -314,6 +347,8 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_FIRST = "compare_first"
+        const val KEY_FIRST_NAME = "compare_first_name"
+        const val KEY_CHOOSING = "compare_choosing"
         const val KEY_COMPARING = "comparing"
         const val KEY_SETTINGS = "settings"
     }

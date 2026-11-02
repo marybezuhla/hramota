@@ -9,6 +9,8 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -292,6 +294,17 @@ class ScreensTest {
         ua.hramota.data.LibraryEntry("a4", "Кобзар.epub", "EPUB", null, position = 120, total = 600, copy = "x", shelves = setOf("read")),
         ua.hramota.data.LibraryEntry("a5", "Презентація проєкту.pptx", "PPTX", null, position = 3, total = 14, copy = "x", shelves = setOf("work")),
     )
+    private fun comparePicker(title: String) {
+        androidx.compose.material3.Surface(androidx.compose.ui.Modifier.fillMaxSize()) {
+            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(24.dp)) {
+                androidx.compose.material3.Text(title, style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+                ua.hramota.ui.ComparePickerList(shelfEntries, recentsUk, onShelf = {}, onRecent = {}, onOther = {})
+            }
+        }
+    }
+    @Test fun comparePickerScreen() = shot("06-compare-pick") { comparePicker("Оберіть попередню версію") }
+    @Config(qualifiers = "+night")
+    @Test fun comparePickerDark() = shot("06-compare-pick-dark") { comparePicker("Оберіть попередню версію") }
     @Test fun homeShelf() = shot("12-home-shelf") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)
     }

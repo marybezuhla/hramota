@@ -250,4 +250,6 @@
     <string name="pdf_notes_not_saved">Не вдалося записати в цей файл; спробуйте «Копією»</string>
     <string name="pdf_copy_not_saved">Не вдалося зберегти копію</string>
     <string name="dict_section_hint">Словники у форматі StarDict (.ifo, .idx і .dict або .dict.dz, чи ZIP із ними), які ви додаєте самі. Виділіть слово в книзі чи документі й виберіть «Словник». Усе лишається на телефоні.</string>
+    <string name="compare_other_file">Інший файл…</string>
+    <string name="compare_none_here">На полиці й у нещодавніх ще немає документів.</string>
 </resources>
