@@ -18,7 +18,6 @@ data class RecentFile(val uri: String, val name: String, val openedAt: Long)
  * cleared. Hramota keeps read access only to files listed here and gives it back when removed.
  */
 class Recents(private val context: Context) {
-    private val prefs = context.getSharedPreferences("recents", Context.MODE_PRIVATE)
     private val state = MutableStateFlow(load())
     val files: StateFlow<List<RecentFile>> = state.asStateFlow()
 
@@ -26,6 +25,8 @@ class Recents(private val context: Context) {
     fun add(uri: Uri, name: String) {
         // The person chose not to keep a list
         if (!Settings.get(context).state.value.rememberRecent) return
+        // Hramota's own copies are on the shelf, not in the recent list; nothing is written while locked
+        if (uri.authority == context.packageName + ".files" || Vault.locked(context)) return
         try {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
@@ -36,6 +37,9 @@ class Recents(private val context: Context) {
         list.drop(MAX).forEach { release(it.uri) }
         save(list.take(MAX))
     }
+
+    /** Reads the list again (after the locked storage is opened). */
+    fun reload() { state.value = load() }
 
     fun remove(uri: String) {
         release(uri)
@@ -55,25 +59,51 @@ class Recents(private val context: Context) {
     }
 
     private fun save(list: List<RecentFile>) {
-        val json = JSONArray()
-        list.forEach { json.put(JSONObject().put("uri", it.uri).put("name", it.name).put("at", it.openedAt)) }
-        prefs.edit().putString(KEY, json.toString()).apply()
+        if (Vault.locked(context)) return
+        write(context, list)
         state.value = list
     }
 
-    private fun load(): List<RecentFile> = try {
-        val json = JSONArray(prefs.getString(KEY, "[]"))
+    private fun load(): List<RecentFile> = read(context)
         (0 until json.length()).map {
             val o = json.getJSONObject(it)
             RecentFile(o.getString("uri"), o.getString("name"), o.getLong("at"))
         }
-    } catch (_: Exception) {
-        emptyList()
-    }
 
     companion object {
         const val MAX = 30
         private const val KEY = "files"
+        private const val SEALED = "files.sealed"
+
+        private fun read(context: Context): List<RecentFile> = try {
+            val prefs = context.getSharedPreferences("recents", Context.MODE_PRIVATE)
+            val sealed = prefs.getString(SEALED, null)
+            val text = if (sealed != null) {
+                val key = Vault.key() ?: return emptyList()
+                String(Sealed.open(key, android.util.Base64.decode(sealed, android.util.Base64.NO_WRAP)))
+            } else prefs.getString(KEY, "[]")
+            val json = JSONArray(text)
+            (0 until json.length()).map {
+                val o = json.getJSONObject(it)
+                RecentFile(o.getString("uri"), o.getString("name"), o.getLong("at"))
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        /** The list as sealed text while the storage is locked, plain otherwise. */
+        private fun write(context: Context, list: List<RecentFile>) {
+            val prefs = context.getSharedPreferences("recents", Context.MODE_PRIVATE)
+            val json = JSONArray()
+            list.forEach { json.put(JSONObject().put("uri", it.uri).put("name", it.name).put("at", it.openedAt)) }
+            val key = Vault.key()
+            if (Vault.sealing(context) && key != null)
+                prefs.edit().putString(SEALED, android.util.Base64.encodeToString(Sealed.seal(key, json.toString().toByteArray()), android.util.Base64.NO_WRAP)).remove(KEY).commit()
+            else prefs.edit().putString(KEY, json.toString()).remove(SEALED).commit()
+        }
+
+        /** Rewrites the list in the new form (locked storage turned on or off). */
+        fun convert(context: Context, seal: Boolean) = write(context, read(context))
 
         /** The file's display name, or the last part of its address. */
         fun displayName(context: Context, uri: Uri): String {

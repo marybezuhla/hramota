@@ -177,4 +177,15 @@
     <string name="shelf_save">Keep in Hramota</string>
     <string name="shelf_drop_copy">Remove from Hramota</string>
     <string name="shelf_empty">Documents kept inside Hramota live here. Books arrive by themselves; any other document — through ⋮ → “Keep in Hramota”. Files you only opened are in Recent, and their bookmarks are remembered too.</string>
+    <string name="vault_title">Locked storage</string>
+    <string name="vault_hint">Document memory, shelves, covers, kept copies and the recent list are encrypted with a key held in the phone’s secure hardware. Opening Hramota then asks for the phone’s screen lock; it locks again a minute after you leave. If the screen lock is removed, the locked data cannot be opened.</string>
+    <string name="vault_no_lock">Set a screen lock on the phone first (PIN, pattern or password).</string>
+    <string name="vault_on_done">Locked storage is on</string>
+    <string name="vault_off_done">Locked storage is off</string>
+    <string name="vault_failed">That did not work; nothing was changed</string>
+    <string name="lock_title">Hramota is locked</string>
+    <string name="lock_body">Your documents, shelves and notes open after the phone confirms it is you.</string>
+    <string name="unlock">Unlock</string>
+    <string name="unlock_title">Unlock Hramota</string>
+    <string name="unlock_subtitle">The phone’s PIN, pattern, password or fingerprint</string>
 </resources>

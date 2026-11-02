@@ -135,6 +135,7 @@ class Library private constructor(private val context: Context) {
     fun forget(id: String) {
         get(id)?.copy?.let { File(it).delete() }
         File(coversDir(context), "$id.png").delete()
+        File(coversDir(context), "$id.png" + Vault.SUFFIX).delete()
         update(id) { null }
     }
 

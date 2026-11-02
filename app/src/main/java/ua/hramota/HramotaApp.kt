@@ -1,0 +1,33 @@
+package ua.hramota
+
+import android.app.Activity
+import android.app.Application
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import ua.hramota.data.Vault
+
+/** Locks the locked storage a minute after the last Hramota window leaves the screen. */
+class HramotaApp : Application() {
+    private var started = 0
+    private val main = Handler(Looper.getMainLooper())
+    private val lock = Runnable { Vault.lock(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) { started++; main.removeCallbacks(lock) }
+            override fun onActivityStopped(activity: Activity) {
+                started = (started - 1).coerceAtLeast(0)
+                if (started == 0) main.postDelayed(lock, LOCK_AFTER)
+            }
+            override fun onActivityCreated(activity: Activity, state: Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+    }
+
+    companion object { const val LOCK_AFTER = 60_000L }
+}

@@ -2,4 +2,6 @@
 <!-- Only the folder of copies kept inside Hramota (documents and books) -->
 <paths>
     <files-path name="documents" path="documents/" />
+    <!-- A sealed copy opened for reading: plain only while the viewer shows it -->
+    <cache-path name="open" path="open/" />
 </paths>

@@ -76,6 +76,9 @@ class ViewerActivity : ComponentActivity() {
                     val state by produceState<ViewerState>(ViewerState.Loading, uri) {
                         // An open PDF is closed if the window goes away before it is shown
                         var opened: java.io.Closeable? = null
+                        // Locked storage closed: ask once; if declined, the file still opens, only nothing is remembered
+                        if (ua.hramota.data.Vault.locked(this@ViewerActivity))
+                            ua.hramota.data.Vault.unlock(this@ViewerActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))
                         withContext(Dispatchers.IO) { Library.fingerprint(this@ViewerActivity, uri) }?.let { id ->
                             val old = Bookmarks(applicationContext)
                             val oldMarks = old.pages(uri.toString())
@@ -145,7 +148,7 @@ class ViewerActivity : ComponentActivity() {
                         val e = library.get(id) ?: return@LaunchedEffect
                         withContext(Dispatchers.IO) {
                             if (e.copy == null && !ownCopy) library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) }
-                            if (!java.io.File(Library.coversDir(applicationContext), "$id.png").exists()) {
+                            if (!ua.hramota.data.Shelf.hasCover(applicationContext, id)) {
                                 val bytes = book.cover?.let { book.images[it] } ?: book.blocks.firstNotNullOfOrNull { (it as? ua.hramota.doc.book.BookBlock.Image)?.key?.let(book.images::get) }
                                 bytes?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleFor(b, 480) }) }
                                     ?.let { ua.hramota.data.Shelf.saveCover(applicationContext, id, it) }
@@ -156,7 +159,7 @@ class ViewerActivity : ComponentActivity() {
                     LaunchedEffect(state, docId) {
                         val pages = (state as? ViewerState.Paged)?.pages ?: return@LaunchedEffect
                         val id = docId ?: return@LaunchedEffect
-                        if (java.io.File(Library.coversDir(applicationContext), "$id.png").exists()) return@LaunchedEffect
+                        if (ua.hramota.data.Shelf.hasCover(applicationContext, id)) return@LaunchedEffect
                         pages.render(0, 360)?.let { img -> withContext(Dispatchers.IO) { ua.hramota.data.Shelf.saveCover(applicationContext, id, img.asAndroidBitmap()) } }
                     }
                     // The PDF engine holds the open file: release it when the window goes
@@ -265,6 +268,20 @@ class ViewerActivity : ComponentActivity() {
     override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean {
         if (keyCode == keyTurned) { keyTurned = 0; return true }
         return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // A copy kept under lock is not left on screen once Hramota has locked again
+        if (intent.data?.authority == "$packageName.files" && ua.hramota.data.Vault.locked(this)) finishAndRemoveTask()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // A sealed copy opened for reading is plain only while it is shown
+        val uri = intent.data
+        if (isFinishing && uri != null && uri.authority == "$packageName.files" && uri.pathSegments.firstOrNull() == "open")
+            uri.lastPathSegment?.let { java.io.File(java.io.File(cacheDir, "open"), it).delete() }
     }
 
     companion object {
