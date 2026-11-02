@@ -20,5 +20,7 @@ internal object PdfiumNative {
     @JvmStatic external fun inspect(handle: Long, maxPages: Int): Array<String?>?
     @JvmStatic external fun text(handle: Long, index: Int, maxChars: Int): String?
     @JvmStatic external fun rects(handle: Long, index: Int, start: Int, count: Int, devW: Int, devH: Int): FloatArray?
+    @JvmStatic external fun saveNotes(handle: Long, outFd: Int, pages: IntArray, starts: IntArray, counts: IntArray, colors: IntArray, texts: Array<String?>): Boolean
+    @JvmStatic external fun annotCount(handle: Long, index: Int): Int
     @JvmStatic external fun charAt(handle: Long, index: Int, x: Int, y: Int, devW: Int, devH: Int): Int
 }

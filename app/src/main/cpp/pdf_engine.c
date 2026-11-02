@@ -18,6 +18,8 @@
 #include "fpdf_formfill.h"
 #include "fpdf_javascript.h"
 #include "fpdf_text.h"
+#include "fpdf_annot.h"
+#include "fpdf_save.h"
 
 typedef struct {
     int fd;
@@ -282,4 +284,117 @@ JNIEXPORT jint JNICALL Java_ua_hramota_pdf_PdfiumNative_charAt(JNIEnv* env, jcla
     }
     FPDF_ClosePage(page);
     return result;
+}
+
+
+// ---- Saving notes into the PDF ----
+
+typedef struct {
+    FPDF_FILEWRITE base;
+    int fd;
+    int ok;
+} FdWriter;
+
+static int write_block(FPDF_FILEWRITE* w, const void* data, unsigned long size) {
+    FdWriter* f = (FdWriter*)w;
+    const unsigned char* p = (const unsigned char*)data;
+    unsigned long done = 0;
+    while (done < size) {
+        ssize_t n = write(f->fd, p + done, size - done);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { f->ok = 0; return 0; }
+        done += (unsigned long)n;
+    }
+    return 1;
+}
+
+// Writes a copy of the document with highlight annotations for the notes, to outFd. Each note is
+// pages[i], starts[i], counts[i] (characters on the page), colors[i] (0xAARRGGBB) and texts[i]
+// (its words, or null). The document being shown is not changed: a second copy is loaded and edited.
+JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveNotes(JNIEnv* env, jclass cls, jlong handle, jint outFd,
+                                                                    jintArray pages, jintArray starts, jintArray counts,
+                                                                    jintArray colors, jobjectArray texts) {
+    (void)cls;
+    Doc* d = (Doc*)(intptr_t)handle;
+    if (!d || outFd < 0) return JNI_FALSE;
+    jsize n = (*env)->GetArrayLength(env, pages);
+    if (n < 0 || n > 5000 || (*env)->GetArrayLength(env, starts) != n || (*env)->GetArrayLength(env, counts) != n ||
+        (*env)->GetArrayLength(env, colors) != n || (*env)->GetArrayLength(env, texts) != n) return JNI_FALSE;
+    FPDF_DOCUMENT doc = FPDF_LoadCustomDocument(&d->access, NULL);
+    if (!doc) return JNI_FALSE;
+    jint* pg = (*env)->GetIntArrayElements(env, pages, NULL);
+    jint* st = (*env)->GetIntArrayElements(env, starts, NULL);
+    jint* ct = (*env)->GetIntArrayElements(env, counts, NULL);
+    jint* co = (*env)->GetIntArrayElements(env, colors, NULL);
+    int pageCount = FPDF_GetPageCount(doc);
+    for (jsize i = 0; i < n; i++) {
+        if (pg[i] < 0 || pg[i] >= pageCount || st[i] < 0 || ct[i] <= 0) continue;
+        FPDF_PAGE page = FPDF_LoadPage(doc, pg[i]);
+        if (!page) continue;
+        FPDF_TEXTPAGE text = FPDFText_LoadPage(page);
+        if (text) {
+            int rects = FPDFText_CountRects(text, st[i], ct[i]);
+            if (rects > 0 && rects <= 4096) {
+                FPDF_ANNOTATION annot = FPDFPage_CreateAnnot(page, FPDF_ANNOT_HIGHLIGHT);
+                if (annot) {
+                    unsigned int c = (unsigned int)co[i];
+                    FPDFAnnot_SetColor(annot, FPDFANNOT_COLORTYPE_Color, (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, (c >> 24) & 0xFF);
+                    double minL = 1e9, minB = 1e9, maxR = -1e9, maxT = -1e9;
+                    for (int r = 0; r < rects; r++) {
+                        double l, t, rr, b;
+                        if (!FPDFText_GetRect(text, r, &l, &t, &rr, &b)) continue;
+                        FS_QUADPOINTSF q = { (float)l, (float)t, (float)rr, (float)t, (float)l, (float)b, (float)rr, (float)b };
+                        FPDFAnnot_AppendAttachmentPoints(annot, &q);
+                        if (l < minL) minL = l;
+                        if (b < minB) minB = b;
+                        if (rr > maxR) maxR = rr;
+                        if (t > maxT) maxT = t;
+                    }
+                    FS_RECTF box = { (float)minL, (float)maxT, (float)maxR, (float)minB };
+                    FPDFAnnot_SetRect(annot, &box);
+                    jstring words = (jstring)(*env)->GetObjectArrayElement(env, texts, i);
+                    if (words) {
+                        jsize len = (*env)->GetStringLength(env, words);
+                        if (len > 0 && len <= 10000) {
+                            unsigned short* w = malloc(((size_t)len + 1) * 2);
+                            if (w) {
+                                (*env)->GetStringRegion(env, words, 0, len, (jchar*)w);
+                                w[len] = 0;
+                                FPDFAnnot_SetStringValue(annot, "Contents", (FPDF_WIDESTRING)w);
+                                free(w);
+                            }
+                        }
+                        (*env)->DeleteLocalRef(env, words);
+                    }
+                    FPDFPage_CloseAnnot(annot);
+                }
+            }
+            FPDFText_ClosePage(text);
+        }
+        FPDF_ClosePage(page);
+    }
+    (*env)->ReleaseIntArrayElements(env, pages, pg, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, starts, st, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, counts, ct, JNI_ABORT);
+    (*env)->ReleaseIntArrayElements(env, colors, co, JNI_ABORT);
+    FdWriter w;
+    memset(&w, 0, sizeof(w));
+    w.base.version = 1;
+    w.base.WriteBlock = write_block;
+    w.fd = outFd;
+    w.ok = 1;
+    // The original kept as it is, the notes added after it (an incremental update)
+    FPDF_BOOL saved = FPDF_SaveAsCopy(doc, &w.base, FPDF_INCREMENTAL);
+    FPDF_CloseDocument(doc);
+    return (saved && w.ok) ? JNI_TRUE : JNI_FALSE;
+}
+
+// How many annotations page [index] has (for tests).
+JNIEXPORT jint JNICALL Java_ua_hramota_pdf_PdfiumNative_annotCount(JNIEnv* env, jclass cls, jlong handle, jint index) {
+    (void)env; (void)cls;
+    FPDF_PAGE page = FPDF_LoadPage(((Doc*)(intptr_t)handle)->doc, index);
+    if (!page) return -1;
+    int n = FPDFPage_GetAnnotCount(page);
+    FPDF_ClosePage(page);
+    return n;
 }

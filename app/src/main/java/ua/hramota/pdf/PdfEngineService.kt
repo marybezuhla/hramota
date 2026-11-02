@@ -149,6 +149,22 @@ class PdfEngineService : Service() {
                         reply?.writeNoException()
                         reply?.writeInt(if (handle > 0) PdfiumNative.charAt(handle, index, x, y, GRID, GRID) else -1)
                     }
+                    SAVE_NOTES -> {
+                        // A copy with the notes as highlights, written to the file the app passes
+                        val out: ParcelFileDescriptor? = data.readFileDescriptor()
+                        val n = data.readInt().coerceIn(0, 5000)
+                        val pages = IntArray(n); val starts = IntArray(n); val counts = IntArray(n); val colors = IntArray(n)
+                        val texts = arrayOfNulls<String>(n)
+                        for (i in 0 until n) { pages[i] = data.readInt(); starts[i] = data.readInt(); counts[i] = data.readInt(); colors[i] = data.readInt(); texts[i] = data.readString() }
+                        val ok = out?.use { handle > 0 && PdfiumNative.saveNotes(handle, it.fd, pages, starts, counts, colors, texts) } ?: false
+                        reply?.writeNoException()
+                        reply?.writeInt(if (ok) R_OK else R_FAILED)
+                    }
+                    ANNOTS -> {
+                        val index = data.readInt()
+                        reply?.writeNoException()
+                        reply?.writeInt(if (handle > 0) PdfiumNative.annotCount(handle, index) else -1)
+                    }
                     CLOSE -> {
                         if (handle > 0) PdfiumNative.close(handle)
                         handle = 0
@@ -173,6 +189,8 @@ class PdfEngineService : Service() {
         const val CHAR_AT = IBinder.FIRST_CALL_TRANSACTION + 7
         const val RENDER_KEEP = IBinder.FIRST_CALL_TRANSACTION + 8
         const val PIXELS = IBinder.FIRST_CALL_TRANSACTION + 9
+        const val SAVE_NOTES = IBinder.FIRST_CALL_TRANSACTION + 10
+        const val ANNOTS = IBinder.FIRST_CALL_TRANSACTION + 11
         /** Render results. */
         const val R_OK = 0
         const val R_FAILED = 1
