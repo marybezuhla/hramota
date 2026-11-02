@@ -106,6 +106,38 @@ class EditorState(val edit: DocxEdit) {
 
     fun indexOf(key: Long?): Int = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
+    /** Comments marked in the document now (a comment whose mark was deleted with its text is gone). */
+    var comments: List<ua.hramota.doc.docx.edit.Comment> by mutableStateOf(liveComments(edit.paragraphs))
+        private set
+
+    private fun liveComments(list: List<EditPara>): List<ua.hramota.doc.docx.edit.Comment> {
+        val ids = HashSet<String>()
+        for (p in list) for (a in p.anchors) if (a.kind == ua.hramota.doc.docx.edit.Anchor.Kind.REF) ids += a.comment
+        return edit.comments().filter { it.id in ids }
+    }
+
+    /** A comment on the selection (or at the cursor) of the paragraph with the cursor. */
+    fun addComment(text: String, author: String): Boolean {
+        val i = indexOf(focused); if (i < 0 || !paras[i].editable || text.isBlank()) return false
+        val list = paras.toMutableList()
+        list[i] = edit.comment(paras[i], selection.min, selection.max, author.trim(), text.trim())
+        commit(list, structure = true)
+        return true
+    }
+
+    /** Removes a comment; false if part of it is in a paragraph that cannot be changed here. */
+    fun removeComment(id: String): Boolean {
+        val list = edit.uncomment(paras, id) ?: return false
+        commit(list, structure = true)
+        return true
+    }
+
+    /** Puts the cursor where a comment begins. */
+    fun goToComment(id: String) {
+        val (place, _) = edit.commentPlace(paras, id) ?: return
+        paras.getOrNull(place.first)?.let { moveTo = it.key to place.second }
+    }
+
     private fun commit(list: List<EditPara>, typingIn: Long? = null, structure: Boolean = false) {
         val now = System.currentTimeMillis()
         val group = typingIn != null && typingIn == lastTypedKey && now - lastTyped < 1500
@@ -118,7 +150,7 @@ class EditorState(val edit: DocxEdit) {
         lastTyped = now; lastTypedKey = typingIn ?: -1L
         redoStack.clear()
         paras = list
-        if (structure) shown = edit.shown(list)
+        if (structure) { shown = edit.shown(list); comments = liveComments(list) }
         dirty = true
         canUndo = undoStack.isNotEmpty(); canRedo = false
     }
@@ -126,7 +158,7 @@ class EditorState(val edit: DocxEdit) {
     fun undo() {
         val prev = undoStack.removeLastOrNull() ?: return
         redoStack += paras
-        paras = prev; shown = edit.shown(prev)
+        paras = prev; shown = edit.shown(prev); comments = liveComments(prev)
         lastTypedKey = -1L
         canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true
     }
@@ -134,7 +166,7 @@ class EditorState(val edit: DocxEdit) {
     fun redo() {
         val next = redoStack.removeLastOrNull() ?: return
         undoStack += paras
-        paras = next; shown = edit.shown(next)
+        paras = next; shown = edit.shown(next); comments = liveComments(next)
         lastTypedKey = -1L
         canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true
     }
@@ -153,14 +185,14 @@ class EditorState(val edit: DocxEdit) {
         val style = pending ?: p.marks.getOrNull(pre - 1) ?: p.marks.getOrNull(pre) ?: p.typing
         val marks = ArrayList<RunStyle>(text.length)
         marks.addAll(p.marks.subList(0, pre)); repeat(inserted) { marks += style }; marks.addAll(p.marks.subList(old.length - suf, old.length))
-        var changed = p.changed(text = text, marks = marks)
+        var changed = edit.retyped(p, text, marks, pre, old.length - suf)
         val list = paras.toMutableList()
         // Enter (or pasted lines): the paragraph is split at each line end
         val parts = ArrayList<EditPara>()
         while (true) {
             val nl = changed.text.indexOf('\n')
             if (nl < 0) break
-            val cut = changed.changed(text = changed.text.removeRange(nl, nl + 1), marks = changed.marks.toMutableList().apply { removeAt(nl) })
+            val cut = edit.retyped(changed, changed.text.removeRange(nl, nl + 1), changed.marks.toMutableList().apply { removeAt(nl) }, nl, nl + 1)
             val (a, b) = edit.split(cut, nl)
             parts += a
             changed = b
@@ -244,7 +276,7 @@ class EditorState(val edit: DocxEdit) {
 }
 
 /** Shows each run of text with its formatting; the text itself is never changed by this. */
-private class Formatting(private val p: EditPara, private val edit: DocxEdit) : VisualTransformation {
+private class Formatting(private val p: EditPara, private val edit: DocxEdit, private val open: Set<String>, private val tint: androidx.compose.ui.graphics.Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val b = AnnotatedString.Builder(text.text)
         // The field's text is the zero-width mark and then the paragraph's text
@@ -263,11 +295,21 @@ private class Formatting(private val p: EditPara, private val edit: DocxEdit) : 
             ), i + 1, j + 1)
             i = j
         }
+        // Text a comment is about, tinted: ranges open from earlier paragraphs, and those begun here
+        val inside = HashSet(open)
+        var from = 0
+        fun mark(to: Int) { if (inside.isNotEmpty() && to > from) b.addStyle(SpanStyle(background = tint), from + 1, minOf(to, n) + 1) }
+        for (a in p.anchors.sortedBy { it.at }) {
+            val at = a.at.coerceIn(0, n)
+            mark(at); from = at
+            when (a.kind) { ua.hramota.doc.docx.edit.Anchor.Kind.START -> inside += a.comment; ua.hramota.doc.docx.edit.Anchor.Kind.END -> inside -= a.comment; else -> {} }
+        }
+        mark(n)
         return TransformedText(b.toAnnotatedString(), OffsetMapping.Identity)
     }
 
-    override fun equals(other: Any?) = other is Formatting && other.p === p
-    override fun hashCode() = System.identityHashCode(p)
+    override fun equals(other: Any?) = other is Formatting && other.p === p && other.open == open && other.tint == tint
+    override fun hashCode() = System.identityHashCode(p) * 31 + open.hashCode()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -278,8 +320,14 @@ fun DocxEditorScreen(
     saving: Boolean,
     onSave: () -> Unit,
     onClose: () -> Unit,
+    /** The name put on new comments (remembered), and how it is changed. */
+    author: String = "",
+    onAuthor: (String) -> Unit = {},
+    startWithComments: Boolean = false,
 ) {
     var askClose by remember { mutableStateOf(false) }
+    var commenting by remember { mutableStateOf(false) }
+    var listing by remember { mutableStateOf(startWithComments) }
     var locked by remember { mutableStateOf(false) }
     BackHandler { if (state.dirty) askClose = true else onClose() }
     Scaffold(
@@ -292,11 +340,12 @@ fun DocxEditorScreen(
                     }
                 },
                 actions = {
+                    if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}") }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
         },
-        bottomBar = { EditToolbar(state, enabled = !saving) },
+        bottomBar = { EditToolbar(state, enabled = !saving, onComment = { commenting = true }) },
     ) { padding ->
         val listState = rememberLazyListState()
         LazyColumn(
@@ -327,6 +376,12 @@ fun DocxEditorScreen(
             }
         },
     )
+    if (commenting) CommentDialog(author, onDismiss = { commenting = false }) { text, who ->
+        commenting = false
+        if (who != author) onAuthor(who)
+        state.addComment(text, who)
+    }
+    if (listing) CommentsSheet(state, enabled = !saving, onDismiss = { listing = false })
     if (locked) AlertDialog(
         onDismissRequest = { locked = false },
         text = { Text(stringResource(R.string.edit_locked_paragraph)) },
@@ -423,7 +478,7 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
             // Nothing changes while the file is being written
             readOnly = readOnly,
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            visualTransformation = Formatting(p, state.edit),
+            visualTransformation = Formatting(p, state.edit, shown.openComments, CommentTint),
             modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { f ->
                 if (f.isFocused && state.focused != p.key) {
                     state.focused = p.key; state.pending = null
@@ -435,7 +490,7 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
 }
 
 @Composable
-private fun EditToolbar(state: EditorState, enabled: Boolean) {
+private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> Unit) {
     val i = state.indexOf(state.focused)
     val active = enabled && i >= 0 && state.paras.getOrNull(i)?.editable == true
     val look = if (active) state.currentLook() else Look()
@@ -456,6 +511,7 @@ private fun EditToolbar(state: EditorState, enabled: Boolean) {
                 KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind)
                 Tool("•", stringResource(R.string.edit_bullets), active, shown?.list == ListKind.BULLET) { state.toggleList(ListKind.BULLET) }
                 Tool("1.", stringResource(R.string.edit_numbers), active, shown?.list == ListKind.NUMBER) { state.toggleList(ListKind.NUMBER) }
+                Tool("💬", stringResource(R.string.comment_add), active, onClick = onComment)
             }
         }
     }
@@ -491,3 +547,63 @@ private fun KindMenu(state: EditorState, enabled: Boolean, kind: Kind?) {
         }
     }
 }
+
+/** Text a comment is about: a soft yellow that reads in both themes. */
+private val CommentTint = androidx.compose.ui.graphics.Color(0x66F2C14E)
+
+/** Writing a comment, with the name it is signed with (empty is allowed: nobody's name goes into the file). */
+@Composable
+private fun CommentDialog(author: String, onDismiss: () -> Unit, onDone: (String, String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    var who by remember { mutableStateOf(author) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.comment_add)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.OutlinedTextField(text, { text = it.take(20_000) }, label = { Text(stringResource(R.string.comment_text)) },
+                    minLines = 3, modifier = Modifier.fillMaxWidth())
+                androidx.compose.material3.OutlinedTextField(who, { who = it.take(100) }, label = { Text(stringResource(R.string.comment_author)) },
+                    singleLine = true, supportingText = { Text(stringResource(R.string.comment_author_hint)) }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = { TextButton(onClick = { onDone(text, who.trim()) }, enabled = text.isNotBlank()) { Text(stringResource(R.string.comment_done)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/** The document's comments: who, when, what about; tap one to go to it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommentsSheet(state: EditorState, enabled: Boolean, onDismiss: () -> Unit) {
+    var refused by remember { mutableStateOf(false) }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Text(stringResource(R.string.comments_count, state.comments.size), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        if (refused) Text(stringResource(R.string.comment_cannot_delete), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 20.dp))
+        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            itemsIndexed(state.comments, key = { _, c -> c.id }) { _, c ->
+                val quoted = remember(c.id, state.paras) { state.edit.commentPlace(state.paras, c.id)?.second.orEmpty() }
+                Column(Modifier.fillMaxWidth().clickable { state.goToComment(c.id); onDismiss() }.padding(horizontal = 20.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(listOf(c.author, commentDate(c.date)).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { refused = !state.removeComment(c.id) }, enabled = enabled) {
+                            Text(stringResource(R.string.comment_delete), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    if (quoted.isNotBlank()) Text("«$quoted»", style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(c.text, style = MaterialTheme.typography.bodyMedium)
+                }
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+/** A comment's date (as Word writes it, in UTC) shown as a local date and time; as is if unreadable. */
+internal fun commentDate(iso: String): String = try {
+    val t = java.time.Instant.parse(iso)
+    java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT).withZone(java.time.ZoneId.systemDefault()).format(t)
+} catch (e: Exception) { iso.take(16).replace('T', ' ') }

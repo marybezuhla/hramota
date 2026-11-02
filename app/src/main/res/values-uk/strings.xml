@@ -287,4 +287,12 @@
     <string name="rescue_suffix">попередня версія</string>
     <string name="rescue_saved">Попередню версію збережено.</string>
     <string name="rescue_not_saved">Не вдалося зберегти попередню версію. Вона й далі збережена тут.</string>
+    <string name="comment_add">Коментар</string>
+    <string name="comment_text">Коментар</string>
+    <string name="comment_author">Ваше ім’я</string>
+    <string name="comment_author_hint">Видно біля коментаря у Word. Можна лишити порожнім.</string>
+    <string name="comment_done">Додати</string>
+    <string name="comments_count">Коментарі (%1$d)</string>
+    <string name="comment_cannot_delete">Цей коментар частково в абзаці, який тут не редагується, тож його не можна видалити.</string>
+    <string name="comment_delete">Видалити</string>
 </resources>
