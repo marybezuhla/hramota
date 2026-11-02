@@ -106,7 +106,8 @@ class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
 
     /** Works the values out (off the main thread) and shows them. */
     suspend fun refresh() {
-        val values = withContext(Dispatchers.Default) { edit.recalc() }
+        // Formulas that cannot be worked out here (too deep a chain) keep their old values on screen
+        val values = try { withContext(Dispatchers.Default) { edit.recalc() } } catch (e: java.io.IOException) { return }
         workbook = withContext(Dispatchers.Default) { shownWith(values) }
     }
 

@@ -155,6 +155,17 @@ class XlsxEdit private constructor(
      */
     @Synchronized
     fun recalc(): Map<CellKey, Value> {
+        // A long chain of formulas (each row adding to the one above) is followed by recursion:
+        // done on a thread with room for it, so it never overflows the caller's stack
+        var result: Map<CellKey, Value>? = null
+        var failure: Throwable? = null
+        val t = Thread(null, { try { result = recalcHere() } catch (e: Throwable) { failure = e } }, "recalc", 512L * 1024 * 1024)
+        t.start(); t.join()
+        failure?.let { if (it is StackOverflowError) throw IOException("Formulas too deep") else throw it }
+        return result!!
+    }
+
+    private fun recalcHere(): Map<CellKey, Value> {
         val dirty = HashSet<CellKey>(inputs.keys)
         val pending = fileFormulas.filter { it.key !in inputs }.toMutableList()
         var grew = true
