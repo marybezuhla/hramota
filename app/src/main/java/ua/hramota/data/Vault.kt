@@ -1,11 +1,12 @@
 package ua.hramota.data
 
 import android.app.Activity
+import android.content.Intent
+import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import android.app.KeyguardManager
 import android.content.Context
-import android.hardware.biometrics.BiometricManager.Authenticators
-import android.hardware.biometrics.BiometricPrompt
-import android.os.CancellationSignal
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
@@ -31,7 +32,8 @@ import kotlin.coroutines.resume
 /**
  * "Locked storage": the document memory, shelves, covers, kept copies and the recent list sealed
  * with a data key. The data key is kept wrapped by a key in the phone's secure hardware (Android
- * Keystore) that works only right after the owner's fingerprint, face or screen lock — every time.
+ * Keystore) that works only for a few seconds right after the phone's own lock screen confirms the
+ * owner (PIN, pattern, password, or the fingerprint or face it offers). No permission is needed.
  * While unlocked, the data key lives only in memory; it is dropped when Hramota is locked.
  */
 object Vault {
@@ -69,7 +71,7 @@ object Vault {
     }
 
     /** Asks for the fingerprint, face or screen lock and opens the storage. */
-    suspend fun unlock(activity: Activity, title: String, subtitle: String): Boolean {
+    suspend fun unlock(activity: ComponentActivity, title: String, subtitle: String): Boolean {
         if (!isOn(activity)) return true
         if (key != null) return true
         val stored = withContext(Dispatchers.IO) { AtomicFile(File(activity.filesDir, FILE)).readFully() }
@@ -77,11 +79,11 @@ object Vault {
         if (stored.size < 13 || buf.get() != VERSION) return false
         val iv = ByteArray(12).also { buf.get(it) }
         val wrapped = ByteArray(buf.remaining()).also { buf.get(it) }
-        val cipher = try {
-            Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, kek() ?: return false, GCMParameterSpec(128, iv)) }
-        } catch (e: KeyPermanentlyInvalidatedException) { return false }
-        val authed = prompt(activity, cipher, title, subtitle) ?: return false
-        val raw = try { authed.doFinal(wrapped) } catch (e: Exception) { return false }
+        val kek = kek() ?: return false
+        if (!confirm(activity, title, subtitle)) return false
+        val raw = try {
+            Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, kek, GCMParameterSpec(128, iv)) }.doFinal(wrapped)
+        } catch (e: KeyPermanentlyInvalidatedException) { return false } catch (e: Exception) { return false }
         key = SecretKeySpec(raw, "AES")
         raw.fill(0)
         openState.value = true
@@ -93,14 +95,14 @@ object Vault {
      * Turns locked storage on: a new hardware key (usable only after authentication), a new data key
      * wrapped by it, then every remembered file sealed. Plain files are removed once sealed.
      */
-    suspend fun enable(activity: Activity, title: String, subtitle: String): Boolean {
+    suspend fun enable(activity: ComponentActivity, title: String, subtitle: String): Boolean {
         if (isOn(activity) || !canUse(activity)) return false
         val kek = withContext(Dispatchers.Default) { newKek() } ?: return false
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, kek) }
-        val authed = prompt(activity, cipher, title, subtitle) ?: return false
+        if (!confirm(activity, title, subtitle)) return false
         val raw = ByteArray(32).also(SecureRandom()::nextBytes)
-        val wrapped = try { authed.doFinal(raw) } catch (e: Exception) { return false }
-        val iv = authed.iv
+        val cipher = try { Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, kek) } } catch (e: Exception) { return false }
+        val wrapped = try { cipher.doFinal(raw) } catch (e: Exception) { return false }
+        val iv = cipher.iv
         key = SecretKeySpec(raw, "AES")
         raw.fill(0)
         withContext(Dispatchers.IO) {
@@ -115,7 +117,7 @@ object Vault {
     }
 
     /** Turns locked storage off (it must be unlocked): everything back to plain files, the keys removed. */
-    suspend fun disable(activity: Activity): Boolean {
+    suspend fun disable(activity: ComponentActivity): Boolean {
         if (!isOn(activity)) return true
         if (key == null) return false
         withContext(Dispatchers.IO) {
@@ -141,9 +143,9 @@ object Vault {
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            // Every use needs a fresh fingerprint, face or screen lock
+            // Usable only within seconds of the owner confirming on the phone's lock screen
             .setUserAuthenticationRequired(true)
-            .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL)
+            .setUserAuthenticationParameters(AUTH_SECONDS, KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL)
             // A new fingerprint added later must not make the storage unreadable
             .setInvalidatedByBiometricEnrollment(false)
             .setIsStrongBoxBacked(strongBox)
@@ -156,18 +158,22 @@ object Vault {
         return null
     }
 
-    /** The system's own prompt (fingerprint, face or screen lock); the cipher comes back ready to use. */
-    private suspend fun prompt(activity: Activity, cipher: Cipher, title: String, subtitle: String): Cipher? = suspendCancellableCoroutine { cont ->
-        val cancel = CancellationSignal()
-        cont.invokeOnCancellation { cancel.cancel() }
-        val prompt = BiometricPrompt.Builder(activity).setTitle(title).setSubtitle(subtitle)
-            .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL).build()
-        try {
-            prompt.authenticate(BiometricPrompt.CryptoObject(cipher), cancel, activity.mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { if (cont.isActive) cont.resume(result.cryptoObject?.cipher) }
-                override fun onAuthenticationError(code: Int, message: CharSequence) { if (cont.isActive) cont.resume(null) }
-            })
-        } catch (e: Exception) { if (cont.isActive) cont.resume(null) }
+    private const val AUTH_SECONDS = 15
+
+    /** The phone's own lock screen asks for the owner (PIN, pattern, password, fingerprint or face). */
+    private suspend fun confirm(activity: ComponentActivity, title: String, subtitle: String): Boolean = suspendCancellableCoroutine { cont ->
+        val intent: Intent? = activity.getSystemService(KeyguardManager::class.java)?.let {
+            @Suppress("DEPRECATION") it.createConfirmDeviceCredentialIntent(title, subtitle)
+        }
+        if (intent == null) { cont.resume(false); return@suspendCancellableCoroutine }
+        val self = arrayOfNulls<ActivityResultLauncher<Intent>>(1)
+        val launcher = activity.activityResultRegistry.register("vault-" + System.nanoTime(), ActivityResultContracts.StartActivityForResult()) { r ->
+            self[0]?.unregister()
+            if (cont.isActive) cont.resume(r.resultCode == Activity.RESULT_OK)
+        }
+        self[0] = launcher
+        cont.invokeOnCancellation { launcher.unregister() }
+        try { launcher.launch(intent) } catch (e: Exception) { launcher.unregister(); if (cont.isActive) cont.resume(false) }
     }
 
     /** Reads a small file, sealed or plain (whichever is there). */

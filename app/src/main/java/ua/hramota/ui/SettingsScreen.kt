@@ -49,6 +49,10 @@ fun SettingsScreen(
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onClearRecent: () -> Unit,
     onBack: () -> Unit,
+    /** Locked storage: on, possible on this phone (a screen lock is set), and turning it on or off. */
+    vault: Boolean = false,
+    vaultPossible: Boolean = true,
+    onVault: (Boolean) -> Unit = {},
 ) {
     var licenses by rememberSaveable { mutableStateOf(false) }
     var cleared by rememberSaveable { mutableStateOf(false) }
@@ -93,6 +97,11 @@ fun SettingsScreen(
             Section(stringResource(R.string.settings_privacy))
             Toggle(stringResource(R.string.settings_remember), stringResource(R.string.settings_remember_hint), settings.rememberRecent) { v -> onChange { it.copy(rememberRecent = v) } }
             Toggle(stringResource(R.string.settings_secure), stringResource(R.string.settings_secure_hint), settings.secureScreen) { v -> onChange { it.copy(secureScreen = v) } }
+            Toggle(
+                stringResource(R.string.vault_title),
+                stringResource(if (vaultPossible || vault) R.string.vault_hint else R.string.vault_no_lock),
+                vault, enabled = vaultPossible || vault,
+            ) { v -> onVault(v) }
             Row(Modifier.fillMaxWidth().clickable { onClearRecent(); cleared = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
                 Text(
                     stringResource(if (cleared) R.string.settings_cleared else R.string.settings_clear),

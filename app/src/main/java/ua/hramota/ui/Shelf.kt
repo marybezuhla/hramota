@@ -269,7 +269,7 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
     val context = LocalContext.current
     val cover by produceState<ImageBitmap?>(null, e.id) {
         value = withContext(Dispatchers.IO) {
-            File(Library.coversDir(context), "${e.id}.png").takeIf { it.exists() }?.let { f -> BitmapFactory.decodeFile(f.path)?.asImageBitmap() }
+            ua.hramota.data.Shelf.loadCover(context, e.id)?.asImageBitmap()
         }
     }
     BoxWithConstraints(modifier.aspectRatio(0.72f)) {

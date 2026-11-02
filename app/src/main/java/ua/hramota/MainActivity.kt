@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
     private var compareFirst by mutableStateOf<Uri?>(null)
     private var comparing by mutableStateOf(false)
     private var showSettings by mutableStateOf(false)
+    // Locked storage: whether it is on (changes when turned on or off here), and a prompt under way
+    private var vaultOn by mutableStateOf(false)
+    private var unlocking = false
 
     // The system file picker: Hramota sees only the file chosen there
     private val pick = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> onPicked(uri) }
@@ -42,6 +45,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         recents = Recents(applicationContext)
+        vaultOn = ua.hramota.data.Vault.isOn(this)
         compareFirst = savedInstanceState?.getString(KEY_FIRST)?.let(Uri::parse)
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
         showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
@@ -49,6 +53,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val open by ua.hramota.data.Vault.unlocked.collectAsStateWithLifecycle()
+                    if (vaultOn && !open) { ua.hramota.ui.LockScreen { unlock() }; return@Surface }
                     val files by recents.files.collectAsStateWithLifecycle()
                     val library = ua.hramota.data.Library.get(applicationContext)
                     val known by library.entries.collectAsStateWithLifecycle()
@@ -62,6 +68,9 @@ class MainActivity : ComponentActivity() {
                         onChange = { Settings.get(this).update(it) },
                         onClearRecent = { recents.clear(); Bookmarks(applicationContext).clearAll(); ua.hramota.data.Library.get(applicationContext).clearAll() },
                         onBack = { showSettings = false },
+                        vault = vaultOn,
+                        vaultPossible = ua.hramota.data.Vault.canUse(this),
+                        onVault = { on -> setVault(on) },
                     ) else HomeScreen(
                         recents = files,
                         comparePrompt = when {
@@ -86,6 +95,36 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        vaultOn = ua.hramota.data.Vault.isOn(this)
+        // Coming back while locked: ask straight away
+        if (vaultOn && ua.hramota.data.Vault.key() == null) unlock()
+    }
+
+    private fun unlock() {
+        if (unlocking) return
+        unlocking = true
+        lifecycleScope.launch {
+            try {
+                if (ua.hramota.data.Vault.unlock(this@MainActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))) recents.reload()
+            } finally { unlocking = false }
+        }
+    }
+
+    /** Turns locked storage on or off; everything kept is sealed or opened again, then a word on how it went. */
+    private fun setVault(on: Boolean) {
+        lifecycleScope.launch {
+            val ok = try {
+                if (on) ua.hramota.data.Vault.enable(this@MainActivity, getString(R.string.vault_title), getString(R.string.unlock_subtitle))
+                else ua.hramota.data.Vault.disable(this@MainActivity)
+            } catch (e: Exception) { false }
+            vaultOn = ua.hramota.data.Vault.isOn(this@MainActivity)
+            recents.reload()
+            android.widget.Toast.makeText(this@MainActivity, getString(if (!ok) R.string.vault_failed else if (on) R.string.vault_on_done else R.string.vault_off_done), android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
@@ -132,8 +171,12 @@ class MainActivity : ComponentActivity() {
 
     /** A shelf document: its copy inside Hramota if there is one, else where it was opened from. */
     private fun openShelf(e: ua.hramota.data.LibraryEntry) {
-        val uri = e.copy?.let { ua.hramota.data.Shelf.copyUri(this, it) } ?: e.uri?.let(Uri::parse) ?: return
-        openViewer(uri, e.title)
+        // A sealed copy is opened into a private temporary file first, off the main thread
+        lifecycleScope.launch {
+            val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { e.copy?.let { ua.hramota.data.Shelf.copyUri(this@MainActivity, it, e.title) } }
+                ?: e.uri?.let(Uri::parse) ?: return@launch
+            openViewer(uri, e.title)
+        }
     }
 
     private fun shelfAction(e: ua.hramota.data.LibraryEntry, a: ua.hramota.ui.ShelfAction) {

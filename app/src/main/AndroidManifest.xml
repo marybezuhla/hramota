@@ -16,6 +16,7 @@
     </queries>
 
     <application
+        android:name=".HramotaApp"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
