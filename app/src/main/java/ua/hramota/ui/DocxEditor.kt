@@ -135,7 +135,7 @@ class EditorState(val edit: DocxEdit) {
     /** Puts the cursor where a comment begins. */
     fun goToComment(id: String) {
         val (place, _) = edit.commentPlace(paras, id) ?: return
-        paras.getOrNull(place.first)?.let { moveTo = it.key to place.second }
+        paras.getOrNull(place.first)?.takeIf { it.editable }?.let { moveTo = it.key to place.second }
     }
 
     private fun commit(list: List<EditPara>, typingIn: Long? = null, structure: Boolean = false) {
@@ -181,6 +181,9 @@ class EditorState(val edit: DocxEdit) {
         while (pre < old.length && pre < text.length && old[pre] == text[pre]) pre++
         var suf = 0
         while (suf < old.length - pre && suf < text.length - pre && old[old.length - 1 - suf] == text[text.length - 1 - suf]) suf++
+        // The change's edges never split a character made of two halves (emoji and the like)
+        if (pre > 0 && pre < old.length && old[pre - 1].isHighSurrogate()) pre--
+        if (suf > 0 && old.length - suf < old.length && old[old.length - suf].isLowSurrogate() && old.length - suf > pre) suf--
         val inserted = text.length - pre - suf
         val style = pending ?: p.marks.getOrNull(pre - 1) ?: p.marks.getOrNull(pre) ?: p.typing
         val marks = ArrayList<RunStyle>(text.length)
@@ -511,7 +514,7 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
                 KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind)
                 Tool("•", stringResource(R.string.edit_bullets), active, shown?.list == ListKind.BULLET) { state.toggleList(ListKind.BULLET) }
                 Tool("1.", stringResource(R.string.edit_numbers), active, shown?.list == ListKind.NUMBER) { state.toggleList(ListKind.NUMBER) }
-                Tool("💬", stringResource(R.string.comment_add), active, onClick = onComment)
+                Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
             }
         }
     }

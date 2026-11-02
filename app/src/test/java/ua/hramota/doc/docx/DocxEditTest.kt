@@ -150,6 +150,13 @@ class DocxEditTest {
         assertEquals(setOf("Може, п'ять?", "Уточнити.", "Або готівкою?", "Новий коментар\nдругий рядок"), again.comments().map { it.text }.toSet())
         assertEquals("Оплата", again.commentPlace(again.paragraphs, again.comments().first { it.author == "Тест" }.id)!!.second)
         assertFalse(String(part(saved, "word/comments.xml")!!).contains("Перевірити з юристом"))
+        // A comment on a point at the end, then Enter there: the comment stays whole in the first part
+        val q = again.paragraphs.indexOfFirst { it.text.startsWith("Оплата") }
+        val point = again.comment(again.paragraphs[q], again.paragraphs[q].text.length, again.paragraphs[q].text.length, "", "Точка")
+        val (first, second) = again.split(point, point.text.length)
+        assertTrue(second.anchors.isEmpty())
+        val pid = again.comments().first { it.text == "Точка" }.id
+        assertEquals(3, first.anchors.count { it.comment == pid })
         // A comment added to a document that had none brings its own part
         val plain = DocxEdit.open(ByteArrayInputStream(bytes("02-paragraphs.docx")))
         val l2 = plain.paragraphs.toMutableList()
