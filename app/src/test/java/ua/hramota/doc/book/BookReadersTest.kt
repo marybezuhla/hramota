@@ -129,4 +129,28 @@ class BookReadersTest {
         val book = Fb2Reader.read(ByteArrayInputStream(bomb.toByteArray()))
         assertEquals("Безпечно", (book.blocks.single() as BookBlock.Text).text)
     }
+
+    /** The ways round a first-bytes check: a long comment first, or the file in UTF-16. */
+    @Test fun refusesEntitiesHoweverHidden() {
+        val body = """<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body><section><p>&a;</p></section></body></FictionBook>"""
+        val decl = """<!DOCTYPE FictionBook [<!ENTITY a "aaaaaaaaaa">]>"""
+        val longComment = "<?xml version=\"1.0\"?><!--" + "x".repeat(10_000) + "-->" + decl + body
+        assertTrue(runCatching { Fb2Reader.read(ByteArrayInputStream(longComment.toByteArray())) }.isFailure)
+        val utf16 = ("<?xml version=\"1.0\" encoding=\"UTF-16\"?>" + decl + body).toByteArray(Charsets.UTF_16LE)
+        assertTrue(runCatching { Fb2Reader.read(ByteArrayInputStream(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + utf16)) }.isFailure)
+    }
+
+    @Test fun oddLinksAndNamedLetters() {
+        assertEquals("a b.png", decodePath("a%20b.png"))
+        assertEquals("a+b%zz%", decodePath("a+b%zz%"))
+        assertEquals("Ґанок.xhtml", decodePath("%D2%90%D0%B0%D0%BD%D0%BE%D0%BA.xhtml"))
+        val fb2 = """<?xml version="1.0"?><FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body><section><p>Caf&eacute; &amp; cr&egrave;me</p>
+<poem><stanza><v>Один</v></stanza><stanza><v>Два</v></stanza></poem></section></body></FictionBook>"""
+        val book = Fb2Reader.read(ByteArrayInputStream(fb2.toByteArray()))
+        val texts = book.blocks.filterIsInstance<BookBlock.Text>()
+        assertEquals("Café & crème", texts.first().text)
+        // A space between stanzas
+        val one = texts.indexOfFirst { it.text == "Один" }
+        assertEquals(BookBlock.Kind.BREAK, texts[one + 1].kind)
+    }
 }
