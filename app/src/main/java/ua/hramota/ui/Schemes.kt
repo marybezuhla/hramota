@@ -82,7 +82,7 @@ object Schemes {
         background = Color(0xFFFBF8F2), onBackground = Color(0xFF1C1B19),
         surface = Color(0xFFFBF8F2), onSurface = Color(0xFF1C1B19),
         surfaceVariant = Color(0xFFF0EBE1), onSurfaceVariant = Color(0xFF55524B),
-        surfaceContainer = Color(0xFFF4EFE6), outline = Color(0xFFCBC4B6), outlineVariant = Color(0xFFE2DCD0),
+        surfaceContainer = Color(0xFFF4EFE6), outline = Color(0xFF8C8577), outlineVariant = Color(0xFFE2DCD0),
     )
     private val LON_NIGHT = darkColorScheme(
         primary = Color(0xFFAEBFEE), onPrimary = Color(0xFF0E2547),
@@ -92,7 +92,7 @@ object Schemes {
         background = Color(0xFF15181D), onBackground = Color(0xFFE6E2DA),
         surface = Color(0xFF15181D), onSurface = Color(0xFFE6E2DA),
         surfaceVariant = Color(0xFF242830), onSurfaceVariant = Color(0xFFB9B4AA),
-        surfaceContainer = Color(0xFF1D2026), outline = Color(0xFF4A4F58), outlineVariant = Color(0xFF30343B),
+        surfaceContainer = Color(0xFF1D2026), outline = Color(0xFF6B717B), outlineVariant = Color(0xFF30343B),
     )
 
     // The colours of the Pysanka keyboard's stylesheets: primary, on-primary, secondary; the page, cards, bars, lines; text and quieter text
