@@ -242,4 +242,11 @@
     <string name="dict_not_found">У ваших словниках не знайдено</string>
     <string name="notes_count">Нотатки (%1$d)</string>
     <string name="page_n">Сторінка %1$d</string>
+    <string name="pdf_save_notes">Зберегти нотатки в PDF</string>
+    <string name="pdf_save_notes_hint">Маркери й нотатки стануть примітками, які бачать і інші програми для PDF. У цей файл — змінюється сам файл. Копією — оригінал лишається як був.</string>
+    <string name="pdf_into_file">У цей файл</string>
+    <string name="pdf_as_copy">Копією…</string>
+    <string name="pdf_with_notes_suffix">(з нотатками)</string>
+    <string name="pdf_notes_saved">Нотатки збережено в PDF</string>
+    <string name="pdf_notes_not_saved">Не вдалося записати в цей файл; спробуйте «Копією»</string>
 </resources>

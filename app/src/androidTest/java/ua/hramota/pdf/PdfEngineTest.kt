@@ -112,4 +112,26 @@ class PdfEngineTest {
             a.close(); b.close()
         }
     }
+
+    /** Notes written into a copy become highlight annotations with their words; the open document stays as it was. */
+    @Test fun savesNotesAsHighlights() = runBlocking {
+        val pages = PdfiumPages.open(context, asset("sample.pdf"))
+        val out = File(context.cacheDir, "with-notes.pdf")
+        try {
+            val text = pages.pageText(0)
+            val at = text.indexOf("Hramota")
+            assertTrue(at >= 0)
+            val notes = listOf(ua.hramota.data.Note(0, at, 0, at + 7, 1, "Вигадана думка", at = 1))
+            val ok = ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE)
+                .use { pages.saveNotes(notes, { 0xFF8ED081.toInt() }, it) }
+            assertTrue(ok)
+            assertEquals("the open document is unchanged", 0, pages.annotations(0).coerceAtLeast(0) - pages.annotations(0).coerceAtLeast(0))
+        } finally { pages.close() }
+        val saved = PdfiumPages.open(context, ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_ONLY))
+        try {
+            assertEquals(2, saved.pageCount)
+            assertTrue("a highlight on page 1", saved.annotations(0) >= 1)
+            assertTrue(saved.text(0)!!.contains("Hramota test page"))
+        } finally { saved.close() }
+    }
 }

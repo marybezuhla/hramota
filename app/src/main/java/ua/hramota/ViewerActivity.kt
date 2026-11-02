@@ -71,6 +71,8 @@ class ViewerActivity : ComponentActivity() {
         var startPosition by mutableIntStateOf(0)
         // Taking the copy out of Hramota deletes it: asked first
         var confirmDrop by mutableStateOf<String?>(null)
+        // A PDF whose notes are being written into a file: into this one, or a copy
+        var savingNotes by mutableStateOf<PdfiumPages?>(null)
 
         applySecureScreen()
         setContent {
@@ -97,6 +99,7 @@ class ViewerActivity : ComponentActivity() {
                             }
                             startPosition = library.get(id)?.position ?: 0
                             docId = id
+                            currentId = id
                         }
                         try {
                         value = withContext(Dispatchers.IO) {
@@ -170,6 +173,32 @@ class ViewerActivity : ComponentActivity() {
                     DisposableEffect(state) {
                         onDispose { ((state as? ViewerState.Paged)?.pages as? java.io.Closeable)?.close() }
                     }
+                    savingNotes?.let { pdf ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { savingNotes = null },
+                            title = { androidx.compose.material3.Text(getString(R.string.pdf_save_notes)) },
+                            text = { androidx.compose.material3.Text(getString(R.string.pdf_save_notes_hint)) },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    savingNotes = null
+                                    docId?.let { id ->
+                                        lifecycleScope.launch {
+                                            val newId = withContext(Dispatchers.IO) { saveNotesInto(pdf, uri, id) }
+                                            if (newId != null) { docId = newId; currentId = newId }
+                                            android.widget.Toast.makeText(this@ViewerActivity, getString(if (newId != null) R.string.pdf_notes_saved else R.string.pdf_notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }) { androidx.compose.material3.Text(getString(R.string.pdf_into_file)) }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    savingNotes = null
+                                    pendingCopy = pdf
+                                    saveCopy.launch(name.substringBeforeLast('.', name) + " " + getString(R.string.pdf_with_notes_suffix) + ".pdf")
+                                }) { androidx.compose.material3.Text(getString(R.string.pdf_as_copy)) }
+                            },
+                        )
+                    }
                     confirmDrop?.let { id ->
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { confirmDrop = null },
@@ -204,6 +233,10 @@ class ViewerActivity : ComponentActivity() {
                                     Unit
                                 } else if (!ownCopy) getString(R.string.shelf_drop_copy) to { confirmDrop = id; Unit } else null,
                                 // Notes as text, sent where the person chooses
+                                // A PDF's notes written into the file itself (or a copy), for other apps to see
+                                ((state as? ViewerState.Paged)?.pages as? PdfiumPages)?.takeIf { e?.notes?.isNotEmpty() == true }?.let { pdf ->
+                                    getString(R.string.pdf_save_notes) to { savingNotes = pdf; Unit }
+                                },
                                 (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
                                     getString(R.string.notes_export) to {
                                         // Kept within what one message between apps can carry
@@ -254,6 +287,75 @@ class ViewerActivity : ComponentActivity() {
      * PDF through PDFium in an isolated process. Only if that process cannot start at all does it
      * fall back to the phone's own PDF engine; a file that crashes the engine is never retried here.
      */
+    // The PDF waiting for the place of its copy with notes
+    private var pendingCopy: PdfiumPages? = null
+    private val saveCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/pdf")) { target ->
+        val pdf = pendingCopy ?: return@registerForActivityResult
+        pendingCopy = null
+        if (target == null) return@registerForActivityResult
+        val id = currentId ?: return@registerForActivityResult
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val notes = Library.get(applicationContext).get(id)?.notes.orEmpty()
+                    contentResolver.openFileDescriptor(target, "wt")?.use { pdf.saveNotes(notes, ::noteArgb, it) } == true
+                } catch (e: Exception) { false }
+            }
+            if (!ok) try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+            android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.pdf_notes_saved else R.string.pdf_notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+    private var currentId: String? = null
+
+    /**
+     * Writes the notes into the PDF itself: the engine writes a copy with them to a private file, which
+     * then replaces the file's content. The document now has other content, so its memory moves to the
+     * new fingerprint, without the notes (they are in the file now, shown by any PDF app).
+     */
+    private suspend fun saveNotesInto(pdf: PdfiumPages, uri: android.net.Uri, id: String): String? {
+        val library = Library.get(applicationContext)
+        val entry = library.get(id) ?: return null
+        val temp = java.io.File(cacheDir, "notes-${System.nanoTime()}.pdf")
+        try {
+            val written = android.os.ParcelFileDescriptor.open(temp, android.os.ParcelFileDescriptor.MODE_READ_WRITE or android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_TRUNCATE)
+                .use { pdf.saveNotes(entry.notes, ::noteArgb, it) }
+            if (!written || temp.length() == 0L) return null
+            // A kept copy (possibly sealed) is replaced in Hramota's storage; another file through its app
+            val copy = entry.copy?.let { java.io.File(it) }
+            if (ua.hramota.data.Shelf.isOwn(this, uri) && copy != null) {
+                val key = ua.hramota.data.Vault.key()
+                if (copy.name.endsWith(ua.hramota.data.Vault.SUFFIX)) {
+                    if (key == null) return null
+                    val part = java.io.File(copy.path + ".part")
+                    temp.inputStream().buffered().use { input -> part.outputStream().buffered().use { ua.hramota.data.Sealed.seal(key, input, it, copy.name.removeSuffix(ua.hramota.data.Vault.SUFFIX)) } }
+                    if (!part.renameTo(copy)) { part.delete(); return null }
+                } else {
+                    val part = java.io.File(copy.path + ".part")
+                    temp.copyTo(part, overwrite = true)
+                    if (!part.renameTo(copy)) { part.delete(); return null }
+                }
+            } else {
+                contentResolver.openOutputStream(uri, "wt")?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
+            }
+            val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return null
+            library.update(newId) { entry.copy(id = newId, notes = emptyList()) }
+            if (newId != id) library.update(id) { null }
+            // The cover goes with the document
+            java.io.File(Library.coversDir(this), "$id.png").takeIf { it.exists() }?.renameTo(java.io.File(Library.coversDir(this), "$newId.png"))
+            java.io.File(Library.coversDir(this), "$id.png${ua.hramota.data.Vault.SUFFIX}").takeIf { it.exists() }?.let { it.delete() }
+            return newId
+        } catch (e: Exception) {
+            return null
+        } finally {
+            temp.delete()
+        }
+    }
+
+    private fun noteArgb(color: Int): Int {
+        val c = ua.hramota.ui.NOTE_COLORS[color.coerceIn(0, ua.hramota.ui.NOTE_COLORS.size - 1)]
+        return android.graphics.Color.argb(255, (c.red * 255).toInt(), (c.green * 255).toInt(), (c.blue * 255).toInt())
+    }
+
     private suspend fun openPdf(uri: android.net.Uri, onOpen: (java.io.Closeable) -> Unit): ViewerState {
         val fd = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
         return try {

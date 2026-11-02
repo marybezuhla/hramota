@@ -186,6 +186,28 @@ class PdfiumPages private constructor(
         }
     }
 
+    /**
+     * Writes a copy of the PDF with [notes] as highlight annotations (their words as the comment) to
+     * [out]. The engine does the writing in its own process; the open document is not changed.
+     */
+    suspend fun saveNotes(notes: List<ua.hramota.data.Note>, colors: (Int) -> Int, out: android.os.ParcelFileDescriptor): Boolean = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (closed || engineDied) return@withLock false
+            // Notes on pages only (one page each), longest call allowed for a big file
+            val list = notes.filter { it.block == it.endBlock && it.end > it.start }.take(5000)
+            call(PdfEngineService.SAVE_NOTES, { d ->
+                d.writeFileDescriptor(out.fileDescriptor)
+                d.writeInt(list.size)
+                for (n in list) { d.writeInt(n.block); d.writeInt(n.start); d.writeInt(n.end - n.start); d.writeInt(colors(n.color)); d.writeString(n.text.ifEmpty { null }) }
+            }) { it.readInt() } == PdfEngineService.R_OK
+        }
+    }
+
+    /** How many annotations a page has (for tests). */
+    suspend fun annotations(index: Int): Int = withContext(Dispatchers.IO) {
+        lock.withLock { if (closed) -1 else call(PdfEngineService.ANNOTS, { it.writeInt(index) }) { it.readInt() } ?: -1 }
+    }
+
     override suspend fun charAt(index: Int, x: Float, y: Float): Int = withContext(Dispatchers.IO) {
         lock.withLock {
             if (closed || index !in 0 until pageCount) return@withLock -1
