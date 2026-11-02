@@ -244,13 +244,16 @@ class Library private constructor(private val context: Context) {
         return json.toString().toByteArray()
     }
 
-    private fun write(map: Map<String, LibraryEntry>) = writeBytes(serialize(map))
+    private fun write(map: Map<String, LibraryEntry>) { writeBytes(serialize(map)) }
 
-    private fun writeBytes(bytes: ByteArray) {
-        if (Vault.isOn(context) && !loadedSealed) return
-        if (Vault.locked(context)) return
-        try { Vault.writeSmall(context, "library.json", bytes) } catch (_: Exception) {}
+    private fun writeBytes(bytes: ByteArray): Boolean {
+        if (Vault.isOn(context) && !loadedSealed) return false
+        if (Vault.locked(context)) return false
+        return try { Vault.writeSmall(context, "library.json", bytes); true } catch (_: Exception) { false }
     }
+
+    /** Writes the memory now and says whether it is on disk (before something older is let go). Off the main thread. */
+    fun saveNow(): Boolean = synchronized(this) { writeBytes(serialize(state.value)) }
 
     /** Seals every remembered file (locked storage turned on, unlocked): memory, shelves, covers, copies, recents. */
     fun sealAll() = convert(seal = true)

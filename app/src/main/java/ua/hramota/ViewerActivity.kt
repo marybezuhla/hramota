@@ -99,7 +99,8 @@ class ViewerActivity : ComponentActivity() {
                                 }
                             }
                             // Bookmarks kept by address before are now kept with the document
-                            if (oldMarks.isNotEmpty() && library.get(id) != null && !ua.hramota.data.Vault.locked(this@ViewerActivity)) old.remove(uri.toString())
+                            // The old bookmarks go only once the new memory holding them is surely on disk
+                            if (oldMarks.isNotEmpty() && library.get(id) != null && withContext(Dispatchers.IO) { library.saveNow() }) old.remove(uri.toString())
                             startPosition = library.get(id)?.position ?: 0
                             docId = id
                         }
