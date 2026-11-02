@@ -70,7 +70,11 @@ object Shelf {
         } catch (ex: Exception) { target.delete(); false }
     }
 
-    private fun coverFile(context: Context, id: String, sealed: Boolean) = File(Library.coversDir(context), "$id.png" + if (sealed) Vault.SUFFIX else "")
+    private fun coverFile(context: Context, id: String, sealed: Boolean): File {
+        // An id is a fingerprint; anything else could name a file outside the covers
+        require(id.none { it == '/' || it == '\\' } && ".." !in id) { "Bad id" }
+        return File(Library.coversDir(context), "$id.png" + if (sealed) Vault.SUFFIX else "")
+    }
 
     fun hasCover(context: Context, id: String) = coverFile(context, id, false).exists() || coverFile(context, id, true).exists()
 

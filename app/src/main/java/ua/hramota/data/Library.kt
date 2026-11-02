@@ -203,7 +203,8 @@ class Library private constructor(private val context: Context) {
     )
 
     internal fun entry(o: JSONObject): LibraryEntry? {
-        val id = o.optString("id").takeIf { it.isNotEmpty() } ?: return null
+        // Only a content fingerprint: the id names files, so nothing else may get in (from a backup, say)
+        val id = o.optString("id").takeIf { ID.matches(it) } ?: return null
         return LibraryEntry(
             id = id, title = o.optString("title"), format = o.optString("format"),
             uri = o.optString("uri").ifEmpty { null }, copy = o.optString("copy").ifEmpty { null },
@@ -229,17 +230,26 @@ class Library private constructor(private val context: Context) {
     private fun save(map: Map<String, LibraryEntry>) {
         if (pending.getAndSet(generation to map) == null) writer.execute {
             // Checked and written under the same lock a new reading takes: no old state slips in after it
-            pending.getAndSet(null)?.let { (gen, m) -> synchronized(this@Library) { if (gen == generation) write(m) } }
+            pending.getAndSet(null)?.let { (gen, m) ->
+                // The text is made outside the lock (page turns are not held up); only the write is inside
+                val bytes = serialize(m)
+                synchronized(this@Library) { if (gen == generation) writeBytes(bytes) }
+            }
         }
     }
 
-    private fun write(map: Map<String, LibraryEntry>) {
-        if (Vault.isOn(context) && !loadedSealed) return
-
+    private fun serialize(map: Map<String, LibraryEntry>): ByteArray {
         val json = JSONArray()
         for (e in map.values) json.put(toJson(e))
+        return json.toString().toByteArray()
+    }
+
+    private fun write(map: Map<String, LibraryEntry>) = writeBytes(serialize(map))
+
+    private fun writeBytes(bytes: ByteArray) {
+        if (Vault.isOn(context) && !loadedSealed) return
         if (Vault.locked(context)) return
-        try { Vault.writeSmall(context, "library.json", json.toString().toByteArray()) } catch (_: Exception) {}
+        try { Vault.writeSmall(context, "library.json", bytes) } catch (_: Exception) {}
     }
 
     /** Seals every remembered file (locked storage turned on, unlocked): memory, shelves, covers, copies, recents. */
@@ -271,6 +281,7 @@ class Library private constructor(private val context: Context) {
     companion object {
         const val MAX_BOOKMARKS = 1000
         const val MAX_NOTES = 5000
+        val ID = Regex("[0-9a-f]{32}")
         const val MAX_SHELVES = 200
         val STYLES = setOf("modern", "wood", "list")
         const val MAX_NOTE_TEXT = 10_000

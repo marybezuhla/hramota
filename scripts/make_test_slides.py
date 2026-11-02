@@ -12,6 +12,9 @@ from PIL import Image, ImageDraw
 out = os.path.join(os.path.dirname(__file__), "..", "app", "src", "test", "resources", "slides")
 os.makedirs(out, exist_ok=True)
 prs = Presentation()
+# No author from the library's template
+prs.core_properties.author = ""
+prs.core_properties.last_modified_by = ""
 prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
 
 s = prs.slides.add_slide(prs.slide_layouts[0])

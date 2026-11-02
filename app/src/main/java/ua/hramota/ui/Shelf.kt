@@ -111,6 +111,17 @@ fun Shelf(
     val current = shelves.firstOrNull { it.id == selected } ?: shelves.firstOrNull() ?: ShelfDef(ShelfDef.ALL, "")
     var editing by remember { mutableStateOf<ShelfDef?>(null) }
     var choosing by remember { mutableStateOf<LibraryEntry?>(null) }
+    // Both delete the copy kept in Hramota: asked first
+    var confirming by remember { mutableStateOf<Pair<LibraryEntry, ShelfAction>?>(null) }
+    confirming?.let { (e, a) ->
+        val title = e.title.substringBeforeLast('.', e.title)
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            text = { Text(stringResource(if (a == ShelfAction.FORGET) R.string.forget_confirm else R.string.drop_confirm, title)) },
+            confirmButton = { TextButton(onClick = { confirming = null; onAction(e, a) }) { Text(stringResource(if (a == ShelfAction.FORGET) R.string.forget_go else R.string.drop_go), color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { confirming = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
     Column(modifier) {
         // The shelves, as tabs with their colours; the selected one opens its settings on a second tap
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -144,8 +155,8 @@ fun Shelf(
         val shown = if (current.id == ShelfDef.ALL) entries else entries.filter { current.id in it.shelves }
         val menu: @Composable (LibraryEntry, () -> Unit) -> Unit = { e, close ->
             DropdownMenuItem(text = { Text(stringResource(R.string.shelf_choose)) }, onClick = { close(); choosing = e })
-            DropdownMenuItem(text = { Text(stringResource(R.string.shelf_drop_copy)) }, onClick = { close(); onAction(e, ShelfAction.DROP_COPY) })
-            DropdownMenuItem(text = { Text(stringResource(R.string.shelf_forget)) }, onClick = { close(); onAction(e, ShelfAction.FORGET) })
+            DropdownMenuItem(text = { Text(stringResource(R.string.shelf_drop_copy)) }, onClick = { close(); confirming = e to ShelfAction.DROP_COPY })
+            DropdownMenuItem(text = { Text(stringResource(R.string.shelf_forget)) }, onClick = { close(); confirming = e to ShelfAction.FORGET })
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (shown.isEmpty()) Text(

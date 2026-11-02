@@ -54,9 +54,11 @@ class ViewerActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val uri = intent.data
-        if (uri == null) { finish(); return }
-        // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
+        // Only documents handed over by address (content://); Hramota's own copies only when Hramota itself asks
+        if (uri == null || uri.scheme != "content") { finish(); return }
         val ownCopy = uri.authority == "$packageName.files"
+        if (ownCopy && intent.getStringExtra(EXTRA_TOKEN) != TOKEN) { finish(); return }
+        // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
         val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
         labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
@@ -77,8 +79,10 @@ class ViewerActivity : ComponentActivity() {
                         // An open PDF is closed if the window goes away before it is shown
                         var opened: java.io.Closeable? = null
                         // Locked storage closed: ask once; if declined, the file still opens, only nothing is remembered
-                        if (ua.hramota.data.Vault.locked(this@ViewerActivity))
-                            ua.hramota.data.Vault.unlock(this@ViewerActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))
+                        if (ua.hramota.data.Vault.locked(this@ViewerActivity)) {
+                            asking = true
+                            try { ua.hramota.data.Vault.unlock(this@ViewerActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle)) } finally { asking = false }
+                        }
                         // The temporary copy of a sealed document is removed when this window goes
                         withContext(Dispatchers.IO) { Library.fingerprint(this@ViewerActivity, uri) }?.let { id ->
                             val old = Bookmarks(applicationContext)
@@ -92,7 +96,7 @@ class ViewerActivity : ComponentActivity() {
                                 }
                             }
                             // Bookmarks kept by address before are now kept with the document
-                            if (oldMarks.isNotEmpty()) old.remove(uri.toString())
+                            if (oldMarks.isNotEmpty() && library.get(id) != null && !ua.hramota.data.Vault.locked(this@ViewerActivity)) old.remove(uri.toString())
                             startPosition = library.get(id)?.position ?: 0
                             docId = id
                         }
@@ -151,7 +155,8 @@ class ViewerActivity : ComponentActivity() {
                             if (e.copy == null && !ownCopy) library.get(id)?.let { ua.hramota.data.Shelf.keepCopy(this@ViewerActivity, it) }
                             if (!ua.hramota.data.Shelf.hasCover(applicationContext, id)) {
                                 val bytes = book.cover?.let { book.images[it] } ?: book.blocks.firstNotNullOfOrNull { (it as? ua.hramota.doc.book.BookBlock.Image)?.key?.let(book.images::get) }
-                                bytes?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleFor(b, 480) }) }
+                                // Decoded within limits (a picture can be built to exhaust memory)
+                                bytes?.let { b -> ua.hramota.ui.decodeFitting(b, 480)?.asAndroidBitmap() }
                                     ?.let { ua.hramota.data.Shelf.saveCover(applicationContext, id, it) }
                             }
                         }
@@ -271,10 +276,21 @@ class ViewerActivity : ComponentActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
+    private var asking = false
+    private var startedOnce = false
+
     override fun onStart() {
         super.onStart()
         // A copy kept under lock is not left on screen once Hramota has locked again
-        if (intent.data?.authority == "$packageName.files" && ua.hramota.data.Vault.locked(this)) finishAndRemoveTask()
+        if (intent.data?.authority == "$packageName.files" && ua.hramota.data.Vault.locked(this)) { finishAndRemoveTask(); return }
+        // Another document, after Hramota locked: ask again, so bookmarks and notes are not lost unseen
+        if (!startedOnce) { startedOnce = true; return }
+        if (ua.hramota.data.Vault.locked(this) && !asking) {
+            asking = true
+            lifecycleScope.launch {
+                try { ua.hramota.data.Vault.unlock(this@ViewerActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle)) } finally { asking = false }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -287,14 +303,9 @@ class ViewerActivity : ComponentActivity() {
     companion object {
         /** The document's name, for a copy kept inside Hramota (whose file is named by its fingerprint). */
         const val EXTRA_NAME = "ua.hramota.NAME"
+        const val EXTRA_TOKEN = "ua.hramota.TOKEN"
+        /** Known only inside this process: proves an own copy was opened by Hramota, not by another app. */
+        val TOKEN: String = java.util.UUID.randomUUID().toString()
     }
 }
 
-/** How much to shrink a picture when decoding so its width is about [width] pixels. */
-private fun sampleFor(bytes: ByteArray, width: Int): Int {
-    val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
-    var s = 1
-    while (o.outWidth / (s * 2) >= width) s *= 2
-    return s
-}

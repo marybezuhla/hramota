@@ -17,7 +17,7 @@
     <string name="back">Back</string>
     <string name="open_failed">This file could not be opened. It may be damaged, or access to it has expired.</string>
     <string name="unsupported_title">This format is not supported yet</string>
-    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, CSV, TXT and Markdown.</string>
+    <string name="unsupported_body">%1$s files will be added soon. For now Hramota opens PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, EPUB, FB2, ODT, CSV, TXT and Markdown.</string>
     <string name="simplified_note">Simplified view: text only. Exact page layout is coming.</string>
     <string name="mode_reading">Text</string>
     <string name="mode_pages">Pages</string>
@@ -112,7 +112,7 @@
     <string name="settings_remember_hint">Only on this phone. Turned off, new files are not added</string>
     <string name="settings_secure">Hide from screenshots</string>
     <string name="settings_secure_hint">Screenshots, screen recording and the recent-apps preview show nothing</string>
-    <string name="settings_clear">Forget all documents: recent files, bookmarks, reading places</string>
+    <string name="settings_clear">Forget all documents and delete the copies kept in Hramota</string>
     <string name="settings_cleared">Cleared</string>
     <string name="settings_about">About</string>
     <string name="settings_version">Hramota %1$s</string>
@@ -216,4 +216,10 @@
     <string name="backup_not_backup">This is not a Hramota backup</string>
     <string name="backup_no_space">Not enough room on the phone</string>
     <string name="backup_locked">Hramota locked meanwhile: unlock it and try again</string>
+    <string name="clear_confirm_title">Forget all documents?</string>
+    <string name="clear_confirm">Hramota will forget the recent list, bookmarks, notes, reading places and shelves, and delete the documents kept in it with their covers. Documents in other places on the phone are not touched.</string>
+    <string name="forget_confirm">Forget “%1$s”? Its bookmarks, notes and place are forgotten, and the copy kept in Hramota is deleted.</string>
+    <string name="drop_confirm">Remove “%1$s” from Hramota? The copy kept in Hramota is deleted; bookmarks and notes stay remembered for the original file.</string>
+    <string name="forget_go">Forget</string>
+    <string name="drop_go">Remove</string>
 </resources>
