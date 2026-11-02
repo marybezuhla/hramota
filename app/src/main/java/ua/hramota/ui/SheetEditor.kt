@@ -74,6 +74,8 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     private val redoStack = ArrayList<Step>()
 
     fun content(sheet: Int, row: Int, col: Int): String {
+        // Rows are being moved (the workbook is held meanwhile): the screen does not wait for it
+        if (busy) return ""
         val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return ""
         return edit.content(CellKey(s, row, col))
     }
@@ -82,7 +84,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     fun commit(sheet: Int, row: Int, col: Int, typed: String): Boolean {
         val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return false
         val key = CellKey(s, row, col)
-        if (edit.locked(key)) return false
+        if (busy || edit.locked(key)) return false
         // Typed exactly what is there: nothing to change
         if (typed == edit.content(key)) return true
         val shown = original.sheets[sheet]
@@ -101,7 +103,9 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         undoStack += step
         if (undoStack.size > 500) undoStack.removeAt(0)
         // Only the last few row changes can be undone: older steps go with them (they refer to rows as they were)
-        while (undoStack.count { it is RowStep } > MAX_ROW_STEPS) {
+        // A big workbook keeps fewer (each holds a copy of its sheets' text)
+        val most = if (edit.size > 8_000_000) 2 else MAX_ROW_STEPS
+        while (undoStack.count { it is RowStep } > most) {
             val first = undoStack.indexOfFirst { it is RowStep }
             repeat(first + 1) { undoStack.removeAt(0) }
         }
@@ -141,17 +145,18 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         val at = if (delete || !below) row else row + 1
         val n = if (delete) -1 else 1
         busy = true
-        try {
+        // Finished even when the screen goes meanwhile (turned): a half-done change would leave the shown rows behind the workbook
+        try { withContext(kotlinx.coroutines.NonCancellable) {
             val before = edit.snapshot()
             val shownBefore = original
             val refusal = try { withContext(Dispatchers.Default) { edit.moveRows(s, at, n) } }
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return }
-            if (refusal != null) { notice = refusalText(refusal); return }
+                catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
+            if (refusal != null) { notice = refusalText(refusal); return@withContext }
             original = withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) sh.withRowsMoved(at, n) else sh }, original.inspection) }
             push(RowStep(before, edit.snapshot(), shownBefore, original))
             changed()
-        } finally { busy = false }
+        } } finally { busy = false }
     }
 
     private fun refusalText(r: XlsxEdit.RowRefusal) = when (r) {
@@ -171,7 +176,8 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     /** Works the values out (off the main thread) and shows them. */
     suspend fun refresh() {
         // Formulas that cannot be worked out here (too deep a chain) keep their old values on screen
-        val values = try { withContext(Dispatchers.Default) { edit.recalc() } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { return }
+        // (the rows as they now are are still shown, with the values the file has)
+        val values = try { withContext(Dispatchers.Default) { edit.recalc() } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { emptyMap() }
         workbook = withContext(Dispatchers.Default) { shownWith(values) }
     }
 

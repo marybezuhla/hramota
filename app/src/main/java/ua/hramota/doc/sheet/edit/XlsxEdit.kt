@@ -264,7 +264,7 @@ class XlsxEdit private constructor(
                     else -> when (val i = inputs[k]) {
                         // A formula whose rows moved and that is not worked out here: its old value no longer holds (Excel works it out on opening)
                         null -> sheets.getOrNull(k.sheet)?.cell(k.row, k.col)?.let { raw ->
-                            if (k in l.forced && raw.f != null) { if (raw.f.contains("#REF!")) Value.REF else Value.NAME } else rawValue(raw)
+                            if (k in l.forced && raw.f?.contains("#REF!") == true) Value.REF else rawValue(raw)
                         } ?: Value.Empty
                         Input.Clear -> Value.Empty
                         is Input.Number -> Value.Num(i.v)
@@ -311,6 +311,9 @@ class XlsxEdit private constructor(
     enum class RowRefusal { WORKBOOK, SHEET, LOCKED, FORMULAS, FULL }
 
     private class Refused(val why: RowRefusal) : Exception()
+
+    /** About how much text the workbook's sheets hold (undo of row changes keeps copies of it). */
+    val size: Long get() = layout.sheets.sumOf { it.xml.length.toLong() }
 
     @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs))
 
@@ -369,6 +372,8 @@ class XlsxEdit private constructor(
                 newInputs[key] = if (i is Input.Formula) Input.Formula(Formula.moveRows(i.text, k.sheet == sheet, name, move) ?: throw Refused(RowRefusal.FORMULAS)) else i
             }
             layout = Layout(newSheets, wb, overrides, forced, true)
+            // The old parts stay only for undo: their worked-out lists are made again if needed
+            l.calc = null
             inputs.clear(); inputs.putAll(newInputs)
             parsedInputs.clear()
             for ((k, i) in inputs) if (i is Input.Formula) parsedInputs[k] = Formula.parse(i.text)
@@ -429,10 +434,16 @@ class XlsxEdit private constructor(
                     var edited = false
                     // Shared formulas: a group is written cell by cell when any of its cells changes (always on the target sheet)
                     val newText = HashMap<Long, String>()
+                    val textChanged = HashSet<Long>()
                     val unshare = HashSet<String>()
                     for ((k, c) in sh.cells) {
                         val f = c.f ?: continue
                         val t = moved(f, isTarget, target, move)
+                        if (t != f) {
+                            textChanged += k
+                            // A shared formula with whole rows is not moved cell by cell here
+                            if (c.fKind == "shared" && c.si in sh.lockedShared) throw Refused(RowRefusal.LOCKED)
+                        }
                         if (t != f || isTarget) { newText[k] = t; if (c.fKind == "shared" && c.si != null) unshare += c.si }
                     }
                     for ((k, c) in sh.cells) if (c.fKind == "shared" && c.si in unshare && k !in newText) newText[k] = c.f ?: continue
@@ -465,7 +476,8 @@ class XlsxEdit private constructor(
                                     val ctag = setAttr(x.substring(c.start, c.openEnd), "r", columnName(col) + (nr + 1))
                                     val text = newText[key(r, col)]
                                     if (raw?.fElem != null && text != null) {
-                                        changed += key(nr, col)
+                                        // Worked out again only where the formula itself changed (the rest keep their values)
+                                        if (key(r, col) in textChanged) changed += key(nr, col)
                                         b.append(ctag).append(x, c.openEnd, raw.fElem.start).append(newF(raw, text)).append(x, raw.fElem.end, c.end)
                                     } else b.append(ctag).append(x, c.openEnd, c.end)
                                 }
@@ -478,7 +490,7 @@ class XlsxEdit private constructor(
                 }
                 // Where the cells end: worked out again by Excel
                 isTarget && e.local == "dimension" -> ""
-                else -> rewriteElem(x, e, isTarget, target, move).let { if (it == x.substring(e.start, e.end)) null else it ?: "" }
+                else -> rewriteElem(x, e, isTarget, target, move, "worksheet", null).let { if (it == x.substring(e.start, e.end)) null else it ?: "" }
             }
             if (replaced != null) { any = true; out.append(x, pos, e.start).append(replaced); pos = e.end }
         }
@@ -488,8 +500,11 @@ class XlsxEdit private constructor(
     }
 
     /** An element outside the cells with rows moved; null when it is to go (nothing of it is left). */
-    private fun rewriteElem(x: String, e: Elem, isTarget: Boolean, target: String, move: Formula.RowMove): String? {
+    private fun rewriteElem(x: String, e: Elem, isTarget: Boolean, target: String, move: Formula.RowMove, parent: String, rebase: IntArray?): String? {
         var tag = x.substring(e.start, e.openEnd)
+        var base = rebase
+        // A link within the workbook ("'Дані'!A9") follows the rows too
+        if (e.local == "hyperlink") e.attrs["location"]?.let { loc -> tag = setAttr(tag, "location", Formula.moveRows(loc, false, target, move) ?: loc) }
         if (isTarget) {
             when (e.local) {
                 "mergeCell", "hyperlink", "autoFilter", "sortState", "sortCondition" -> {
@@ -497,36 +512,44 @@ class XlsxEdit private constructor(
                     if (ref != null) {
                         val m = movedAreas(ref, move) ?: return null
                         // A merge of one cell is no merge (Excel would call the file damaged)
-                        if (e.local == "mergeCell" && !m.contains(':')) return null
+                        if (e.local == "mergeCell" && area(m).let { it == null || (it[0] == it[2] && it[1] == it[3]) }) return null
                         tag = setAttr(tag, "ref", m)
                     }
                 }
                 "conditionalFormatting", "dataValidation", "protectedRange", "ignoredError" -> {
                     val ref = e.attrs["sqref"]
-                    if (ref != null) tag = setAttr(tag, "sqref", movedAreas(ref, move) ?: return null)
+                    if (ref != null) {
+                        tag = setAttr(tag, "sqref", movedAreas(ref, move) ?: return null)
+                        // Formulas here are written for the area's first cell: when its row goes, they are
+                        // written for the first row left first (as Excel does), then moved
+                        val top = ref.trim().split(Regex("\\s+")).firstOrNull()?.let(::area)?.get(0)
+                        if (top != null && move.n < 0 && move.row(top) == null) base = intArrayOf(top, move.at - move.n)
+                    }
                 }
                 // Which cell was chosen: Excel chooses again
                 "selection" -> return null
                 "pane" -> e.attrs["topLeftCell"]?.let { t -> tag = setAttr(tag, "topLeftCell", movedAreas(t, move) ?: (Regex("[A-Za-z]+").find(t)?.value ?: "A") + (move.at + 1)) }
-                "brk" -> {
+                "brk" -> if (parent == "rowBreaks") {
                     val id = e.attrs["id"]?.toIntOrNull()
                     if (id != null && id > 0) tag = setAttr(tag, "id", ((move.row(id - 1) ?: return null) + 1).toString())
                 }
             }
         }
         if (e.selfClosing || e.empty) return tag + x.substring(e.openEnd, e.end)
-        if (e.local == "formula" || e.local == "formula1" || e.local == "formula2") {
-            val text = XmlScan.unescape(x.substring(e.openEnd, e.closeStart))
+        val kids = XmlScan.children(x, e)
+        // A formula's text (in x14 extensions the text is in an "xm:f" inside)
+        if (kids.isEmpty() && (e.local == "formula" || e.local == "formula1" || e.local == "formula2" || e.local == "f")) {
+            var text = XmlScan.unescape(x.substring(e.openEnd, e.closeStart))
+            if (base != null) text = Formula.shift(text, base[0], 0, base[1], 0)
             return tag + XmlScan.escape(moved(text, isTarget, target, move)) + x.substring(e.closeStart, e.end)
         }
-        val kids = XmlScan.children(x, e)
         if (kids.isEmpty()) return tag + x.substring(e.openEnd, e.end)
         val b = StringBuilder(tag)
         var pos = e.openEnd
         var kept = 0
         for (k in kids) {
             b.append(x, pos, k.start); pos = k.end
-            val r = rewriteElem(x, k, isTarget, target, move)
+            val r = rewriteElem(x, k, isTarget, target, move, e.local, base)
             if (r != null) { b.append(r); kept++ }
         }
         b.append(x, pos, e.end)
@@ -576,7 +599,7 @@ class XlsxEdit private constructor(
             parts[sh.path] = writeSheet(si, sh, mine, values, inputs)
         }
         // Nothing changed (all undone): the file is written as it was
-        if (parts.isEmpty()) { copy(source, out, emptyMap(), emptySet()); return }
+        if (parts.isEmpty() && !l.moved) { copy(source, out, emptyMap(), emptySet()); return }
         // Excel works every formula out again when it opens the file (formulas not done here included)
         parts["xl/workbook.xml"] = fullCalcOnLoad(l.workbookXml)
         // Excel's list of formula cells would no longer match: it is left out, and Excel makes it again

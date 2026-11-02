@@ -343,7 +343,7 @@ object Formula {
                     i += rr.value.length
                     continue
                 }
-                val m = CELL_RANGE.matchAt(text, i)
+                val m = CELL_RANGE.matchAt(text, i)?.takeIf { r -> colIndex(r.groupValues[2].uppercase()) < 16_384 && (r.groupValues[6].isEmpty() || colIndex(r.groupValues[6].uppercase()) < 16_384) }
                 if (m != null && boundaryAfter(i + m.value.length)) {
                     val g = m.groupValues
                     if (!applies) b.append(m.value)
@@ -370,7 +370,7 @@ object Formula {
                 b.append(text, i, e)
                 if (e < text.length && text[e] == '!') { sheet = text.substring(i, e); external = ext; b.append('!'); e++ }
                 // Several sheets at once (Аркуш1:Аркуш3!A1)
-                else if (e < text.length && text[e] == ':' && Regex("[^\\s!:()]+!").matchAt(text, e + 1) != null && !CELL_RANGE.matchesAt(text, e + 1)) return null
+                else if (e < text.length && text[e] == ':' && Regex("(?:[\\p{L}\\p{N}_.]+|'[^']*')!").matchAt(text, e + 1) != null && !CELL_RANGE.matchesAt(text, e + 1)) return null
                 i = e
                 continue
             }
