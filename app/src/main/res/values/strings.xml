@@ -242,4 +242,6 @@
     <string name="pdf_notes_not_saved">Could not save into this file; try “As a copy”</string>
     <string name="pdf_copy_not_saved">Could not save the copy</string>
     <string name="dict_section_hint">Dictionaries in the StarDict format (.ifo, .idx and .dict or .dict.dz, or a ZIP of them) that you add yourself. Select a word in a book or a document and choose “Dictionary”. Everything stays on the phone.</string>
+    <string name="compare_other_file">Another file…</string>
+    <string name="compare_none_here">No documents on the shelf or in Recent yet.</string>
 </resources>

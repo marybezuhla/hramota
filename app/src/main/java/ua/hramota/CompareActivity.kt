@@ -22,14 +22,24 @@ import ua.hramota.ui.applySecureScreen
 
 /** Two versions of a document: what was added, removed or changed, paragraph by paragraph. */
 class CompareActivity : ComponentActivity() {
+    private var opened: List<Uri> = emptyList()
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Temporary plain copies of sealed shelf documents go once the comparison is closed
+        if (isFinishing) opened.forEach { ua.hramota.data.Shelf.closeOpened(this, it) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val older = intent.getStringExtra(EXTRA_OLDER)?.let(Uri::parse)
         val newer = intent.getStringExtra(EXTRA_NEWER)?.let(Uri::parse)
         if (older == null || newer == null) { finish(); return }
-        val olderName = Recents.displayName(this, older)
-        val newerName = Recents.displayName(this, newer)
+        // Names as chosen (a kept copy opened from its seal has only a temporary name of its own)
+        val olderName = intent.getStringExtra(EXTRA_OLDER_NAME)?.takeIf { it.isNotBlank() } ?: Recents.displayName(this, older)
+        val newerName = intent.getStringExtra(EXTRA_NEWER_NAME)?.takeIf { it.isNotBlank() } ?: Recents.displayName(this, newer)
+        opened = listOf(older, newer)
         labelTask("$olderName ↔ $newerName")
 
         applySecureScreen()
@@ -62,6 +72,8 @@ class CompareActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OLDER = "older"
+        const val EXTRA_OLDER_NAME = "older_name"
+        const val EXTRA_NEWER_NAME = "newer_name"
         const val EXTRA_NEWER = "newer"
     }
 }
