@@ -290,4 +290,5 @@
     <string name="edit_saved_copy_plain">A copy with your changes was saved.</string>
     <string name="edit_locked_storage">The locked storage is closed. Unlock Hramota and save again.</string>
     <string name="rescue_delete_sure">Delete for good</string>
+    <string name="sheet_edit_hint">Value or =formula</string>
 </resources>

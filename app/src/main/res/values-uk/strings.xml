@@ -298,4 +298,5 @@
     <string name="edit_saved_copy_plain">Копію зі змінами збережено.</string>
     <string name="edit_locked_storage">Сховище під замком закрите. Відімкніть Грамоту й збережіть знову.</string>
     <string name="rescue_delete_sure">Видалити назавжди</string>
+    <string name="sheet_edit_hint">Значення або =формула</string>
 </resources>

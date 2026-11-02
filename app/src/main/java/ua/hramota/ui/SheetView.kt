@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -86,9 +88,10 @@ class SheetViewState {
 }
 
 /** Column edges and row edges in points, computed once per sheet. */
-private class Geometry(val sheet: Sheet) {
-    val cols = max(sheet.colCount, 1).coerceAtMost(16_384)
-    val rows = max(sheet.rowCount, 1)
+private class Geometry(val sheet: Sheet, room: Boolean = false) {
+    // While editing there is room to write beyond the last filled row and column
+    val cols = (max(sheet.colCount, 1) + if (room) 6 else 0).coerceAtMost(16_384)
+    val rows = (max(sheet.rowCount, 1) + if (room) 40 else 0).coerceAtMost(1_048_576)
     val colX = FloatArray(cols + 1).also { a -> for (c in 0 until cols) a[c + 1] = a[c] + sheet.width(c) }
     val rowY = FloatArray(rows + 1).also { a -> for (r in 0 until rows) a[r + 1] = a[r] + sheet.height(r) }
     /** For each index, the next one that is not hidden (zero size), so hidden ranges cost nothing to skip. */
@@ -118,17 +121,25 @@ fun WorkbookDocument(
     state: SheetViewState,
     hits: Map<Int, List<SearchHit>> = emptyMap(),
     current: SearchHit? = null,
+    /** Editing: the bar under the grid writes into the chosen cell. */
+    editing: SheetEditing? = null,
+    startCell: Pair<Int, Int>? = null,
 ) {
-    val sheet = workbook.sheets[sheetIndex.coerceIn(0, workbook.sheets.size - 1)]
-    var selected by remember(sheet) { mutableStateOf<Pair<Int, Int>?>(null) }
-    // Another sheet opens at its top left
-    var shown by remember { mutableStateOf(sheet) }
-    if (shown !== sheet) { shown = sheet; state.x = 0f; state.y = 0f }
+    val index = sheetIndex.coerceIn(0, workbook.sheets.size - 1)
+    val sheet = workbook.sheets[index]
+    var selected by remember(index) { mutableStateOf(startCell) }
+    // Another sheet opens at its top left (an edited one stays where it is)
+    var shown by remember { mutableStateOf(index) }
+    if (shown != index) { shown = index; state.x = 0f; state.y = 0f }
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            SheetGrid(sheet, state, hits, current, selected) { selected = it }
+            SheetGrid(sheet, state, hits, current, selected, room = editing != null) { selected = it }
         }
-        selected?.let { (r, c) ->
+        if (editing != null) {
+            selected?.let { (r, c) ->
+                EditBar(editing, index, r, c, onDone = { next -> selected = next }, onClose = { selected = null })
+            }
+        } else selected?.let { (r, c) ->
             val row = sheet.row(r)
             val k = row?.find(c) ?: -1
             val text = if (row != null && k >= 0) sheet.text(row, k) else ""
@@ -181,9 +192,10 @@ private fun SheetGrid(
     hits: Map<Int, List<SearchHit>>,
     current: SearchHit?,
     selected: Pair<Int, Int>?,
+    room: Boolean = false,
     onSelect: (Pair<Int, Int>?) -> Unit,
 ) {
-    val g = remember(sheet) { Geometry(sheet) }
+    val g = remember(sheet, room) { Geometry(sheet, room) }
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer(cacheSize = 512)
     var viewport by remember { mutableStateOf(Size.Zero) }
@@ -442,5 +454,45 @@ private class Ctx(
         val tx = when (align) { "center" -> cx + (w - tw) / 2; "right" -> cx + w - pad - tw; else -> cx + pad }
         val ty = when (style.vertical) { "top" -> cy + pad / 2; "center" -> cy + (h - layout.size.height) / 2; else -> cy + h - layout.size.height - pad / 2 }
         clipRect(cx, cy, if (spill > right) x(spill) else cx + w, cy + h) { drawText(layout, topLeft = Offset(tx, ty)) }
+    }
+}
+
+/** What editing a workbook needs from the grid: a cell's content to edit, and putting new content in. */
+class SheetEditing(
+    val content: (sheet: Int, row: Int, col: Int) -> String,
+    /** Puts [typed] into the cell; false if the cell cannot be changed here. */
+    val commit: (sheet: Int, row: Int, col: Int, typed: String) -> Boolean,
+    val enabled: Boolean = true,
+)
+
+/** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */
+@Composable
+private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
+    val ref = "${columnName(col)}${row + 1}"
+    var value by remember(sheet, row, col) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
+    var refused by remember(sheet, row, col) { mutableStateOf(false) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    fun put(): Boolean {
+        val ok = editing.commit(sheet, row, col, value.text)
+        refused = !ok
+        return ok
+    }
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp, modifier = Modifier.imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 10.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = value,
+                onValueChange = { value = it; refused = false },
+                singleLine = true,
+                enabled = editing.enabled,
+                isError = refused,
+                placeholder = { Text(stringResource(R.string.sheet_edit_hint), maxLines = 1) },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onNext = { if (put()) onDone(row + 1 to col) }),
+                modifier = Modifier.weight(1f).focusRequester(focus),
+            )
+            TextButton(onClick = { if (put()) onDone(row to col) }, enabled = editing.enabled) { Text("✓") }
+            TextButton(onClick = onClose) { Text("✕") }
+        }
     }
 }

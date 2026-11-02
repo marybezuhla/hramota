@@ -317,6 +317,11 @@ class ScreensTest {
     @Config(fontScale = 1.5f)
     @Test fun editorLargeFont() = shot("13-edit-docx-large-font") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
+    private fun sheetEditor() = ua.hramota.ui.SheetEditorState(
+        ua.hramota.doc.sheet.edit.XlsxEdit.open(File(javaClass.classLoader!!.getResource("sheets/01-budget.xlsx")!!.toURI()).inputStream()), budget())
+    @Test fun sheetEditorScreen() = shot("14-edit-xlsx") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
+    @Config(qualifiers = "+night")
+    @Test fun sheetEditorDark() = shot("14-edit-xlsx-dark") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 1) }
     @Test fun editorEnglish() = shot("13-edit-docx-en") { ua.hramota.ui.DocxEditorScreen("Contract.docx", androidx.compose.runtime.remember { editor("05-flow.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Test fun homeShelf() = shot("12-home-shelf") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)

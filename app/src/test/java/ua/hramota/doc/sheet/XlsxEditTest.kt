@@ -1,0 +1,98 @@
+package ua.hramota.doc.sheet
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+import ua.hramota.doc.sheet.edit.CellKey
+import ua.hramota.doc.sheet.edit.Formula
+import ua.hramota.doc.sheet.edit.Value
+import ua.hramota.doc.sheet.edit.XlsxEdit
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.zip.ZipInputStream
+
+/** Editing XLSX: changed cells and the formulas depending on them; everything else as it was. */
+@RunWith(androidx.test.ext.junit.runners.AndroidJUnit4::class)
+@Config(sdk = [35])
+class XlsxEditTest {
+    private fun bytes(path: String) = File(javaClass.classLoader!!.getResource(path)!!.toURI()).readBytes()
+    private fun part(b: ByteArray, name: String): String? = ZipInputStream(ByteArrayInputStream(b)).use { z ->
+        while (true) { val e = z.nextEntry ?: return null; if (e.name == name) return String(z.readBytes()) }
+        @Suppress("UNREACHABLE_CODE") null
+    }
+    private fun save(path: String, edit: XlsxEdit, label: String): ByteArray {
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes(path)), out)
+        // Kept for CI, where LibreOffice opens each edited file
+        File("build/edited").apply { mkdirs() }.let { File(it, "$label.xlsx").writeBytes(out.toByteArray()) }
+        return out.toByteArray()
+    }
+
+    private val cells = object : Formula.Cells {
+        override fun value(sheet: String?, row: Int, col: Int) = when (row to col) { 0 to 0 -> Value.Num(2.0); 1 to 0 -> Value.Num(3.0); 2 to 0 -> Value.Text("x"); else -> Value.Empty }
+    }
+    private fun ev(f: String) = Formula.eval(Formula.parse(f).node!!, cells)
+
+    @Test fun formulas() {
+        assertEquals(Value.Num(7.0), ev("1+2*3"))
+        assertEquals(Value.Num(4.0), ev("-2^2"))
+        assertEquals(Value.Num(5.0), ev("SUM(A1:A3)"))
+        assertEquals(Value.Num(2.5), ev("AVERAGE(A1:A2)"))
+        assertEquals(Value.Text("2 шт"), ev("A1&\" шт\""))
+        assertEquals(Value.Text("так"), ev("IF(A1>1,\"так\",\"ні\")"))
+        assertEquals(Value.Num(2.68), ev("ROUND(2.675,2)"))
+        assertEquals(Value.Num(3.0), ev("SUMIF(A1:A3,\">2\")"))
+        assertEquals(Value.DIV0, ev("A1/0"))
+        assertFalse(Formula.parse("VLOOKUP(1,A1:B2,2)").supported)
+        assertEquals("B3+\$B\$2+C\$3+SUM(B3:B5)", Formula.shift("A1+\$B\$2+B\$3+SUM(A1:A3)", 0, 0, 2, 1))
+        assertEquals("SUM(A1,A2)*1.5", Formula.normalize("SUM(A1;A2)*1,5"))
+        assertEquals(1234.5, Formula.parseNumber("1 234,5")!!, 0.0)
+        assertEquals(0.15, Formula.parseNumber("15%")!!, 1e-12)
+        assertNull(Formula.parseNumber("12 шт"))
+    }
+
+    @Test fun valueChangesFlowIntoFormulasAndTheFileOpens() {
+        val path = "sheets/01-budget.xlsx"
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes(path)))
+        assertEquals("=SUM(B4:D4)", edit.content(CellKey(0, 3, 4)))
+        edit.set(CellKey(0, 3, 1), edit.parse("7000", false))
+        edit.set(CellKey(0, 20, 0), edit.parse("Нове", false))
+        edit.set(CellKey(0, 20, 1), edit.parse("=SUM(E4:E9)", false))
+        val v = edit.recalc()
+        assertEquals(Value.Num(11500.5), v[CellKey(0, 3, 4)])
+        val saved = save(path, edit, "edited-budget")
+        val sheet = XlsxReader.read(ByteArrayInputStream(saved)).sheets[0]
+        assertEquals("Нове", sheet.text(sheet.row(20)!!, sheet.row(20)!!.find(0)))
+        // Rows not touched are written exactly as they were
+        val before = part(bytes(path), "xl/worksheets/sheet1.xml")!!
+        val after = part(saved, "xl/worksheets/sheet1.xml")!!
+        val row6 = Regex("<row r=\"6\".*?</row>").find(before)!!.value
+        assertTrue(after.contains(row6))
+        assertTrue(part(saved, "xl/workbook.xml")!!.contains("fullCalcOnLoad=\"1\""))
+    }
+
+    @Test fun sharedFormulasOtherSheetsDatesAndCalcChain() {
+        val path = "docs-edit/shared.xlsx"
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes(path)))
+        assertEquals("=B3*Ціни!A2", edit.content(CellKey(0, 2, 2)))
+        edit.set(CellKey(1, 0, 0), edit.parse("150", false))
+        edit.set(CellKey(0, 2, 2), edit.parse("=B3*Ціни!\$A\$1", false))
+        edit.set(CellKey(0, 0, 3), edit.parse("05.11.2026", true))
+        val v = edit.recalc()
+        assertEquals(Value.Num(1500.0), v[CellKey(0, 1, 2)])
+        assertEquals(Value.Num(300.0), v[CellKey(0, 2, 2)])
+        assertEquals(Value.Num(1800.0), v[CellKey(0, 4, 2)])
+        assertEquals(Value.Num(46331.0), v[CellKey(0, 0, 3)])
+        val saved = save(path, edit, "edited-shared")
+        assertNull(part(saved, "xl/calcChain.xml"))
+        assertFalse(part(saved, "[Content_Types].xml")!!.contains("calcChain"))
+        // The shared group is written out cell by cell
+        assertTrue(part(saved, "xl/worksheets/sheet1.xml")!!.contains("<x:f>B4*Ціни!A3</x:f>"))
+        XlsxReader.read(ByteArrayInputStream(saved))
+    }
+}

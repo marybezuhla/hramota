@@ -26,6 +26,14 @@ object EditSaving {
 
     class Outcome(val result: Result, val newId: String? = null, val copy: Uri? = null)
 
+    /** What makes the edited file from the original (read again) and checks the result opens. */
+    interface Maker {
+        /** "docx" or "xlsx". */
+        val ext: String
+        fun write(source: InputStream, out: OutputStream)
+        fun check(made: InputStream)
+    }
+
     /** Where a file is read and written: through its app, or (in tests) anything else. */
     interface Io {
         fun read(): InputStream?
@@ -38,20 +46,27 @@ object EditSaving {
     }
 
     /** A private file for this save, in the folder emptied when Hramota locks and when it starts. */
-    private fun temp(context: Context, what: String) = File(File(context.cacheDir, "open").apply { mkdirs() }, "$what-${System.nanoTime()}.docx")
+    private fun temp(context: Context, what: String, ext: String) = File(File(context.cacheDir, "open").apply { mkdirs() }, "$what-${System.nanoTime()}.$ext")
 
-    /** The edited document written to [out] from the file at [uri] (read again), and checked to open as a document. */
-    private fun build(context: Context, edit: DocxEdit, list: List<EditPara>, uri: Uri, out: File): Boolean = try {
-        context.contentResolver.openInputStream(uri)?.use { input -> out.outputStream().buffered().use { edit.save(list, input.buffered(), it) } } ?: return false
-        out.inputStream().buffered().use { DocxReader.read(it) }
+    /** The edited document written to [out] from the file at [uri] (read again), and checked to open. */
+    private fun build(context: Context, maker: Maker, uri: Uri, out: File): Boolean = try {
+        context.contentResolver.openInputStream(uri)?.use { input -> out.outputStream().buffered().use { maker.write(input.buffered(), it) } } ?: return false
+        out.inputStream().buffered().use { maker.check(it) }
         true
     } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false }
 
+    /** A Word document's edits. */
+    fun docx(edit: DocxEdit, list: List<EditPara>) = object : Maker {
+        override val ext = "docx"
+        override fun write(source: InputStream, out: OutputStream) = edit.save(list, source, out)
+        override fun check(made: InputStream) { DocxReader.read(made) }
+    }
+
     /** Saves into the kept copy or into the file itself; the document's memory moves to its new fingerprint. Off the main thread. */
-    fun saveInto(context: Context, edit: DocxEdit, list: List<EditPara>, uri: Uri, id: String?, name: String): Outcome {
-        val made = temp(context, "edit")
+    fun saveInto(context: Context, maker: Maker, uri: Uri, id: String?, name: String): Outcome {
+        val made = temp(context, "edit", maker.ext)
         try {
-            if (!build(context, edit, list, uri, made)) return Outcome(Result.FAILED)
+            if (!build(context, maker, uri, made)) return Outcome(Result.FAILED)
             val library = Library.get(context)
             val entry = id?.let { library.get(it) }
             val copy = entry?.copy?.let { File(it) }
@@ -62,7 +77,7 @@ object EditSaving {
             if (!own) {
                 // Under lock the original could only be kept plain: not saved until the storage is open
                 if (Vault.sealing(context) && Vault.key() == null) return Outcome(Result.LOCKED)
-                val rescue = Rescue.create(context, name)
+                val rescue = Rescue.create(context, name, maker.ext)
                 val written = try { writeWhole(io(context, uri), made, rescue) } finally { Rescue.done(rescue) }
                 when (written) {
                     Write.DONE -> rescue.delete()
@@ -110,12 +125,12 @@ object EditSaving {
     }
 
     /** Writes the edited document as a new file the person chose. Off the main thread. */
-    fun saveCopy(context: Context, edit: DocxEdit, list: List<EditPara>, source: Uri, target: Uri): Outcome {
-        val made = temp(context, "edit")
+    fun saveCopy(context: Context, maker: Maker, source: Uri, target: Uri): Outcome {
+        val made = temp(context, "edit", maker.ext)
         // A file picker may hand back a file that already exists: only a new, empty one is ever removed
         val wasEmpty = try { context.contentResolver.openInputStream(target)?.use { it.read() < 0 } == true } catch (e: Exception) { false }
         try {
-            val ok = build(context, edit, list, source, made) && try { writeChecked(io(context, target)) { made.inputStream() } } catch (e: Exception) { false }
+            val ok = build(context, maker, source, made) && try { writeChecked(io(context, target)) { made.inputStream() } } catch (e: Exception) { false }
             if (!ok) {
                 if (wasEmpty) try { android.provider.DocumentsContract.deleteDocument(context.contentResolver, target) } catch (_: Exception) {}
                 return Outcome(Result.FAILED)
@@ -218,6 +233,8 @@ object EditSaving {
         } catch (e: Exception) { "" }
         val sealed: Boolean get() = file.name.endsWith(Vault.SUFFIX)
         val path: String get() = file.path
+        /** "docx" or "xlsx". */
+        val ext: String get() = file.name.removeSuffix(Vault.SUFFIX).substringAfterLast('.')
 
         /** Keeps the content: written beside, synced, then put in place, so only a whole copy is ever left. */
         fun keep(input: InputStream) {
@@ -235,7 +252,7 @@ object EditSaving {
         fun open(): InputStream {
             if (!sealed) return file.inputStream()
             val k = key ?: Vault.key() ?: throw IOException("Locked")
-            val plain = File(cache.apply { mkdirs() }, "rescue-${System.nanoTime()}.docx")
+            val plain = File(cache.apply { mkdirs() }, "rescue-${System.nanoTime()}.$ext")
             try {
                 file.inputStream().buffered().use { input -> plain.outputStream().buffered().use { Sealed.open(k, input, it, file.name.removeSuffix(Vault.SUFFIX)) } }
             } catch (e: Exception) { plain.delete(); throw e }
@@ -258,14 +275,14 @@ object EditSaving {
             /** Rescues of saves under way in this process: never offered or removed meanwhile. */
             private val inUse = java.util.Collections.synchronizedSet(HashSet<String>())
 
-            fun create(context: Context, name: String): Rescue {
+            fun create(context: Context, name: String, ext: String): Rescue {
                 val stem = "r" + System.currentTimeMillis().toString(36) + System.nanoTime().toString(36).takeLast(4)
                 val key = if (Vault.sealing(context)) Vault.key() else null
                 val suffix = if (key != null) Vault.SUFFIX else ""
                 val label = File(dir(context), "$stem.txt$suffix")
                 val bytes = name.take(200).toByteArray(Charsets.UTF_8)
                 label.writeBytes(if (key != null) Sealed.seal(key, bytes, "$stem.txt") else bytes)
-                val file = File(dir(context), "$stem.docx$suffix")
+                val file = File(dir(context), "$stem.${if (ext == "xlsx") "xlsx" else "docx"}$suffix")
                 inUse += file.path
                 return Rescue(file, label, key, File(context.cacheDir, "open"))
             }
@@ -280,10 +297,10 @@ object EditSaving {
                 val files = dir(context).listFiles().orEmpty()
                 // A copy that was never finished holds nothing worth offering
                 files.filter { it.name.endsWith(".part") }.forEach { it.delete() }
-                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.docx(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
+                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.(docx|xlsx)(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
                 fun stem(f: File) = f.name.removeSuffix(Vault.SUFFIX).substringBeforeLast('.')
                 // Labels whose copy never came to be (not of a save under way)
-                files.filter { it.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && files.none { k -> k.name.removeSuffix(Vault.SUFFIX).endsWith(".docx") && stem(k) == stem(it) } }.forEach { it.delete() }
+                files.filter { it.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && files.none { k -> !k.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && stem(k) == stem(it) } }.forEach { it.delete() }
                 return kept.map { k ->
                     val label = File(k.parentFile, stem(k) + ".txt" + if (k.name.endsWith(Vault.SUFFIX)) Vault.SUFFIX else "")
                     Rescue(k, label, null, File(context.cacheDir, "open"))

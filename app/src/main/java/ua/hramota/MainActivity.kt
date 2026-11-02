@@ -63,7 +63,8 @@ class MainActivity : ComponentActivity() {
     // Which one was being saved, kept while the window is made again (the file picker open)
     private var savingRescuePath: String? = null
     private var confirmRescueDelete by mutableStateOf(false)
-    private val saveRescue = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
+    // Any kind of file (Word or Excel): the name carries the extension
+    private val saveRescue = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { target ->
         val r = savingRescue ?: savingRescuePath?.let { p -> EditSaving.Rescue.left(applicationContext).firstOrNull { it.path == p } }
         savingRescue = null; savingRescuePath = null
         if (target == null) return@registerForActivityResult
@@ -121,7 +122,7 @@ class MainActivity : ComponentActivity() {
                             title = { androidx.compose.material3.Text(getString(R.string.rescue_title)) },
                             text = { androidx.compose.material3.Text(getString(R.string.rescue_text, r.name.ifBlank { "?" })) },
                             confirmButton = {
-                                androidx.compose.material3.TextButton(onClick = { savingRescue = r; savingRescuePath = r.path; saveRescue.launch(r.name.substringBeforeLast('.', r.name).ifBlank { "document" } + " (" + getString(R.string.rescue_suffix) + ").docx") }) {
+                                androidx.compose.material3.TextButton(onClick = { savingRescue = r; savingRescuePath = r.path; saveRescue.launch(r.name.substringBeforeLast('.', r.name).ifBlank { "document" } + " (" + getString(R.string.rescue_suffix) + ")." + r.ext) }) {
                                     androidx.compose.material3.Text(getString(R.string.rescue_save))
                                 }
                             },

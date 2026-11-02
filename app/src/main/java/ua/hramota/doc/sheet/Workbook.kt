@@ -86,6 +86,9 @@ class Sheet(
 
     /** True when cell [k] holds a number (shown on the right unless the cell says otherwise). */
     fun isNumber(row: SheetRow, k: Int): Boolean = row.texts[k] == null
+
+    /** The same sheet with other rows (after editing): sizes, styles and merges stay. */
+    fun withRows(newRows: List<SheetRow>) = Sheet(name, newRows, styles, widths, defaultWidth, heights, defaultHeight, merges, frozenRows, frozenCols, date1904)
 }
 
 /** A workbook: its sheets, and what the inspector found in the file. */
@@ -194,7 +197,7 @@ object NumberFormat {
         return s
     }
 
-    private fun isDate(code: String): Boolean {
+    fun isDate(code: String): Boolean {
         var quoted = false
         var i = 0
         while (i < code.length) {

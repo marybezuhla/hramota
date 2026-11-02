@@ -214,9 +214,13 @@ class ViewerActivity : ComponentActivity() {
                     val editor = held.editor
                     // A save finished (perhaps while the window was being made again): said and acted on here
                     held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
+                    held.sheet?.let { sheetEditor ->
+                        ua.hramota.ui.SheetEditorScreen(name, sheetEditor, held.saving, onSave = { saveEdits(uri, docId, name) }, onClose = { held.sheet = null })
+                        return@Surface
+                    }
                     if (editor != null) {
                         ua.hramota.ui.DocxEditorScreen(name, editor, held.saving,
-                            onSave = { saveEdits(editor, uri, docId, name) },
+                            onSave = { saveEdits(uri, docId, name) },
                             onClose = { held.editor = null },
                             author = settings.commentAuthor,
                             onAuthor = { who -> ua.hramota.data.Settings.get(this@ViewerActivity).update { it.copy(commentAuthor = who) } },
@@ -241,6 +245,8 @@ class ViewerActivity : ComponentActivity() {
                             listOfNotNull<Pair<String, () -> Unit>>(
                                 // Word documents can be edited: text, bold and other marks, headings, lists
                                 if (format == Format.DOCX && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
+                                // Excel workbooks: cells and formulas
+                                (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
                                 // Word comments: read, answered with new ones, removed (in the editing view)
                                 (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 }?.let { n ->
                                     getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
@@ -344,18 +350,32 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
+    /** Opens the XLSX for editing (off the main thread), shown as the workbook already read. */
+    private fun startSheetEditing(uri: android.net.Uri, workbook: ua.hramota.doc.sheet.Workbook) {
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        val app = applicationContext
+        held.scope.launch {
+            val edit = withContext(Dispatchers.IO) {
+                try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.sheet.edit.XlsxEdit.open(it.buffered()) }?.let { ua.hramota.ui.SheetEditorState(it, workbook) } }
+                catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+            }
+            if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
+            else held.sheet = edit
+        }
+    }
+
     /** Saves the edits off the main thread, in work that outlives the window (turning the phone); the outcome is shown when it is back. */
-    private fun saveEdits(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, id: String?, name: String) {
+    private fun saveEdits(uri: android.net.Uri, id: String?, name: String) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         if (held.saving) return
+        val maker = held.maker() ?: return
         held.saving = true
-        val list = editor.paras
         val app = applicationContext
         // Locked storage stays open until the file is written (its temporary files would go with locking)
         ua.hramota.data.Vault.hold()
         held.scope.launch {
             val outcome = try {
-                withContext(Dispatchers.IO) { EditSaving.saveInto(app, editor.edit, list, uri, id, name) }
+                withContext(Dispatchers.IO) { EditSaving.saveInto(app, maker, uri, id, name) }
             } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
             finally { ua.hramota.data.Vault.release() }
             held.saving = false
@@ -370,7 +390,7 @@ class ViewerActivity : ComponentActivity() {
         when (o.result) {
             EditSaving.Result.SAVED -> {
                 say(R.string.edit_saved)
-                held.editor = null
+                held.editor = null; held.sheet = null
                 // Shown again from the saved file
                 o.newId?.let { reopen(it) } ?: recreate()
             }
@@ -378,13 +398,14 @@ class ViewerActivity : ComponentActivity() {
                 say(when (o.result) { EditSaving.Result.BROKEN -> R.string.edit_original_broken; EditSaving.Result.RESTORED -> R.string.edit_not_written; else -> R.string.edit_save_copy_hint })
                 held.copyPending = true
                 held.copyReason = o.result
-                saveEditCopy.launch(name.substringBeforeLast('.', name) + ".docx")
+                val base = name.substringBeforeLast('.', name)
+                if (held.sheet != null) saveSheetCopy.launch("$base.xlsx") else saveEditCopy.launch("$base.docx")
             }
             EditSaving.Result.FAILED -> say(R.string.edit_not_saved)
             EditSaving.Result.LOCKED -> say(R.string.edit_locked_storage)
             EditSaving.Result.COPY_SAVED -> {
                 say(if (held.copyReason == EditSaving.Result.NOT_ALLOWED) R.string.edit_saved_copy else R.string.edit_saved_copy_plain)
-                held.editor = null
+                held.editor = null; held.sheet = null
                 // The copy is opened in place of the original
                 o.copy?.let { target ->
                     startActivity(android.content.Intent(this, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
@@ -396,24 +417,26 @@ class ViewerActivity : ComponentActivity() {
     }
 
     // A copy of the edits saved where the person chooses (the file itself could not be changed)
-    private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
+    private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target -> onCopyTarget(target) }
+    private val saveSheetCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { target -> onCopyTarget(target) }
+
+    private fun onCopyTarget(target: android.net.Uri?) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
-        val editor = held.editor
+        val maker = held.maker()
         val uri = intent.data
         val waiting = held.copyPending
         held.copyPending = false
-        if (target == null) return@registerForActivityResult
+        if (target == null) return
         // Nothing waiting (the edits are gone): the empty file just made is removed
-        if (!waiting || editor == null || uri == null) {
+        if (!waiting || maker == null || uri == null) {
             try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
-            return@registerForActivityResult
+            return
         }
         held.saving = true
-        val list = editor.paras
         val app = applicationContext
         ua.hramota.data.Vault.hold()
         held.scope.launch {
-            val outcome = try { withContext(Dispatchers.IO) { EditSaving.saveCopy(app, editor.edit, list, uri, target) } } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
+            val outcome = try { withContext(Dispatchers.IO) { EditSaving.saveCopy(app, maker, uri, target) } } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
             finally { ua.hramota.data.Vault.release() }
             held.saving = false
             held.outcome = outcome
@@ -559,6 +582,10 @@ class ViewerActivity : ComponentActivity() {
     /** What is being edited, kept while the window is made again (the phone turned). */
     class EditHolder : androidx.lifecycle.ViewModel() {
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
+        var sheet by mutableStateOf<ua.hramota.ui.SheetEditorState?>(null)
+
+        /** What saving needs from whichever editor is open (taken now: later typing is not part of it). */
+        fun maker(): EditSaving.Maker? = editor?.let { EditSaving.docx(it.edit, it.paras) } ?: sheet?.maker()
         var saving by mutableStateOf(false)
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
         /** Why the edits went into a copy (what is said when it is saved). */

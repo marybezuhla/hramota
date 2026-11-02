@@ -131,7 +131,7 @@ jobs:
           python3 - <<'PY'
           import glob, zipfile, xml.dom.minidom, sys
           bad = 0
-          for f in glob.glob("app/build/edited/*.docx"):
+          for f in glob.glob("app/build/edited/*.docx") + glob.glob("app/build/edited/*.xlsx"):
               z = zipfile.ZipFile(f)
               for n in z.namelist():
                   if n.endswith(".xml") or n.endswith(".rels"):
@@ -139,13 +139,13 @@ jobs:
                       except Exception as e: print(f, n, e); bad += 1
           sys.exit(1 if bad else 0)
           PY
-          command -v soffice > /dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui poppler-utils > /dev/null; }
+          dpkg -s libreoffice-calc-nogui > /dev/null 2>&1 || { sudo apt-get update -qq; sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui libreoffice-calc-nogui poppler-utils > /dev/null; }
           mkdir -p edited-pdf log/edited
-          soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx > /dev/null
-          for f in app/build/edited/*.docx; do
-            pdf="edited-pdf/$(basename "$f" .docx).pdf"
+          soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx app/build/edited/*.xlsx > /dev/null
+          for f in app/build/edited/*.docx app/build/edited/*.xlsx; do
+            b="$(basename "$f")"; pdf="edited-pdf/${b%.*}.pdf"
             test -s "$pdf" || { echo "LibreOffice could not open $f"; exit 1; }
-            pdftoppm -r 60 -png -f 1 -l 1 "$pdf" "log/edited/$(basename "$f" .docx)" || true
+            pdftoppm -r 60 -png -f 1 -l 1 "$pdf" "log/edited/${b%.*}" || true
           done
           echo "edited documents open: $(ls edited-pdf | wc -l)"
 
