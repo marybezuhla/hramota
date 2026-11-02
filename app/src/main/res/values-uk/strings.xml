@@ -106,6 +106,16 @@
     <string name="settings">Налаштування</string>
     <string name="settings_look">Вигляд</string>
     <string name="settings_theme">Тема</string>
+    <string name="settings_scheme_day">Кольори вдень</string>
+    <string name="settings_scheme_night">Кольори вночі</string>
+    <string name="settings_scheme_hint">Льон — власні кольори Грамоти, решта — кольори українських писанок.</string>
+    <string name="scheme_lon">Льон</string>
+    <string name="scheme_kreyda">Крейда</string>
+    <string name="scheme_visk">Віск</string>
+    <string name="scheme_nebo">Небо</string>
+    <string name="scheme_podillia">Поділля</string>
+    <string name="scheme_hutsulshchyna">Гуцульщина</string>
+    <string name="scheme_chornozem">Чорнозем</string>
     <string name="theme_system">Як у системі</string>
     <string name="theme_light">Світла</string>
     <string name="theme_dark">Темна</string>

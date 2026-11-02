@@ -64,7 +64,7 @@ fun BookTheme(on: Boolean, settings: AppSettings, content: @Composable () -> Uni
         bars?.isAppearanceLightNavigationBars = !p.dark
         onDispose { if (before != null) { bars.isAppearanceLightStatusBars = before; bars.isAppearanceLightNavigationBars = before } }
     }
-    HramotaTheme(dark = p.dark, dynamic = settings.dynamicColor) {
+    HramotaTheme(dark = p.dark, dynamic = settings.dynamicColor, day = settings.dayScheme, night = settings.nightScheme) {
         val cs = MaterialTheme.colorScheme.copy(
             background = p.background, surface = p.background, onBackground = p.text, onSurface = p.text, onSurfaceVariant = p.muted,
             surfaceContainer = p.background, surfaceContainerLow = p.background, surfaceContainerHigh = p.background,

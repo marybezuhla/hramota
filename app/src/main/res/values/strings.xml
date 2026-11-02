@@ -98,6 +98,16 @@
     <string name="settings">Settings</string>
     <string name="settings_look">Appearance</string>
     <string name="settings_theme">Theme</string>
+    <string name="settings_scheme_day">Colours by day</string>
+    <string name="settings_scheme_night">Colours at night</string>
+    <string name="settings_scheme_hint">Lon (flax) is Hramota’s own; the others are the colours of Ukrainian pysanky.</string>
+    <string name="scheme_lon">Lon</string>
+    <string name="scheme_kreyda">Kreyda</string>
+    <string name="scheme_visk">Visk</string>
+    <string name="scheme_nebo">Nebo</string>
+    <string name="scheme_podillia">Podillia</string>
+    <string name="scheme_hutsulshchyna">Hutsulshchyna</string>
+    <string name="scheme_chornozem">Chornozem</string>
     <string name="theme_system">System</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>

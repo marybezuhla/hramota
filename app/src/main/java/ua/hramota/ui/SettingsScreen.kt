@@ -1,6 +1,14 @@
 package ua.hramota.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,6 +101,12 @@ fun SettingsScreen(
             }
 
             Toggle(stringResource(R.string.settings_dynamic), stringResource(R.string.settings_dynamic_hint), settings.dynamicColor) { v -> onChange { it.copy(dynamicColor = v) } }
+            // The schemes (not with the wallpaper's colours, which take their place)
+            if (!settings.dynamicColor) {
+                Text(stringResource(R.string.settings_scheme_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp))
+                SchemeRow(stringResource(R.string.settings_scheme_day), Schemes.day, settings.dayScheme) { id -> onChange { it.copy(dayScheme = id) } }
+                SchemeRow(stringResource(R.string.settings_scheme_night), Schemes.night, settings.nightScheme) { id -> onChange { it.copy(nightScheme = id) } }
+            }
 
             Section(stringResource(R.string.settings_documents))
             Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -181,5 +195,46 @@ private fun Toggle(title: String, hint: String, checked: Boolean, enabled: Boole
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
+}
+
+/** A row of small pictures of the schemes, each in its own colours; a tap chooses one. */
+@Composable
+private fun SchemeRow(title: String, schemes: List<Scheme>, chosen: String, onChoose: (String) -> Unit) {
+    Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp))
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        for (sc in schemes) {
+            val selected = sc.id == chosen || (schemes.none { it.id == chosen } && sc == schemes.first())
+            val c = sc.colors
+            Column(
+                Modifier.width(104.dp).clip(RoundedCornerShape(14.dp)).selectable(selected, role = Role.RadioButton) { onChoose(sc.id) }.padding(2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val frame = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                // A picture only: the name below is what is read aloud
+                Surface(shape = RoundedCornerShape(12.dp), border = frame, color = c.background, modifier = Modifier.fillMaxWidth().height(76.dp).clearAndSetSemantics { }) {
+                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        // A title, two lines of text on a card, and a button in the accent
+                        Box(Modifier.fillMaxWidth(0.7f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.onBackground))
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(c.surfaceVariant).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurfaceVariant))
+                            Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurfaceVariant))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Box(Modifier.width(34.dp).height(12.dp).clip(RoundedCornerShape(6.dp)).background(c.primary))
+                        }
+                    }
+                }
+                Text(
+                    stringResource(sc.name), style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
     }
 }

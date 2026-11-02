@@ -63,10 +63,10 @@ class ScreensTest {
         shadowOf(app.packageManager).addActivityIfNotPresent(ComponentName(app, ComponentActivity::class.java))
     }
 
-    private fun shot(name: String, settle: Int = 8, content: @Composable () -> Unit) = ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+    private fun shot(name: String, settle: Int = 8, day: String = ua.hramota.ui.Schemes.DEFAULT, night: String = ua.hramota.ui.Schemes.DEFAULT, content: @Composable () -> Unit) = ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
         scenario.onActivity { activity ->
             activity.setContent {
-                HramotaTheme {
+                HramotaTheme(day = day, night = night) {
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { content() }
                 }
             }
@@ -167,6 +167,18 @@ class ScreensTest {
     @Test fun homeComparing() = shot("03-home-compare-second") { home(recentsUk, "Тепер оберіть нову версію") }
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun homeEnglish() = shot("02-home-en") { home(recentsEn) }
+    // The colours of pysanky: each day scheme by day, each night scheme at night
+    @Test fun homeKreyda() = shot("02-home-kreyda", day = "kreyda") { home(recentsUk) }
+    @Test fun homeVisk() = shot("02-home-visk", day = "visk") { home(recentsUk) }
+    @Test fun homeNebo() = shot("02-home-nebo", day = "nebo") { home(recentsUk) }
+    @Config(qualifiers = "+night")
+    @Test fun homePodillia() = shot("02-home-podillia", night = "podillia") { home(recentsUk) }
+    @Config(qualifiers = "+night")
+    @Test fun homeHutsulshchyna() = shot("02-home-hutsulshchyna", night = "hutsulshchyna") { home(recentsUk) }
+    @Config(qualifiers = "+night")
+    @Test fun homeChornozem() = shot("02-home-chornozem", night = "chornozem") { home(recentsUk) }
+    @Config(qualifiers = "+night")
+    @Test fun settingsHutsulshchyna() = shot("09-settings-hutsulshchyna", night = "hutsulshchyna") { SettingsScreen(AppSettings(nightScheme = "hutsulshchyna"), "0.4.0", onChange = {}, onClearRecent = {}, onBack = {}) }
 
     @Test fun viewerText() = shot("04-viewer-reading") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}) }
     @Config(qualifiers = "+night")
