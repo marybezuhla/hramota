@@ -230,4 +230,14 @@
     <string name="drop_confirm">Прибрати «%1$s» з Грамоти? Копію в Грамоті буде видалено, а закладки й нотатки лишаться для оригінального файлу.</string>
     <string name="forget_go">Забути</string>
     <string name="drop_go">Прибрати</string>
+    <string name="dict_section">Словники</string>
+    <string name="dict_section_hint">Словники у форматі StarDict (.ifo, .idx і .dict або .dict.dz, чи ZIP із ними), які ви додаєте самі. Виділіть слово в книзі й виберіть «Словник». Усе лишається на телефоні.</string>
+    <string name="dict_words">слів: %1$d</string>
+    <string name="dict_add">Додати словник</string>
+    <string name="dict_adding">Додаю словник…</string>
+    <string name="dict_added">Словник «%1$s» додано</string>
+    <string name="dict_failed">Ці файли — не словник StarDict</string>
+    <string name="dict_open">Словник</string>
+    <string name="dict_none">Словників ще немає. Додайте в Налаштуваннях → Словники.</string>
+    <string name="dict_not_found">У ваших словниках не знайдено</string>
 </resources>

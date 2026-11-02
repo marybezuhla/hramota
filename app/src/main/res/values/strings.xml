@@ -222,4 +222,14 @@
     <string name="drop_confirm">Remove “%1$s” from Hramota? The copy kept in Hramota is deleted; bookmarks and notes stay remembered for the original file.</string>
     <string name="forget_go">Forget</string>
     <string name="drop_go">Remove</string>
+    <string name="dict_section">Dictionaries</string>
+    <string name="dict_section_hint">Dictionaries in the StarDict format (.ifo, .idx and .dict or .dict.dz, or a ZIP of them) that you add yourself. Select a word in a book and choose “Dictionary”. Everything stays on the phone.</string>
+    <string name="dict_words">%1$d words</string>
+    <string name="dict_add">Add a dictionary</string>
+    <string name="dict_adding">Adding the dictionary…</string>
+    <string name="dict_added">Dictionary “%1$s” added</string>
+    <string name="dict_failed">These files are not a StarDict dictionary</string>
+    <string name="dict_open">Dictionary</string>
+    <string name="dict_none">No dictionaries yet. Add one in Settings → Dictionaries.</string>
+    <string name="dict_not_found">Not found in your dictionaries</string>
 </resources>
