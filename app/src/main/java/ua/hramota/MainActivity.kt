@@ -48,6 +48,8 @@ class MainActivity : ComponentActivity() {
     private var restoreWrong by mutableStateOf(false)
     private var restoreProblem by mutableStateOf(ua.hramota.data.Backup.Reason.WRONG_PASSWORD_OR_DAMAGED)
     private var busy by mutableStateOf<Triple<String, Int, Int>?>(null)
+    private var dictionaries by mutableStateOf<List<ua.hramota.data.Dictionary>>(emptyList())
+    private val addDictionary = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) onDictionaryFiles(uris) }
     private val saveBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> onBackupTarget(uri) }
     private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) { restoreWrong = false; restoreUri = uri } }
 
@@ -100,6 +102,9 @@ class MainActivity : ComponentActivity() {
                         vaultPossible = ua.hramota.data.Vault.canUse(this),
                         onVault = { on -> setVault(on) },
                         onBackup = { backupDialog = true },
+                        dictionaries = dictionaries,
+                        onAddDictionary = { addDictionary.launch(arrayOf("*/*")) },
+                        onRemoveDictionary = { id -> ua.hramota.data.Dictionaries.remove(this, id); refreshDictionaries() },
                         onRestore = { openBackup.launch(arrayOf("*/*")) },
                     ) else HomeScreen(
                         recents = files,
@@ -162,6 +167,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshDictionaries() {
+        lifecycleScope.launch { dictionaries = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Dictionaries.list(this@MainActivity) } }
+    }
+
+    /** A dictionary from the chosen files (its parts, or one ZIP); kept in Hramota, used offline. */
+    private fun onDictionaryFiles(uris: List<Uri>) {
+        busy = Triple(getString(R.string.dict_adding), 0, 0)
+        lifecycleScope.launch {
+            val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try { ua.hramota.data.Dictionaries.add(this@MainActivity, uris) { Recents.displayName(this@MainActivity, it) } } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+            }
+            busy = null
+            refreshDictionaries()
+            android.widget.Toast.makeText(this@MainActivity, if (name != null) getString(R.string.dict_added, name) else getString(R.string.dict_failed), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun restore(uri: Uri, pw: CharArray) {
         busy = Triple(getString(R.string.backup_reading), 0, 0)
         lifecycleScope.launch {
@@ -188,6 +210,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         vaultOn = ua.hramota.data.Vault.isOn(this)
         applySecureScreen()
+        refreshDictionaries()
         if (skipResume) { skipResume = false; return }
         // Coming to Hramota while locked: ask straight away
         if (vaultOn && ua.hramota.data.Vault.key() == null && !keyLost) unlock()

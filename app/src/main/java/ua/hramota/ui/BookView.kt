@@ -141,6 +141,7 @@ internal fun BookDocument(
     // The blocks on screen, where selected text is looked for
     val visible = remember { Visible() }
     var editing by remember { mutableStateOf<Pair<Note, Boolean>?>(null) }
+    var lookingUp by remember { mutableStateOf<String?>(null) }
     val view = BookView(look, hits, current, notes, selection.reset, visible, selection)
     // Where this view sits in the window: the selection's place comes in window coordinates
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -153,8 +154,10 @@ internal fun BookDocument(
             selection, taking, origin,
             onMark = { t, c -> locate(book, visible.blocks(), t)?.let { onNote(it.copy(color = c)) } },
             onNote = { t -> locate(book, visible.blocks(), t)?.let { editing = it to true } },
+            onDictionary = { t -> lookingUp = t },
         )
     }
+    lookingUp?.let { w -> DictionarySheet(w) { lookingUp = null } }
     editing?.let { (n, new) ->
         NoteDialog(excerpt(book, n), n, onSave = { onNote(it); editing = null }, onDelete = if (new) null else ({ onRemoveNote(n.at); editing = null }), onDismiss = { editing = null })
     }

@@ -55,6 +55,9 @@ fun SettingsScreen(
     onVault: (Boolean) -> Unit = {},
     onBackup: () -> Unit = {},
     onRestore: () -> Unit = {},
+    dictionaries: List<ua.hramota.data.Dictionary> = emptyList(),
+    onAddDictionary: () -> Unit = {},
+    onRemoveDictionary: (String) -> Unit = {},
 ) {
     var licenses by rememberSaveable { mutableStateOf(false) }
     var cleared by rememberSaveable { mutableStateOf(false) }
@@ -118,6 +121,19 @@ fun SettingsScreen(
                     stringResource(if (cleared) R.string.settings_cleared else R.string.settings_clear),
                     style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary,
                 )
+            }
+
+            Section(stringResource(R.string.dict_section))
+            Text(stringResource(R.string.dict_section_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            for (d in dictionaries) Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(d.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.dict_words, d.words), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = { onRemoveDictionary(d.id) }) { Text(stringResource(R.string.note_delete)) }
+            }
+            Row(Modifier.fillMaxWidth().clickable { onAddDictionary() }.padding(horizontal = 20.dp, vertical = 14.dp)) {
+                Text(stringResource(R.string.dict_add), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
             }
 
             Section(stringResource(R.string.backup_section))
