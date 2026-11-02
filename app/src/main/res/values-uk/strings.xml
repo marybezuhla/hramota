@@ -190,7 +190,6 @@
     <string name="vault_no_lock">Спершу встановіть блокування екрана телефону (PIN, графічний ключ або пароль).</string>
     <string name="vault_on_done">Сховище під замком увімкнено</string>
     <string name="vault_off_done">Сховище під замком вимкнено</string>
-    <string name="vault_failed">Не вдалося, нічого не змінено</string>
     <string name="lock_title">Грамота під замком</string>
     <string name="lock_body">Документи, полиці й нотатки відкриються, щойно телефон підтвердить, що це ви.</string>
     <string name="unlock">Відімкнути</string>
@@ -217,4 +216,9 @@
     <string name="backup_wrong">Неправильний пароль або це не резервна копія Грамоти</string>
     <string name="backup_restore_go">Відновити</string>
     <string name="backup_restored">Відновлено: нових %1$d, поєднано %2$d, документів %3$d</string>
+    <string name="vault_failed">Не вдалося. Нічого не втрачено, спробуйте ще раз.</string>
+    <string name="unlock_not_confirmed">Телефон не підтвердив, що це ви. Спробуйте PIN, графічний ключ або пароль.</string>
+    <string name="vault_key_lost">Телефон більше не має ключа до сховища (блокування екрана зняли або змінили захист). Замкнене не відкрити нікому.</string>
+    <string name="vault_start_over">Почати заново</string>
+    <string name="vault_start_over_confirm">Замкнена пам\'ять, полиці й збережені копії буде видалено. Документів в інших місцях це не торкнеться. Якщо є резервна копія, її можна буде відновити.</string>
 </resources>

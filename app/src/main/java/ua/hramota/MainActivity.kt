@@ -37,6 +37,9 @@ class MainActivity : ComponentActivity() {
     // Locked storage: whether it is on (changes when turned on or off here), and a prompt under way
     private var vaultOn by mutableStateOf(false)
     private var unlocking = false
+    // The confirmation screen returning is not a new arrival: no second prompt then
+    private var skipResume = false
+    private var keyLost by mutableStateOf(false)
     // Backup: the dialog, the password waiting for the chosen file, a restore's file and work under way
     private var backupDialog by mutableStateOf(false)
     private var pendingBackup: Pair<CharArray, Set<String>>? = null
@@ -52,7 +55,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        recents = Recents(applicationContext)
+        recents = Recents.get(applicationContext)
         vaultOn = ua.hramota.data.Vault.isOn(this)
         compareFirst = savedInstanceState?.getString(KEY_FIRST)?.let(Uri::parse)
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
@@ -62,7 +65,13 @@ class MainActivity : ComponentActivity() {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val open by ua.hramota.data.Vault.unlocked.collectAsStateWithLifecycle()
-                    if (vaultOn && !open) { ua.hramota.ui.LockScreen { unlock() }; return@Surface }
+                    if (vaultOn && !open) {
+                        ua.hramota.ui.LockScreen(keyLost, onUnlock = { unlock() }, onStartOver = {
+                            ua.hramota.data.Vault.reset(this@MainActivity)
+                            keyLost = false; vaultOn = false
+                        })
+                        return@Surface
+                    }
                     val files by recents.files.collectAsStateWithLifecycle()
                     val library = ua.hramota.data.Library.get(applicationContext)
                     val known by library.entries.collectAsStateWithLifecycle()
@@ -123,9 +132,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
-                    contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                        ua.hramota.data.Backup.write(this@MainActivity, out, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) }
-                    } != null
+                    // The key is held to the end: Hramota does not lock in the middle of a backup
+                    ua.hramota.data.Vault.holding {
+                        contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                            ua.hramota.data.Backup.write(this@MainActivity, out, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) }
+                        } != null
+                    }
                 } catch (e: Exception) { false } finally { pw.fill(' ') }
             }
             if (!ok) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
@@ -138,7 +150,7 @@ class MainActivity : ComponentActivity() {
         busy = Triple(getString(R.string.backup_reading), 0, 0)
         lifecycleScope.launch {
             val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                try { contentResolver.openInputStream(uri)?.use { ua.hramota.data.Backup.restore(this@MainActivity, it, pw) } }
+                try { ua.hramota.data.Vault.holding { contentResolver.openInputStream(uri)?.use { ua.hramota.data.Backup.restore(this@MainActivity, it, pw) } } }
                 catch (e: Exception) { null } finally { pw.fill(' ') }
             }
             busy = null
@@ -152,16 +164,23 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vaultOn = ua.hramota.data.Vault.isOn(this)
-        // Coming back while locked: ask straight away
-        if (vaultOn && ua.hramota.data.Vault.key() == null) unlock()
+        if (skipResume) { skipResume = false; return }
+        // Coming to Hramota while locked: ask straight away
+        if (vaultOn && ua.hramota.data.Vault.key() == null && !keyLost) unlock()
     }
 
     private fun unlock() {
         if (unlocking) return
         unlocking = true
+        skipResume = true
         lifecycleScope.launch {
             try {
-                if (ua.hramota.data.Vault.unlock(this@MainActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))) recents.reload()
+                when (ua.hramota.data.Vault.unlock(this@MainActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))) {
+                    ua.hramota.data.Vault.Outcome.OPEN -> recents.reload()
+                    ua.hramota.data.Vault.Outcome.KEY_LOST -> keyLost = true
+                    ua.hramota.data.Vault.Outcome.NOT_CONFIRMED -> android.widget.Toast.makeText(this@MainActivity, getString(R.string.unlock_not_confirmed), android.widget.Toast.LENGTH_LONG).show()
+                    ua.hramota.data.Vault.Outcome.CANCELLED -> Unit
+                }
             } finally { unlocking = false }
         }
     }

@@ -16,7 +16,8 @@ import javax.crypto.spec.GCMParameterSpec
  * Files sealed with AES-256-GCM in segments of 64 KiB, so a file of any size is sealed and opened as a
  * stream and every part is checked. Each segment's nonce is the file's random 8-byte prefix and the
  * segment's number; the last segment is marked in its associated data, so segments cannot be
- * reordered, dropped or cut off without the opening failing.
+ * reordered, dropped or cut off without the opening failing. The file's name is bound in too, so one
+ * sealed file cannot be passed off as another.
  *
  * Layout: "HRV1" · prefix (8) · segments (each its ciphertext and 16-byte tag).
  */
@@ -26,7 +27,9 @@ object Sealed {
     private const val TAG = 16
     private val random = SecureRandom()
 
-    fun seal(key: SecretKey, input: InputStream, output: OutputStream) {
+    private fun aad(last: Boolean, name: String) = byteArrayOf(if (last) 1 else 0) + name.toByteArray()
+
+    fun seal(key: SecretKey, input: InputStream, output: OutputStream, name: String) {
         val prefix = ByteArray(8).also(random::nextBytes)
         output.write(MAGIC); output.write(prefix)
         var cur = ByteArray(SEGMENT); var n = readFully(input, cur)
@@ -37,7 +40,7 @@ object Sealed {
             val last = m == 0
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG * 8, nonce(prefix, counter)))
-            c.updateAAD(byteArrayOf(if (last) 1 else 0))
+            c.updateAAD(aad(last, name))
             output.write(c.doFinal(cur, 0, n))
             if (last) break
             cur = next; n = m; counter++
@@ -46,7 +49,7 @@ object Sealed {
     }
 
     /** Opens a sealed stream; a changed, cut or reordered file throws [IOException] and gives nothing after the damage. */
-    fun open(key: SecretKey, input: InputStream, output: OutputStream) {
+    fun open(key: SecretKey, input: InputStream, output: OutputStream, name: String) {
         val head = ByteArray(12)
         if (readFully(input, head) != 12 || !head.copyOfRange(0, 4).contentEquals(MAGIC)) throw IOException("Not a sealed file")
         val prefix = head.copyOfRange(4, 12)
@@ -59,7 +62,7 @@ object Sealed {
             val last = m == 0
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG * 8, nonce(prefix, counter)))
-            c.updateAAD(byteArrayOf(if (last) 1 else 0))
+            c.updateAAD(aad(last, name))
             val plain = try { c.doFinal(cur, 0, n) } catch (e: AEADBadTagException) { throw IOException("Damaged sealed file", e) }
             output.write(plain)
             if (last) break
@@ -68,8 +71,8 @@ object Sealed {
         }
     }
 
-    fun seal(key: SecretKey, bytes: ByteArray): ByteArray = ByteArrayOutputStream(bytes.size + 64).also { seal(key, ByteArrayInputStream(bytes), it) }.toByteArray()
-    fun open(key: SecretKey, bytes: ByteArray): ByteArray = ByteArrayOutputStream(bytes.size).also { open(key, ByteArrayInputStream(bytes), it) }.toByteArray()
+    fun seal(key: SecretKey, bytes: ByteArray, name: String): ByteArray = ByteArrayOutputStream(bytes.size + 64).also { seal(key, ByteArrayInputStream(bytes), it, name) }.toByteArray()
+    fun open(key: SecretKey, bytes: ByteArray, name: String): ByteArray = ByteArrayOutputStream(bytes.size).also { open(key, ByteArrayInputStream(bytes), it, name) }.toByteArray()
 
     fun isSealed(bytes: ByteArray) = bytes.size >= 4 && bytes.copyOfRange(0, 4).contentEquals(MAGIC)
 
@@ -83,7 +86,7 @@ object Sealed {
     }
 
     /** Sealing as data is written (for a backup built on the fly); [close] seals the last segment. */
-    class SealingStream(private val key: SecretKey, private val out: OutputStream) : OutputStream() {
+    class SealingStream(private val key: SecretKey, private val out: OutputStream, private val name: String) : OutputStream() {
         private val prefix = ByteArray(8).also(random::nextBytes)
         private var buf = ByteArray(SEGMENT)
         private var n = 0
@@ -108,7 +111,7 @@ object Sealed {
         private fun segment(last: Boolean) {
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG * 8, nonce(prefix, counter)))
-            c.updateAAD(byteArrayOf(if (last) 1 else 0))
+            c.updateAAD(aad(last, name))
             out.write(c.doFinal(buf, 0, n))
             counter++
             if (counter > 0xFFFFFFFFL) throw IOException("File too large")
@@ -126,7 +129,7 @@ object Sealed {
     }
 
     /** Opening as data is read; a damaged file throws [IOException] before any of its damaged part is given out. */
-    class OpeningStream(private val key: SecretKey, private val input: InputStream) : InputStream() {
+    class OpeningStream(private val key: SecretKey, private val input: InputStream, private val name: String) : InputStream() {
         private var prefix = ByteArray(0)
         private var plain = ByteArray(0)
         private var pos = 0
@@ -151,7 +154,7 @@ object Sealed {
             val last = m == 0
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG * 8, nonce(prefix, counter)))
-            c.updateAAD(byteArrayOf(if (last) 1 else 0))
+            c.updateAAD(aad(last, name))
             plain = try { c.doFinal(cur, 0, n) } catch (e: AEADBadTagException) { throw IOException("Damaged sealed file", e) }
             pos = 0
             counter++

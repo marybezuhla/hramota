@@ -11,10 +11,15 @@ import ua.hramota.data.Vault
 class HramotaApp : Application() {
     private var started = 0
     private val main = Handler(Looper.getMainLooper())
-    private val lock = Runnable { Vault.lock(this) }
+    private val lock: Runnable = Runnable {
+        // Work holding the key (sealing, a backup) finishes first; locking is tried again shortly
+        if (started == 0 && !Vault.lock(this)) main.postDelayed(lock, 5_000)
+    }
 
     override fun onCreate() {
         super.onCreate()
+        // Temporary plain copies left by a process that was stopped are removed at once
+        ua.hramota.data.Shelf.clearOpened(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { started++; main.removeCallbacks(lock) }
             override fun onActivityStopped(activity: Activity) {

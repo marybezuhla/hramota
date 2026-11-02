@@ -61,34 +61,65 @@ object Vault {
 
     fun canUse(context: Context) = context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true
 
-    fun lock(context: Context) {
-        if (key == null) return
+    // Work that needs the key from start to end (turning on or off, a backup): locking waits for it
+    private val busy = java.util.concurrent.atomic.AtomicInteger()
+
+    fun <T> holding(block: () -> T): T { busy.incrementAndGet(); try { return block() } finally { busy.decrementAndGet() } }
+
+    /** Locks now, unless work holding the key is under way; returns whether it locked. */
+    fun lock(context: Context): Boolean {
+        if (busy.get() > 0) return false
+        // Opened copies are plain only while being read: removed even if nothing was unlocked (after a restart)
+        Shelf.clearOpened(context)
+        if (key == null) return true
         key = null
         openState.value = false
         Library.get(context).reload()
-        // Opened copies are plain only while being read
-        File(context.cacheDir, "open").deleteRecursively()
+        Recents.get(context).reload()
+        return true
+    }
+
+    enum class Outcome { OPEN, CANCELLED, NOT_CONFIRMED, KEY_LOST }
+
+    /**
+     * Gives up locked storage whose key the phone no longer has (the screen lock was removed, say):
+     * the sealed files cannot be opened by anyone, so they are deleted and Hramota starts afresh.
+     */
+    fun reset(context: Context) {
+        key = null
+        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context)))
+            dir.listFiles().orEmpty().filter { it.name.endsWith(SUFFIX) }.forEach { it.delete() }
+        context.getSharedPreferences("recents", Context.MODE_PRIVATE).edit().clear().commit()
+        File(context.filesDir, FILE).delete()
+        try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS) } catch (_: Exception) {}
+        openState.value = false
+        Library.get(context).reload()
+        Recents.get(context).reload()
     }
 
     /** Asks for the fingerprint, face or screen lock and opens the storage. */
-    suspend fun unlock(activity: ComponentActivity, title: String, subtitle: String): Boolean {
-        if (!isOn(activity)) return true
-        if (key != null) return true
-        val stored = withContext(Dispatchers.IO) { AtomicFile(File(activity.filesDir, FILE)).readFully() }
+    suspend fun unlock(activity: ComponentActivity, title: String, subtitle: String): Outcome {
+        if (!isOn(activity)) return Outcome.OPEN
+        if (key != null) return Outcome.OPEN
+        val stored = try { withContext(Dispatchers.IO) { AtomicFile(File(activity.filesDir, FILE)).readFully() } } catch (e: Exception) { return Outcome.KEY_LOST }
         val buf = ByteBuffer.wrap(stored)
-        if (stored.size < 13 || buf.get() != VERSION) return false
+        if (stored.size < 13 || buf.get() != VERSION) return Outcome.KEY_LOST
         val iv = ByteArray(12).also { buf.get(it) }
         val wrapped = ByteArray(buf.remaining()).also { buf.get(it) }
-        val kek = kek() ?: return false
-        if (!confirm(activity, title, subtitle)) return false
+        val kek = kek() ?: return Outcome.KEY_LOST
+        if (!confirm(activity, title, subtitle)) return Outcome.CANCELLED
         val raw = try {
             Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, kek, GCMParameterSpec(128, iv)) }.doFinal(wrapped)
-        } catch (e: KeyPermanentlyInvalidatedException) { return false } catch (e: Exception) { return false }
-        key = SecretKeySpec(raw, "AES")
+        } catch (e: KeyPermanentlyInvalidatedException) { return Outcome.KEY_LOST }
+        catch (e: android.security.keystore.UserNotAuthenticatedException) { return Outcome.NOT_CONFIRMED }
+        catch (e: javax.crypto.AEADBadTagException) { return Outcome.KEY_LOST }
+        catch (e: Exception) { return Outcome.NOT_CONFIRMED }
+        // The key and the memory read with it come in together: nothing is written in between
+        withContext(Dispatchers.IO) { Library.get(activity).reloadWith { key = SecretKeySpec(raw, "AES") } }
         raw.fill(0)
+        Recents.get(activity).reload()
         openState.value = true
-        withContext(Dispatchers.IO) { Library.get(activity).reload() }
-        return true
+        return Outcome.OPEN
     }
 
     /**
@@ -110,7 +141,7 @@ object Vault {
             val f = AtomicFile(File(activity.filesDir, FILE))
             val out = f.startWrite()
             try { out.write(byteArrayOf(VERSION) + iv + wrapped); f.finishWrite(out) } catch (e: Exception) { f.failWrite(out); throw e }
-            Library.get(activity).sealAll()
+            holding { Library.get(activity).sealAll() }
         }
         openState.value = true
         return true
@@ -122,7 +153,7 @@ object Vault {
         if (key == null) return false
         withContext(Dispatchers.IO) {
             unsealing = true
-            try { Library.get(activity).unsealAll() } finally { unsealing = false }
+            try { holding { Library.get(activity).unsealAll() } } finally { unsealing = false }
             // Only when nothing sealed is left is the key given up
             File(activity.filesDir, FILE).delete()
             try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS) } catch (_: Exception) {}
@@ -181,7 +212,7 @@ object Vault {
         val sealed = File(context.filesDir, name + SUFFIX)
         if (sealed.exists()) {
             val k = key ?: return null
-            return Sealed.open(k, AtomicFile(sealed).readFully())
+            return Sealed.open(k, AtomicFile(sealed).readFully(), name)
         }
         val plain = File(context.filesDir, name)
         return if (plain.exists()) AtomicFile(plain).readFully() else null
@@ -194,7 +225,7 @@ object Vault {
         if (on && k == null) throw IOException("Locked")
         val target = AtomicFile(File(context.filesDir, if (on) name + SUFFIX else name))
         val out = target.startWrite()
-        try { out.write(if (on) Sealed.seal(k!!, bytes) else bytes); target.finishWrite(out) } catch (e: Exception) { target.failWrite(out); throw e }
+        try { out.write(if (on) Sealed.seal(k!!, bytes, name) else bytes); target.finishWrite(out) } catch (e: Exception) { target.failWrite(out); throw e }
         // Only one form of a file stays
         File(context.filesDir, if (on) name else name + SUFFIX).delete()
     }

@@ -182,7 +182,6 @@
     <string name="vault_no_lock">Set a screen lock on the phone first (PIN, pattern or password).</string>
     <string name="vault_on_done">Locked storage is on</string>
     <string name="vault_off_done">Locked storage is off</string>
-    <string name="vault_failed">That did not work; nothing was changed</string>
     <string name="lock_title">Hramota is locked</string>
     <string name="lock_body">Your documents, shelves and notes open after the phone confirms it is you.</string>
     <string name="unlock">Unlock</string>
@@ -209,4 +208,9 @@
     <string name="backup_wrong">Wrong password, or not a Hramota backup</string>
     <string name="backup_restore_go">Restore</string>
     <string name="backup_restored">Restored: %1$d new, %2$d joined, %3$d documents</string>
+    <string name="vault_failed">That did not work. Nothing was lost; try again.</string>
+    <string name="unlock_not_confirmed">The phone did not confirm it was you. Try the PIN, pattern or password.</string>
+    <string name="vault_key_lost">The phone no longer has the key to the locked storage (its screen lock was removed or changed security). What was locked cannot be opened by anyone.</string>
+    <string name="vault_start_over">Start afresh</string>
+    <string name="vault_start_over_confirm">The locked memory, shelves and kept copies will be deleted. Documents in other places are not touched. If you have a backup, it can be restored after.</string>
 </resources>

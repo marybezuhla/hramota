@@ -20,14 +20,38 @@ object Shelf {
         val shown = if (f.name.endsWith(Vault.SUFFIX)) {
             val key = Vault.key() ?: return null
             val dir = File(context.cacheDir, "open").apply { mkdirs() }
-            val out = File(dir, f.name.removeSuffix(Vault.SUFFIX))
+            // A name of its own for each opening, so two windows never share (and delete) one file
+            val base = f.name.removeSuffix(Vault.SUFFIX)
+            val out = File(dir, base.substringBeforeLast('.') + "-" + System.nanoTime() + "." + base.substringAfterLast('.', "bin"))
+            opened += out.canonicalPath
             try {
-                f.inputStream().buffered().use { input -> out.outputStream().buffered().use { Sealed.open(key, input, it) } }
+                f.inputStream().buffered().use { input -> out.outputStream().buffered().use { Sealed.open(key, input, it, f.name.removeSuffix(Vault.SUFFIX)) } }
             } catch (e: Exception) { out.delete(); throw e }
             out
         } else f
         FileProvider.getUriForFile(context, context.packageName + ".files", shown)
     } catch (e: Exception) { null }
+
+    // Temporary plain copies made in this process: only these are ever deleted on a viewer's request
+    private val opened = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** Deletes a temporary copy, if it is one this process made (never anything named from outside). */
+    fun closeOpened(context: Context, uri: Uri) {
+        val segments = uri.pathSegments
+        if (uri.authority != context.packageName + ".files" || segments.size != 2 || segments[0] != "open") return
+        val name = segments[1]
+        if (name.contains('/') || name.contains("..")) return
+        val f = File(File(context.cacheDir, "open"), name)
+        val path = try { f.canonicalPath } catch (e: Exception) { return }
+        if (f.parentFile?.canonicalPath != File(context.cacheDir, "open").canonicalPath) return
+        if (opened.remove(path)) f.delete()
+    }
+
+    /** Removes every temporary plain copy (on locking, and when Hramota starts). */
+    fun clearOpened(context: Context) {
+        File(context.cacheDir, "open").deleteRecursively()
+        opened.clear()
+    }
 
     /** Copies the document into Hramota's private storage, so it opens from the shelf whatever happens to the original. */
     fun keepCopy(context: Context, e: LibraryEntry): Boolean {
@@ -39,7 +63,7 @@ object Shelf {
         val target = File(Library.copiesDir(context), "${e.id}.$ext" + if (sealing) Vault.SUFFIX else "")
         return try {
             context.contentResolver.openInputStream(source)?.use { input ->
-                target.outputStream().buffered().use { out -> if (sealing) Sealed.seal(key!!, input.buffered(), out) else input.copyTo(out) }
+                target.outputStream().buffered().use { out -> if (sealing) Sealed.seal(key!!, input.buffered(), out, "${e.id}.$ext") else input.copyTo(out) }
             } ?: return false
             Library.get(context).update(e.id) { it?.copy(copy = target.path, onShelf = true) }
             true
@@ -53,14 +77,14 @@ object Shelf {
     /** The document's cover, if there is one and it can be read now. */
     fun loadCover(context: Context, id: String): Bitmap? = try {
         val sealed = coverFile(context, id, true)
-        if (sealed.exists()) Vault.key()?.let { k -> Sealed.open(k, sealed.readBytes()).let { BitmapFactory.decodeByteArray(it, 0, it.size) } }
+        if (sealed.exists()) Vault.key()?.let { k -> Sealed.open(k, sealed.readBytes(), "$id.png").let { BitmapFactory.decodeByteArray(it, 0, it.size) } }
         else coverFile(context, id, false).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path) }
     } catch (e: Exception) { null }
 
     /** The cover as PNG bytes (opened if sealed), for a backup. */
     fun loadCoverBytes(context: Context, id: String): ByteArray? = try {
         val sealed = coverFile(context, id, true)
-        if (sealed.exists()) Vault.key()?.let { Sealed.open(it, sealed.readBytes()) }
+        if (sealed.exists()) Vault.key()?.let { Sealed.open(it, sealed.readBytes(), "$id.png") }
         else coverFile(context, id, false).takeIf { it.exists() }?.readBytes()
     } catch (e: Exception) { null }
 
@@ -75,7 +99,7 @@ object Shelf {
             val w = 240
             val scaled = Bitmap.createScaledBitmap(bitmap, w, (w.toFloat() * bitmap.height / bitmap.width).toInt().coerceIn(1, 600), true)
             val png = java.io.ByteArrayOutputStream().also { scaled.compress(Bitmap.CompressFormat.PNG, 90, it) }.toByteArray()
-            f.writeBytes(if (sealing) Sealed.seal(key!!, png) else png)
+            f.writeBytes(if (sealing) Sealed.seal(key!!, png, "$id.png") else png)
         } catch (e: Exception) { f.delete() }
     }
 
@@ -87,10 +111,11 @@ object Shelf {
         val isSealed = f.name.endsWith(Vault.SUFFIX)
         if (isSealed == seal) return null
         val out = if (seal) File(f.path + Vault.SUFFIX) else File(f.path.removeSuffix(Vault.SUFFIX))
+        val name = f.name.removeSuffix(Vault.SUFFIX)
         try {
-            f.inputStream().buffered().use { input -> out.outputStream().buffered().use { if (seal) Sealed.seal(key, input, it) else Sealed.open(key, input, it) } }
+            f.inputStream().buffered().use { input -> out.outputStream().buffered().use { if (seal) Sealed.seal(key, input, it, name) else Sealed.open(key, input, it, name) } }
             // Checked before the original goes: a sealed file must open again
-            if (seal) out.inputStream().buffered().use { Sealed.open(key, it, NullOut) }
+            if (seal) out.inputStream().buffered().use { Sealed.open(key, it, NullOut, name) }
         } catch (e: Exception) { out.delete(); throw IOException("Could not convert ${f.name}", e) }
         f.delete()
         return out
