@@ -57,6 +57,19 @@ class MainActivity : ComponentActivity() {
 
     // The system file picker: Hramota sees only the file chosen there
     private val pick = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> onPicked(uri) }
+    // Originals kept by saves that did not finish (Hramota stopped, or the file could not be put back)
+    private var rescues by mutableStateOf<List<EditSaving.Rescue>>(emptyList())
+    private var savingRescue: EditSaving.Rescue? = null
+    private val saveRescue = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
+        val r = savingRescue ?: return@registerForActivityResult
+        savingRescue = null
+        if (target == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { EditSaving.saveRescue(applicationContext, r, target) }
+            android.widget.Toast.makeText(this@MainActivity, getString(if (ok) R.string.rescue_saved else R.string.rescue_not_saved), android.widget.Toast.LENGTH_LONG).show()
+            if (ok) rescues = rescues - r
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -87,6 +100,29 @@ class MainActivity : ComponentActivity() {
                     // The shelf holds only documents kept inside Hramota
                     val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
                     BackHandler(showSettings) { showSettings = false }
+                    // Looked for once Hramota is open (a sealed one needs the storage unlocked)
+                    androidx.compose.runtime.LaunchedEffect(Unit) {
+                        rescues = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            EditSaving.Rescue.left(applicationContext).filter { !it.sealed || ua.hramota.data.Vault.key() != null }
+                        }
+                    }
+                    rescues.firstOrNull()?.let { r ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { rescues = rescues - r },
+                            title = { androidx.compose.material3.Text(getString(R.string.rescue_title)) },
+                            text = { androidx.compose.material3.Text(getString(R.string.rescue_text, r.name.ifBlank { "?" })) },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = { savingRescue = r; saveRescue.launch(r.name.substringBeforeLast('.', r.name).ifBlank { "document" } + " (" + getString(R.string.rescue_suffix) + ").docx") }) {
+                                    androidx.compose.material3.Text(getString(R.string.rescue_save))
+                                }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(onClick = { r.delete(); rescues = rescues - r }) {
+                                    androidx.compose.material3.Text(getString(R.string.rescue_delete), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                                }
+                            },
+                        )
+                    }
                     if (choosing && comparing) ua.hramota.ui.ComparePicker(
                         getString(if (compareFirst == null) R.string.compare_pick_first else R.string.compare_pick_second),
                         shelf, files,

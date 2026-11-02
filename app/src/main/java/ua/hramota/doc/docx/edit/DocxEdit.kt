@@ -59,6 +59,7 @@ class DocxEdit private constructor(
     private val digest: ByteArray,
     private val w: String,
     private val slots: List<Slot>,
+    private val partDigests: Map<String, ByteArray>,
     private var stylesXml: String?,
     private var numberingXml: String?,
     private var relsXml: String?,
@@ -397,7 +398,13 @@ class DocxEdit private constructor(
                         if (!MessageDigest.getInstance("SHA-256").digest(was).contentEquals(digest)) throw IOException("The document changed meanwhile")
                         z.write(doc)
                     }
-                    changedParts.containsKey(name) -> z.write(changedParts.getValue(name).toByteArray(Charsets.UTF_8))
+                    changedParts.containsKey(name) -> {
+                        // A part changed here must still be the one opened (not changed by another app meanwhile)
+                        val was = readAll(zip, MAX_SMALL)
+                        val opened = partDigests[name]
+                        if (opened != null && !MessageDigest.getInstance("SHA-256").digest(was).contentEquals(opened)) throw IOException("$name changed meanwhile")
+                        z.write(changedParts.getValue(name).toByteArray(Charsets.UTF_8))
+                    }
                     else -> {
                         val buf = ByteArray(64 * 1024)
                         while (true) {
@@ -444,6 +451,8 @@ class DocxEdit private constructor(
         fun open(input: InputStream): DocxEdit {
             var doc: ByteArray? = null
             var styles: String? = null; var numbering: String? = null; var rels: String? = null; var types: String? = null
+            val digests = HashMap<String, ByteArray>()
+            fun small(zip: InputStream, name: String): String { val b = readAll(zip, MAX_SMALL); digests[name] = MessageDigest.getInstance("SHA-256").digest(b); return text(b) }
             ZipInputStream(input).use { zip ->
                 var count = 0
                 while (true) {
@@ -451,10 +460,10 @@ class DocxEdit private constructor(
                     if (++count > MAX_ENTRIES) throw IOException("Too many entries")
                     when (e.name) {
                         DOCUMENT -> doc = readAll(zip, MAX_DOCUMENT)
-                        "word/styles.xml" -> styles = text(readAll(zip, MAX_SMALL))
-                        "word/numbering.xml" -> numbering = text(readAll(zip, MAX_SMALL))
-                        "word/_rels/document.xml.rels" -> rels = text(readAll(zip, MAX_SMALL))
-                        "[Content_Types].xml" -> types = text(readAll(zip, MAX_SMALL))
+                        "word/styles.xml" -> styles = small(zip, e.name)
+                        "word/numbering.xml" -> numbering = small(zip, e.name)
+                        "word/_rels/document.xml.rels" -> rels = small(zip, e.name)
+                        "[Content_Types].xml" -> types = small(zip, e.name)
                     }
                 }
             }
@@ -481,7 +490,7 @@ class DocxEdit private constructor(
                 }
             }
             collect(XmlScan.children(xml, body), 0, 0)
-            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, styles, numbering, rels, types, paras)
+            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, digests, styles, numbering, rels, types, paras)
         }
 
         private fun paragraph(xml: String, w: String, e: Elem, slot: Int, interned: HashMap<String, RunStyle>): EditPara {

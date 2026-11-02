@@ -216,7 +216,7 @@ class ViewerActivity : ComponentActivity() {
                     held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
                     if (editor != null) {
                         ua.hramota.ui.DocxEditorScreen(name, editor, held.saving,
-                            onSave = { saveEdits(editor, uri, docId) },
+                            onSave = { saveEdits(editor, uri, docId, name) },
                             onClose = { held.editor = null })
                         return@Surface
                     }
@@ -325,27 +325,31 @@ class ViewerActivity : ComponentActivity() {
     /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
     private fun startEditing(uri: android.net.Uri) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
-        lifecycleScope.launch {
+        val app = applicationContext
+        held.scope.launch {
             val edit = withContext(Dispatchers.IO) {
-                try { contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) }?.let { ua.hramota.ui.EditorState(it) } }
+                try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) }?.let { ua.hramota.ui.EditorState(it) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
             }
-            if (edit == null) android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
+            if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
             else held.editor = edit
         }
     }
 
     /** Saves the edits off the main thread, in work that outlives the window (turning the phone); the outcome is shown when it is back. */
-    private fun saveEdits(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, id: String?) {
+    private fun saveEdits(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, id: String?, name: String) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         if (held.saving) return
         held.saving = true
         val list = editor.paras
         val app = applicationContext
+        // Locked storage stays open until the file is written (its temporary files would go with locking)
+        ua.hramota.data.Vault.hold()
         held.scope.launch {
             val outcome = try {
-                withContext(Dispatchers.IO) { ua.hramota.data.Vault.holding { EditSaving.saveInto(app, editor.edit, list, uri, id) } }
+                withContext(Dispatchers.IO) { EditSaving.saveInto(app, editor.edit, list, uri, id, name) }
             } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
+            finally { ua.hramota.data.Vault.release() }
             held.saving = false
             held.outcome = outcome
         }
@@ -397,8 +401,10 @@ class ViewerActivity : ComponentActivity() {
         held.saving = true
         val list = editor.paras
         val app = applicationContext
+        ua.hramota.data.Vault.hold()
         held.scope.launch {
             val outcome = try { withContext(Dispatchers.IO) { EditSaving.saveCopy(app, editor.edit, list, uri, target) } } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
+            finally { ua.hramota.data.Vault.release() }
             held.saving = false
             held.outcome = outcome
         }
@@ -412,7 +418,8 @@ class ViewerActivity : ComponentActivity() {
     private suspend fun saveNotesInto(pdf: PdfiumPages, uri: android.net.Uri, id: String): String? {
         val library = Library.get(applicationContext)
         val entry = library.get(id) ?: return null
-        val temp = java.io.File(cacheDir, "notes-${System.nanoTime()}.pdf")
+        // In the folder emptied when Hramota locks: a plain copy is never left behind
+        val temp = java.io.File(java.io.File(cacheDir, "open").apply { mkdirs() }, "notes-${System.nanoTime()}.pdf")
         try {
             val written = android.os.ParcelFileDescriptor.open(temp, android.os.ParcelFileDescriptor.MODE_READ_WRITE or android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_TRUNCATE)
                 .use { pdf.saveNotes(entry.notes, ::noteArgb, it) }

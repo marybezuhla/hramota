@@ -397,8 +397,8 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
                     val removed = before.length - pre - suf
                     if (removed > 0) {
                         // The mark was deleted: Backspace at the start joins this paragraph to the one before
-                        stale[0] = true
-                        if (!state.joinWithPrevious(p.key)) value = TextFieldValue(ZW + p.text, TextRange(1))
+                        // Joined: this field goes away. Refused: nothing changed, the mark is simply kept
+                        if (state.joinWithPrevious(p.key)) stale[0] = true else value = TextFieldValue(ZW + p.text, TextRange(1))
                         return@BasicTextField
                     }
                     // Typed before the mark: the mark goes back to the very start
