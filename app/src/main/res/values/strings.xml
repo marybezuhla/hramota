@@ -118,7 +118,7 @@
     <string name="settings_version">Hramota %1$s</string>
     <string name="settings_privacy_statement">Hramota has no internet access and asks for no permissions. It sees only the files you open, and keeps nothing outside this phone.</string>
     <string name="settings_licenses">Licences</string>
-    <string name="licenses_text">Hramota — GPL-3.0.\n\nPDFium — BSD 3-Clause (Google, the PDFium authors).\npdfium-binaries — MIT (Benoît Blanchon).\n\nFonts Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX and Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
+    <string name="licenses_text">Hramota — GNU GPL-3.0, with no warranty. Source code: github.com/Marybezu/hramota\n\nPDFium — BSD 3-Clause (Google, the PDFium authors).\npdfium-binaries — MIT (Benoît Blanchon).\n\nFonts Literata, Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX and Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
     <string name="pages_cut">not all pages: out of memory</string>
     <string name="slide_n">Slide %1$d</string>
     <string name="settings_docx_open_hint">Pages, like on paper, with the layout of the original. Text flows to the width of the screen, easier to read on a phone. You can switch at any time in the document.</string>

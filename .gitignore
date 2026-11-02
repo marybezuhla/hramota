@@ -10,3 +10,9 @@ captures/
 .kotlin/
 __pycache__/
 
+
+# Kept by the owner, not in the repository
+CLAUDE.md
+DECISIONS.md
+*.jks
+*.jks.enc

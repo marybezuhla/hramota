@@ -69,8 +69,6 @@ jobs:
           gradle-version: "8.14.3"
 
       - name: Test and build (unsigned)
-        env:
-          VERSION_CODE: ${{ github.run_number }}
         shell: bash
         run: |
           set -o pipefail
@@ -227,8 +225,9 @@ jobs:
         env:
           PASS: ${{ secrets.HRAMOTA_SIGNING_PASS }}
           STORE: ${{ secrets.HRAMOTA_STORE_PASS }}
+          KEYSTORE: ${{ secrets.HRAMOTA_KEYSTORE }}
         run: |
-          if [ -n "$PASS" ] && [ -n "$STORE" ]; then
+          if [ -n "$PASS" ] && [ -n "$STORE" ] && [ -n "$KEYSTORE" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "::error::Signing secrets are not set in the release environment; nothing is published."
@@ -261,13 +260,16 @@ jobs:
         env:
           PASS: ${{ secrets.HRAMOTA_SIGNING_PASS }}
           STORE: ${{ secrets.HRAMOTA_STORE_PASS }}
+          KEYSTORE: ${{ secrets.HRAMOTA_KEYSTORE }}
         shell: bash
         run: |
           set -e
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           printf %s "$PASS" > "$RUNNER_TEMP/p"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing/hramota.jks.enc -out "$RUNNER_TEMP/hramota.jks" -pass file:"$RUNNER_TEMP/p"
-          rm "$RUNNER_TEMP/p"
+          # The key is kept only in the release environment's secrets (encrypted, as base64), never in the repository
+          printf %s "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/k.enc"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in "$RUNNER_TEMP/k.enc" -out "$RUNNER_TEMP/hramota.jks" -pass file:"$RUNNER_TEMP/p"
+          rm "$RUNNER_TEMP/p" "$RUNNER_TEMP/k.enc"
           mkdir -p out
           "$BT/zipalign" -P 16 -f 4 unsigned/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
           OUT="out/hramota-$(tr -d '[:space:]' < version.txt).apk"
@@ -283,7 +285,7 @@ jobs:
 
       - name: Remove the decrypted key
         if: always()
-        run: rm -f "$RUNNER_TEMP/hramota.jks" "$RUNNER_TEMP/p"
+        run: rm -f "$RUNNER_TEMP/hramota.jks" "$RUNNER_TEMP/p" "$RUNNER_TEMP/k.enc"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: steps.secrets.outputs.ready == 'true'

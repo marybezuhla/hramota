@@ -6,12 +6,15 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val ciVersionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-// The version people see (major.minor.patch), set by hand before each release in version.txt.
+// The version people see (major.minor.patch), set by hand before each release in version.txt;
+// Android's version number comes from it (1.2.4 → 10204), so every build of a version has the same one.
 val appVersion = rootProject.file("version.txt").readText().trim()
+val appVersionCode = appVersion.split('.').map { it.toInt() }.let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
 
 android {
     namespace = "ua.hramota"
+    // No list of dependencies (encrypted for Google) inside the APK
+    dependenciesInfo { includeInApk = false; includeInBundle = false }
     compileSdk = 36
     // Pinned so the PDF bridge (src/main/cpp) builds the same everywhere
     ndkVersion = "27.0.12077973"
@@ -20,7 +23,7 @@ android {
         applicationId = "ua.hramota"
         minSdk = 31
         targetSdk = 36
-        versionCode = ciVersionCode
+        versionCode = appVersionCode
         versionName = appVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += "arm64-v8a" }
