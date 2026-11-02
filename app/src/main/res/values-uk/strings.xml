@@ -231,7 +231,6 @@
     <string name="forget_go">Забути</string>
     <string name="drop_go">Прибрати</string>
     <string name="dict_section">Словники</string>
-    <string name="dict_section_hint">Словники у форматі StarDict (.ifo, .idx і .dict або .dict.dz, чи ZIP із ними), які ви додаєте самі. Виділіть слово в книзі й виберіть «Словник». Усе лишається на телефоні.</string>
     <string name="dict_words">слів: %1$d</string>
     <string name="dict_add">Додати словник</string>
     <string name="dict_adding">Додаю словник…</string>
@@ -249,4 +248,6 @@
     <string name="pdf_with_notes_suffix">(з нотатками)</string>
     <string name="pdf_notes_saved">Нотатки збережено в PDF</string>
     <string name="pdf_notes_not_saved">Не вдалося записати в цей файл; спробуйте «Копією»</string>
+    <string name="pdf_copy_not_saved">Не вдалося зберегти копію</string>
+    <string name="dict_section_hint">Словники у форматі StarDict (.ifo, .idx і .dict або .dict.dz, чи ZIP із ними), які ви додаєте самі. Виділіть слово в книзі чи документі й виберіть «Словник». Усе лишається на телефоні.</string>
 </resources>

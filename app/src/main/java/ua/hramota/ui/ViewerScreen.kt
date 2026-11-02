@@ -613,9 +613,11 @@ private fun PageNotesSheet(
     // The marked words, read from the pages off the main thread
     val words by androidx.compose.runtime.produceState(emptyMap<Long, String>(), sorted) {
         val out = HashMap<Long, String>()
+        val texts = HashMap<Int, String>()
         for (n in sorted.take(500)) {
-            val t = try { pages.pageText(n.block) } catch (e: Exception) { "" }
-            out[n.at] = t.substring(n.start.coerceIn(0, t.length), n.end.coerceIn(0, t.length)).replace('\uFFFC', ' ').trim()
+            val t = texts.getOrPut(n.block) { try { pages.pageText(n.block) } catch (e: Exception) { "" } }
+            val a = n.start.coerceIn(0, t.length); val b = n.end.coerceIn(a, t.length)
+            out[n.at] = t.substring(a, b).replace('\uFFFC', ' ').trim()
         }
         value = out
     }

@@ -326,6 +326,14 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveNotes(JNIEnv* en
     jint* st = (*env)->GetIntArrayElements(env, starts, NULL);
     jint* ct = (*env)->GetIntArrayElements(env, counts, NULL);
     jint* co = (*env)->GetIntArrayElements(env, colors, NULL);
+    if (!pg || !st || !ct || !co) {
+        if (pg) (*env)->ReleaseIntArrayElements(env, pages, pg, JNI_ABORT);
+        if (st) (*env)->ReleaseIntArrayElements(env, starts, st, JNI_ABORT);
+        if (ct) (*env)->ReleaseIntArrayElements(env, counts, ct, JNI_ABORT);
+        if (co) (*env)->ReleaseIntArrayElements(env, colors, co, JNI_ABORT);
+        FPDF_CloseDocument(doc);
+        return JNI_FALSE;
+    }
     int pageCount = FPDF_GetPageCount(doc);
     for (jsize i = 0; i < n; i++) {
         if (pg[i] < 0 || pg[i] >= pageCount || st[i] < 0 || ct[i] <= 0) continue;
@@ -340,9 +348,11 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveNotes(JNIEnv* en
                     unsigned int c = (unsigned int)co[i];
                     FPDFAnnot_SetColor(annot, FPDFANNOT_COLORTYPE_Color, (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, (c >> 24) & 0xFF);
                     double minL = 1e9, minB = 1e9, maxR = -1e9, maxT = -1e9;
+                    int got = 0;
                     for (int r = 0; r < rects; r++) {
                         double l, t, rr, b;
                         if (!FPDFText_GetRect(text, r, &l, &t, &rr, &b)) continue;
+                        got++;
                         FS_QUADPOINTSF q = { (float)l, (float)t, (float)rr, (float)t, (float)l, (float)b, (float)rr, (float)b };
                         FPDFAnnot_AppendAttachmentPoints(annot, &q);
                         if (l < minL) minL = l;
@@ -350,6 +360,8 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveNotes(JNIEnv* en
                         if (rr > maxR) maxR = rr;
                         if (t > maxT) maxT = t;
                     }
+                    // No box could be read: the annotation is taken off again
+                    if (got == 0) { FPDFPage_CloseAnnot(annot); FPDFPage_RemoveAnnot(page, FPDFPage_GetAnnotCount(page) - 1); FPDFText_ClosePage(text); FPDF_ClosePage(page); continue; }
                     FS_RECTF box = { (float)minL, (float)maxT, (float)maxR, (float)minB };
                     FPDFAnnot_SetRect(annot, &box);
                     jstring words = (jstring)(*env)->GetObjectArrayElement(env, texts, i);

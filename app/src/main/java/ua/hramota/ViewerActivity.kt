@@ -184,8 +184,9 @@ class ViewerActivity : ComponentActivity() {
                                     docId?.let { id ->
                                         lifecycleScope.launch {
                                             val newId = withContext(Dispatchers.IO) { saveNotesInto(pdf, uri, id) }
-                                            if (newId != null) { docId = newId; currentId = newId }
                                             android.widget.Toast.makeText(this@ViewerActivity, getString(if (newId != null) R.string.pdf_notes_saved else R.string.pdf_notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
+                                            // The file is different now: opened again, so its new notes show and the next save builds on them
+                                            if (newId != null) recreate()
                                         }
                                     }
                                 }) { androidx.compose.material3.Text(getString(R.string.pdf_into_file)) }
@@ -302,7 +303,7 @@ class ViewerActivity : ComponentActivity() {
                 } catch (e: Exception) { false }
             }
             if (!ok) try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
-            android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.pdf_notes_saved else R.string.pdf_notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.pdf_notes_saved else R.string.pdf_copy_not_saved), android.widget.Toast.LENGTH_LONG).show()
         }
     }
     private var currentId: String? = null
@@ -335,7 +336,15 @@ class ViewerActivity : ComponentActivity() {
                     if (!part.renameTo(copy)) { part.delete(); return null }
                 }
             } else {
-                contentResolver.openOutputStream(uri, "wt")?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
+                // The engine (not trusted) must have kept the file whole, only adding to its end: the
+                // original's bytes are checked to begin the new file, then only the addition is written
+                val originalSize = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: return null
+                if (originalSize <= 0 || temp.length() <= originalSize) return null
+                val same = contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, originalSize) } } ?: false
+                if (!same) return null
+                contentResolver.openOutputStream(uri, "wa")?.use { out ->
+                    temp.inputStream().use { input -> input.skip(originalSize); input.copyTo(out) }
+                } ?: return null
             }
             val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return null
             library.update(newId) { entry.copy(id = newId, notes = emptyList()) }
@@ -349,6 +358,20 @@ class ViewerActivity : ComponentActivity() {
         } finally {
             temp.delete()
         }
+    }
+
+    /** True if [b] begins with the first [n] bytes of [a]. */
+    private fun sameStart(a: java.io.InputStream, b: java.io.InputStream, n: Long): Boolean {
+        val x = ByteArray(64 * 1024); val y = ByteArray(64 * 1024)
+        var left = n
+        while (left > 0) {
+            val want = minOf(left, x.size.toLong()).toInt()
+            val ka = a.readNBytes(x, 0, want); val kb = b.readNBytes(y, 0, want)
+            if (ka != want || kb != want) return false
+            if (!java.util.Arrays.equals(x, 0, want, y, 0, want)) return false
+            left -= want
+        }
+        return true
     }
 
     private fun noteArgb(color: Int): Int {

@@ -94,8 +94,9 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     private val left = tw(doc.page.left)
     private val contentWidth = tw(doc.page.width - doc.page.left - doc.page.right)
     // As in Word, a header taller than the top margin pushes the text down (and a footer pushes it up)
-    private val top by lazy { max(tw(doc.page.top), tw(doc.page.header) + headerHeight(true)) }
-    private val bottom by lazy { min(pageHeight - tw(doc.page.bottom), pageHeight - tw(doc.page.footer) - headerHeight(false)) }
+    // …but never so far that the text has less than half the page
+    private val top by lazy { max(tw(doc.page.top), min(tw(doc.page.header) + headerHeight(true), pageHeight * 0.25f)) }
+    private val bottom by lazy { min(pageHeight - tw(doc.page.bottom), max(pageHeight - tw(doc.page.footer) - headerHeight(false), pageHeight * 0.75f)) }
 
     private val basePaint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.LINEAR_TEXT_FLAG).apply {
         // Word neither kerns nor joins letters by default

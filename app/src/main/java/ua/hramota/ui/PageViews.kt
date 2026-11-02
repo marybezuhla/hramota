@@ -157,7 +157,8 @@ fun ZoomablePages(
                 val renderW = (widthPx * quality).roundToInt()
                 var image by remember(index) { mutableStateOf<ImageBitmap?>(null) }
                 var failed by remember(index) { mutableStateOf(false) }
-                LaunchedEffect(index, renderW) {
+                // Drawn again once all pages are laid out (a header's "page 1 of N" then knows N)
+                LaunchedEffect(index, renderW, text?.complete) {
                     val drawn = pages.render(index, renderW)
                     if (drawn != null) { image = drawn; failed = false } else if (image == null) failed = true
                 }
