@@ -123,6 +123,43 @@ class DocxEditTest {
         assertTrue(texts(saved).any { it.contains("(змінено)") })
     }
 
+    @Test fun commentsAreKeptMovedAddedAndRemoved() {
+        val src = File(javaClass.classLoader!!.getResource("docs-edit/comments.docx")!!.toURI()).readBytes()
+        fun save(edit: DocxEdit, list: List<EditPara>, label: String): ByteArray {
+            val out = ByteArrayOutputStream()
+            edit.save(list, ByteArrayInputStream(src), out)
+            File("build/edited").apply { mkdirs() }.let { File(it, "$label-comments.docx").writeBytes(out.toByteArray()) }
+            return out.toByteArray()
+        }
+        val edit = DocxEdit.open(ByteArrayInputStream(src))
+        assertEquals(4, edit.comments().size)
+        // Paragraphs with comments can be edited, and saving unchanged keeps them to the byte
+        assertTrue(edit.paragraphs.all { it.editable })
+        assertTrue(part(src, "word/document.xml")!!.contentEquals(part(save(edit, edit.paragraphs, "same"), "word/document.xml")!!))
+        val list = edit.paragraphs.toMutableList()
+        val i = list.indexOfFirst { it.text.startsWith("Строк") }
+        val p = list[i]
+        // Typed before a comment: its range moves with the text
+        list[i] = edit.retyped(p, "Новий " + p.text, List(6) { p.marks[0] } + p.marks, 0, 0)
+        assertEquals("десять робочих днів", edit.commentPlace(list, "0")!!.second)
+        val j = list.indexOfFirst { it.text.startsWith("Оплата") }
+        list[j] = edit.comment(list[j], 0, 6, "Тест", "Новий коментар\nдругий рядок")
+        val after = edit.uncomment(list, "1")!!
+        val saved = save(edit, after, "edited")
+        val again = DocxEdit.open(ByteArrayInputStream(saved))
+        assertEquals(setOf("Може, п'ять?", "Уточнити.", "Або готівкою?", "Новий коментар\nдругий рядок"), again.comments().map { it.text }.toSet())
+        assertEquals("Оплата", again.commentPlace(again.paragraphs, again.comments().first { it.author == "Тест" }.id)!!.second)
+        assertFalse(String(part(saved, "word/comments.xml")!!).contains("Перевірити з юристом"))
+        // A comment added to a document that had none brings its own part
+        val plain = DocxEdit.open(ByteArrayInputStream(bytes("02-paragraphs.docx")))
+        val l2 = plain.paragraphs.toMutableList()
+        val k = l2.indexOfFirst { it.editable && it.text.length > 10 }
+        l2[k] = plain.comment(l2[k], 0, 5, "", "Перший коментар")
+        val withPart = save("02-paragraphs.docx", plain, l2, "comment")
+        assertNotNull(part(withPart, "word/comments.xml"))
+        assertTrue(String(part(withPart, "word/_rels/document.xml.rels")!!).contains("relationships/comments"))
+    }
+
     @Test fun propertiesKeepSchemaOrder() {
         val ppr = "<w:pPr><w:keepNext/><w:jc w:val=\"center\"/></w:pPr>"
         val withStyle = DocxEdit.setChild(ppr, "pStyle", "<w:pStyle w:val=\"H\"/>", listOf("pStyle", "keepNext", "jc"))

@@ -217,7 +217,10 @@ class ViewerActivity : ComponentActivity() {
                     if (editor != null) {
                         ua.hramota.ui.DocxEditorScreen(name, editor, held.saving,
                             onSave = { saveEdits(editor, uri, docId, name) },
-                            onClose = { held.editor = null })
+                            onClose = { held.editor = null },
+                            author = settings.commentAuthor,
+                            onAuthor = { who -> ua.hramota.data.Settings.get(this@ViewerActivity).update { it.copy(commentAuthor = who) } },
+                            startWithComments = held.withComments)
                         return@Surface
                     }
                     ViewerScreen(
@@ -238,6 +241,10 @@ class ViewerActivity : ComponentActivity() {
                             listOfNotNull<Pair<String, () -> Unit>>(
                                 // Word documents can be edited: text, bold and other marks, headings, lists
                                 if (format == Format.DOCX && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
+                                // Word comments: read, answered with new ones, removed (in the editing view)
+                                (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 }?.let { n ->
+                                    getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
+                                },
                                 // On the shelf = kept inside Hramota; taking it off keeps bookmarks and notes
                                 if (e?.copy == null) getString(R.string.shelf_save) to {
                                     if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
@@ -323,8 +330,9 @@ class ViewerActivity : ComponentActivity() {
     private var currentId: String? = null
 
     /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
-    private fun startEditing(uri: android.net.Uri) {
+    private fun startEditing(uri: android.net.Uri, withComments: Boolean = false) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        held.withComments = withComments
         val app = applicationContext
         held.scope.launch {
             val edit = withContext(Dispatchers.IO) {
@@ -551,6 +559,8 @@ class ViewerActivity : ComponentActivity() {
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
         var saving by mutableStateOf(false)
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
+        /** The editing view opens with the list of comments. */
+        var withComments = false
         /** The edits wait for the place of their copy (the file picker is open). */
         var copyPending = false
         val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)

@@ -306,11 +306,14 @@ class ScreensTest {
     @Config(qualifiers = "+night")
     @Test fun comparePickerDark() = shot("06-compare-pick-dark") { comparePicker("Оберіть попередню версію") }
     private fun editor(name: String) = ua.hramota.ui.EditorState(
-        ua.hramota.doc.docx.edit.DocxEdit.open(File(javaClass.classLoader!!.getResource("docs/$name")!!.toURI()).inputStream()),
+        ua.hramota.doc.docx.edit.DocxEdit.open(File(javaClass.classLoader!!.getResource(if ('/' in name) name else "docs/$name")!!.toURI()).inputStream()),
     ).also { s -> s.focused = s.paras.first { it.text.startsWith("Другий") || it.text.length > 30 }.key }
     @Test fun editorLists() = shot("13-edit-docx") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(qualifiers = "+night")
     @Test fun editorDark() = shot("13-edit-docx-dark") { ua.hramota.ui.DocxEditorScreen("Таблиці.docx", androidx.compose.runtime.remember { editor("04-tables.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Test fun editorComments() = shot("13-edit-docx-comments") { ua.hramota.ui.DocxEditorScreen("Коментарі.docx", androidx.compose.runtime.remember { editor("docs-edit/comments.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "+night")
+    @Test fun editorCommentsDark() = shot("13-edit-docx-comments-dark") { ua.hramota.ui.DocxEditorScreen("Коментарі.docx", androidx.compose.runtime.remember { editor("docs-edit/comments.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(fontScale = 1.5f)
     @Test fun editorLargeFont() = shot("13-edit-docx-large-font") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")

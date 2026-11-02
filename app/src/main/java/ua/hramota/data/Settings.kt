@@ -37,6 +37,8 @@ data class AppSettings(
     val readTurn: String = "slide",
     /** Books: the volume keys turn pages. */
     val readVolumeKeys: Boolean = true,
+    /** The name put on Word comments written here (empty: none). */
+    val commentAuthor: String = "",
 )
 
 /** One instance per process; screens observe [state] and change it with [update]. */
@@ -59,6 +61,7 @@ class Settings private constructor(context: Context) {
             .putFloat("readSize", s.readSize).putFloat("readSpacing", s.readSpacing).putFloat("readMargin", s.readMargin)
             .putBoolean("readJustify", s.readJustify).putBoolean("readPaged", s.readPaged)
             .putString("readTurn", s.readTurn).putBoolean("readVolumeKeys", s.readVolumeKeys)
+            .putString("commentAuthor", s.commentAuthor)
             .apply()
         flow.value = s
     }
@@ -71,6 +74,7 @@ class Settings private constructor(context: Context) {
             put("secureScreen", s.secureScreen); put("dynamicColor", s.dynamicColor)
             put("readPaper", s.readPaper); put("readFont", s.readFont); put("readSize", s.readSize.toDouble()); put("readSpacing", s.readSpacing.toDouble())
             put("readMargin", s.readMargin.toDouble()); put("readJustify", s.readJustify); put("readPaged", s.readPaged); put("readTurn", s.readTurn); put("readVolumeKeys", s.readVolumeKeys)
+            put("commentAuthor", s.commentAuthor)
         }
     }
 
@@ -88,6 +92,7 @@ class Settings private constructor(context: Context) {
             readJustify = o.optBoolean("readJustify", s.readJustify), readPaged = o.optBoolean("readPaged", s.readPaged),
             readTurn = o.optString("readTurn", s.readTurn).takeIf { it in setOf("slide", "curl", "none") } ?: s.readTurn,
             readVolumeKeys = o.optBoolean("readVolumeKeys", s.readVolumeKeys),
+            commentAuthor = o.optString("commentAuthor", s.commentAuthor).take(100),
         )
     }
 
@@ -108,6 +113,7 @@ class Settings private constructor(context: Context) {
         readPaged = prefs.getBoolean("readPaged", true),
         readTurn = prefs.getString("readTurn", "slide").takeIf { it in setOf("slide", "curl", "none") } ?: "slide",
         readVolumeKeys = prefs.getBoolean("readVolumeKeys", true),
+        commentAuthor = prefs.getString("commentAuthor", "").orEmpty().take(100),
     )
 
     companion object {

@@ -20,6 +20,15 @@ data class RunStyle(val rPr: String, val bold: Boolean? = null, val italic: Bool
 data class Look(val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false, val strike: Boolean = false)
 
 enum class Kind { NORMAL, H1, H2, H3, OTHER }
+
+/** Where a comment begins or ends, or its mark (Word's reference), at a place in a paragraph's text. */
+class Anchor(val at: Int, val xml: String, val comment: String, val kind: Anchor.Kind) {
+    enum class Kind { START, END, REF }
+    fun moved(to: Int) = Anchor(to, xml, comment, kind)
+}
+
+/** A Word comment: who wrote it, when, and what it says. */
+class Comment(val id: String, val author: String, val date: String, val text: String)
 enum class ListKind { BULLET, NUMBER }
 
 /**
@@ -40,15 +49,22 @@ class EditPara(
     val original: String?,
     /** Formatting for text typed into an empty paragraph. */
     val typing: RunStyle,
+    /** Comment ranges and marks, by place in [text], in the order the file has them. */
+    val anchors: List<Anchor> = emptyList(),
 ) {
     init { require(marks.size == text.length) }
 
-    fun changed(text: String = this.text, marks: List<RunStyle> = this.marks, pPr: String = this.pPr, head: String = this.head, tail: String = this.tail, key: Long = this.key) =
-        EditPara(key, slot, text, marks, pPr, startTag, head, tail, editable, null, marks.lastOrNull() ?: typing)
+    /** The paragraph changed. Anchors stay where they were (clamped to the text): text edits move them with [DocxEdit.retyped]. */
+    fun changed(text: String = this.text, marks: List<RunStyle> = this.marks, pPr: String = this.pPr, head: String = this.head, tail: String = this.tail, key: Long = this.key,
+                anchors: List<Anchor> = this.anchors) =
+        EditPara(key, slot, text, marks, pPr, startTag, head, tail, editable, null, marks.lastOrNull() ?: typing,
+            if (anchors.any { it.at > text.length }) anchors.map { if (it.at > text.length) it.moved(text.length) else it } else anchors)
 }
 
 /** What the editor shows for a paragraph besides its text. */
-class Shown(val kind: Kind, val marker: String?, val list: ListKind?, val inTable: Boolean, val base: Look, val rowStart: Boolean = false, val cellStart: Boolean = false)
+class Shown(val kind: Kind, val marker: String?, val list: ListKind?, val inTable: Boolean, val base: Look, val rowStart: Boolean = false, val cellStart: Boolean = false,
+            /** Comments whose range is open where the paragraph begins (they began in an earlier one). */
+            val openComments: Set<String> = emptySet())
 
 /**
  * A DOCX opened for editing. Only the paragraphs the person changes are written anew; everything else
@@ -65,6 +81,8 @@ class DocxEdit private constructor(
     private var relsXml: String?,
     private var typesXml: String?,
     val paragraphs: List<EditPara>,
+    private val commentsXml: String?,
+    private val commentParts: Map<String, String>,
 ) {
     /** Where a paragraph is in the file; [row] is the table row it is in (0 outside tables). */
     private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0)
@@ -111,7 +129,10 @@ class DocxEdit private constructor(
     fun shown(list: List<EditPara>): List<Shown> {
         val nums = numbering?.let { Numbering.parse(it) } ?: Numbering.EMPTY
         var prevContainer = -1; var prevRow = -1
+        val open = LinkedHashSet<String>()
         return list.map { p ->
+            val openHere = if (open.isEmpty()) emptySet() else open.toSet()
+            for (a in p.anchors) when (a.kind) { Anchor.Kind.START -> open += a.comment; Anchor.Kind.END -> open -= a.comment; else -> {} }
             val style = styleOf(p.pPr)
             val (pp, rp) = styles.paragraph(style)
             val num = numOf(p.pPr) ?: pp.numId?.let { it to (pp.numLevel ?: 0) }
@@ -121,7 +142,7 @@ class DocxEdit private constructor(
             val cellStart = slot.row != 0 && slot.container != prevContainer
             val rowStart = slot.row != 0 && slot.row != prevRow
             prevContainer = slot.container; prevRow = slot.row
-            Shown(kindOf(style), marker, listKind, slot.row != 0, Look(rp.bold ?: false, rp.italic ?: false, rp.underline ?: false, rp.strike ?: false), rowStart, cellStart)
+            Shown(kindOf(style), marker, listKind, slot.row != 0, Look(rp.bold ?: false, rp.italic ?: false, rp.underline ?: false, rp.strike ?: false), rowStart, cellStart, openHere)
         }
     }
 
@@ -176,16 +197,38 @@ class DocxEdit private constructor(
         return SECT !in a.pPr && SECT !in b.pPr
     }
 
-    fun join(a: EditPara, b: EditPara): EditPara = a.changed(text = a.text + b.text, marks = a.marks + b.marks, head = a.head + b.head, tail = a.tail + b.tail)
+    fun join(a: EditPara, b: EditPara): EditPara = a.changed(text = a.text + b.text, marks = a.marks + b.marks, head = a.head + b.head, tail = a.tail + b.tail,
+        anchors = a.anchors + b.anchors.map { it.moved(it.at + a.text.length) })
+
+    /**
+     * The paragraph with new text, where [old][from, oldEnd) was replaced: comment anchors after the change
+     * move with the text; those inside it go to its start (a beginning) or its end (an end, a mark).
+     */
+    fun retyped(p: EditPara, text: String, marks: List<RunStyle>, from: Int, oldEnd: Int): EditPara {
+        val delta = text.length - p.text.length
+        val newEnd = oldEnd + delta
+        val anchors = p.anchors.map { a ->
+            when {
+                a.at <= from -> a
+                a.at >= oldEnd -> a.moved(a.at + delta)
+                a.kind == Anchor.Kind.START -> a.moved(from)
+                else -> a.moved(newEnd)
+            }
+        }
+        return p.changed(text = text, marks = marks, anchors = anchors)
+    }
 
     /** Splits at [at]: the second part keeps where the section ends; a heading split at its end is followed by ordinary text. */
     fun split(p: EditPara, at: Int): Pair<EditPara, EditPara> {
         val withoutSection = removeChild(p.pPr, "sectPr", PPR_ORDER)
         var secondPpr = p.pPr
         if (at == p.text.length && shownKindOf(p) in setOf(Kind.H1, Kind.H2, Kind.H3)) secondPpr = removeChild(secondPpr, "pStyle", PPR_ORDER)
-        val first = p.changed(text = p.text.substring(0, at), marks = p.marks.subList(0, at).toList(), pPr = withoutSection, tail = "")
+        // At the split itself a comment's beginning goes with the second part, its end and mark stay with the first
+        val (keep, move) = p.anchors.partition { it.at < at || (it.at == at && it.kind != Anchor.Kind.START) }
+        val first = p.changed(text = p.text.substring(0, at), marks = p.marks.subList(0, at).toList(), pPr = withoutSection, tail = "", anchors = keep)
         val style = p.marks.getOrNull(at - 1) ?: p.marks.getOrNull(at) ?: p.typing
-        val second = EditPara(newKey(), p.slot, p.text.substring(at), p.marks.subList(at, p.text.length).toList(), secondPpr, "<$w:p>", "", p.tail, true, null, style)
+        val second = EditPara(newKey(), p.slot, p.text.substring(at), p.marks.subList(at, p.text.length).toList(), secondPpr, "<$w:p>", "", p.tail, true, null, style,
+            move.map { it.moved(it.at - at) })
         return first to second
     }
 
@@ -313,6 +356,157 @@ class DocxEdit private constructor(
 
     private fun parseStyles(): Styles = stylesXml?.let { s -> tree(s)?.let { Styles.parse(it) } } ?: Styles.EMPTY
 
+    // --- Comments ---
+
+    // The comments part's own prefix for the main namespace (a new part uses "w")
+    private val cw: String = commentsXml?.let { c ->
+        XmlScan.children(c, 0, c.length).firstOrNull { it.local == "comments" }?.attrs?.entries?.firstOrNull { it.value == MAIN && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
+    } ?: "w"
+
+    private fun commentElems(): List<Elem> {
+        val c = commentsXml ?: return emptyList()
+        val root = XmlScan.children(c, 0, c.length).firstOrNull { it.local == "comments" } ?: return emptyList()
+        return XmlScan.children(c, root).filter { it.local == "comment" }
+    }
+
+    /** The document's comments as the file has them, and those added here. */
+    private val fileComments: List<Comment> = try {
+        commentElems().map { e ->
+            val c = commentsXml!!
+            // Text of each paragraph, a line each
+            val paras = ArrayList<String>()
+            fun walk(el: Elem, out: StringBuilder) {
+                for (k in XmlScan.children(c, el)) when (k.local) {
+                    "t" -> if (!k.empty) out.append(XmlScan.unescape(c.substring(k.openEnd, k.closeStart)))
+                    "tab" -> out.append('\t')
+                    "br" -> out.append('\n')
+                    else -> if (!k.empty) walk(k, out)
+                }
+            }
+            for (pe in XmlScan.children(c, e)) if (pe.local == "p") paras += StringBuilder().also { walk(pe, it) }.toString()
+            Comment(e.attrs["$cw:id"] ?: "", e.attrs["$cw:author"] ?: "", e.attrs["$cw:date"] ?: "", paras.joinToString("\n").trim())
+        }
+    } catch (e: Exception) { emptyList() }
+    private val added = ArrayList<Comment>()
+
+    /** Every comment known (in the file, and added here); which are in the document is up to its paragraphs' marks. */
+    fun comments(): List<Comment> = fileComments + added
+
+    /**
+     * A new comment on [from, to) of [p] (a point when equal): its beginning, end and mark go into the
+     * paragraph, its text into the comments part on saving.
+     */
+    fun comment(p: EditPara, from: Int, to: Int, author: String, text: String): EditPara {
+        val used = (comments().mapNotNull { it.id.toIntOrNull() } + Regex("$w:id=\"(\\d+)\"").findAll(xml).mapNotNull { it.groupValues[1].toIntOrNull() }.filter { it < 1_000_000 })
+        val id = ((used.maxOrNull() ?: -1) + 1).toString()
+        val date = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
+        added += Comment(id, author.take(100), date, text.take(20_000))
+        val a = from.coerceIn(0, p.text.length); val b = to.coerceIn(a, p.text.length)
+        val anchors = p.anchors + listOf(
+            Anchor(a, "<$w:commentRangeStart $w:id=\"$id\"/>", id, Anchor.Kind.START),
+            Anchor(b, "<$w:commentRangeEnd $w:id=\"$id\"/>", id, Anchor.Kind.END),
+            Anchor(b, "<$w:r><$w:commentReference $w:id=\"$id\"/></$w:r>", id, Anchor.Kind.REF),
+        )
+        // The new anchors after those already at the same place, so a range that ends here is closed first
+        return p.changed(anchors = anchors.withIndex().sortedWith(compareBy({ it.value.at }, { it.index })).map { it.value })
+    }
+
+    /** The paragraphs without comment [id]; null if part of it is in a paragraph that cannot be changed here. */
+    fun uncomment(list: List<EditPara>, id: String): List<EditPara>? {
+        if (list.any { !it.editable && it.anchors.any { a -> a.comment == id } }) return null
+        return list.map { p -> if (p.anchors.none { it.comment == id }) p else p.changed(anchors = p.anchors.filter { it.comment != id }) }
+    }
+
+    /** Where comment [id] begins (paragraph index, place), and the text it is about (shortened). */
+    fun commentPlace(list: List<EditPara>, id: String): Pair<Pair<Int, Int>, String>? {
+        var start: Pair<Int, Int>? = null
+        val quoted = StringBuilder()
+        for ((i, p) in list.withIndex()) {
+            val s0 = p.anchors.firstOrNull { it.comment == id && it.kind == Anchor.Kind.START }
+            val e0 = p.anchors.firstOrNull { it.comment == id && (it.kind == Anchor.Kind.END || it.kind == Anchor.Kind.REF) }
+            if (start == null && s0 == null && e0 == null) continue
+            if (start == null) start = i to (s0 ?: e0)!!.at
+            val from = if (s0 != null) s0.at else 0
+            val to = e0?.at ?: p.text.length
+            if (quoted.isNotEmpty()) quoted.append(' ')
+            quoted.append(p.text, from.coerceIn(0, p.text.length), to.coerceIn(from.coerceIn(0, p.text.length), p.text.length))
+            if (e0 != null || quoted.length > 300) break
+        }
+        return start?.let { it to quoted.toString().take(300) }
+    }
+
+    /**
+     * The comment parts for the document as saved: comments no longer marked in it are left out (with
+     * their entries in Word's other comment parts), new ones added. Null when nothing about comments changed.
+     */
+    private fun commentPartsFor(doc: String): Map<String, String>? {
+        val refs = Regex("<$w:commentReference\\b[^>]*?\\b$w:id=\"([^\"]+)\"").findAll(doc).map { it.groupValues[1] }.toSet()
+        val before = Regex("<$w:commentReference\\b[^>]*?\\b$w:id=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toSet()
+        val gone = before - refs
+        val fresh = added.filter { it.id in refs }
+        if (gone.isEmpty() && fresh.isEmpty()) return null
+        val out = HashMap<String, String>()
+        var c = commentsXml ?: "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<$cw:comments xmlns:$cw=\"$MAIN\"></$cw:comments>"
+        // Paragraph ids of removed comments: Word's newer parts refer to comments by them
+        val goneParas = HashSet<String>()
+        if (gone.isNotEmpty() && commentsXml != null) {
+            val root = XmlScan.children(c, 0, c.length).first { it.local == "comments" }
+            val drop = XmlScan.children(c, root).filter { it.local == "comment" && it.attrs["$cw:id"] in gone }
+            for (d in drop) for (pe in XmlScan.children(c, d)) pe.attrs.entries.filter { it.key.endsWith(":paraId") }.forEach { goneParas += it.value }
+            val b = StringBuilder()
+            var pos = 0
+            for (d in drop) { b.append(c, pos, d.start); pos = d.end }
+            b.append(c, pos, c.length)
+            c = b.toString()
+        }
+        if (fresh.isNotEmpty()) {
+            val root = XmlScan.children(c, 0, c.length).first { it.local == "comments" }
+            val add = fresh.joinToString("") { k ->
+                val lines = k.text.split('\n')
+                val initials = k.author.split(' ').filter { it.isNotBlank() }.take(3).joinToString("") { it.take(1) }
+                "<$cw:comment $cw:id=\"${k.id}\" $cw:author=\"${XmlScan.escape(k.author)}\" $cw:date=\"${k.date}\" $cw:initials=\"${XmlScan.escape(initials)}\">" +
+                    lines.withIndex().joinToString("") { (n, line) ->
+                        "<$cw:p>" + (if (n == 0) "<$cw:r><$cw:annotationRef/></$cw:r>" else "") + "<$cw:r><$cw:t xml:space=\"preserve\">${XmlScan.escape(line)}</$cw:t></$cw:r></$cw:p>"
+                    } + "</$cw:comment>"
+            }
+            c = if (root.selfClosing) c.substring(0, root.start) + c.substring(root.start, root.end).removeSuffix("/>").trimEnd() + ">" + add + "</${root.name}>" + c.substring(root.end)
+                else c.substring(0, root.closeStart) + add + c.substring(root.closeStart)
+        }
+        out["word/comments.xml"] = c
+        if (commentsXml == null) {
+            // A new part, known to the package (with numbering's changes, if any, kept)
+            val rels = changedParts["word/_rels/document.xml.rels"] ?: relsXml ?: return null
+            val types = changedParts["[Content_Types].xml"] ?: typesXml ?: return null
+            if ("relationships/comments\"" in rels) return null
+            val relsEnd = rels.lastIndexOf("</Relationships>").takeIf { it > 0 } ?: return null
+            val typesEnd = types.lastIndexOf("</Types>").takeIf { it > 0 } ?: return null
+            var rid = "rIdHramotaC1"; var k = 2
+            while ("\"$rid\"" in rels) rid = "rIdHramotaC${k++}"
+            out["word/_rels/document.xml.rels"] = rels.substring(0, relsEnd) + "<Relationship Id=\"$rid\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments\" Target=\"comments.xml\"/>" + rels.substring(relsEnd)
+            out["[Content_Types].xml"] = if ("/word/comments.xml" in types) types else
+                types.substring(0, typesEnd) + "<Override PartName=\"/word/comments.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml\"/>" + types.substring(typesEnd)
+        }
+        if (goneParas.isNotEmpty()) {
+            // Word 2013+ parts: entries for the removed comments go too
+            val durable = HashSet<String>()
+            commentParts["word/commentsIds.xml"]?.let { ids ->
+                val root = XmlScan.children(ids, 0, ids.length).firstOrNull() ?: return@let
+                for (k in XmlScan.children(ids, root)) if (k.attrs.entries.any { it.key.endsWith(":paraId") && it.value in goneParas }) k.attrs.entries.filter { it.key.endsWith(":durableId") }.forEach { durable += it.value }
+            }
+            for (name in listOf("word/commentsExtended.xml", "word/commentsIds.xml", "word/commentsExtensible.xml")) {
+                val part = commentParts[name] ?: continue
+                val root = XmlScan.children(part, 0, part.length).firstOrNull() ?: continue
+                val drop = XmlScan.children(part, root).filter { k -> k.attrs.entries.any { (it.key.endsWith(":paraId") && it.value in goneParas) || (it.key.endsWith(":durableId") && it.value in durable) } }
+                if (drop.isEmpty()) continue
+                val b = StringBuilder(); var pos = 0
+                for (d in drop) { b.append(part, pos, d.start); pos = d.end }
+                b.append(part, pos, part.length)
+                out[name] = b.toString()
+            }
+        }
+        return out
+    }
+
     // --- Saving ---
 
     /** The document part with every changed paragraph written anew and the rest as it was. */
@@ -333,11 +527,18 @@ class DocxEdit private constructor(
     private fun write(p: EditPara, b: StringBuilder) {
         p.original?.let { b.append(it); return }
         b.append(p.startTag).append(p.pPr).append(p.head)
+        // Anchors in place: before the text at their position (stable order, as the file had them)
+        val anchors = p.anchors.sortedBy { it.at.coerceIn(0, p.text.length) }
+        var next = 0
+        fun anchorsUpTo(pos: Int) { while (next < anchors.size && anchors[next].at.coerceIn(0, p.text.length) <= pos) { b.append(anchors[next].xml); next++ } }
         var i = 0
         while (i < p.text.length) {
+            anchorsUpTo(i)
             val m = p.marks[i]
+            // A run ends at a change of formatting or where an anchor stands
+            val stop = if (next < anchors.size) anchors[next].at.coerceIn(i + 1, p.text.length) else p.text.length
             var j = i
-            while (j < p.text.length && p.marks[j] == m) j++
+            while (j < stop && p.marks[j] == m) j++
             b.append("<$w:r>").append(rprOf(m))
             var k = i
             while (k < j) {
@@ -357,6 +558,7 @@ class DocxEdit private constructor(
             b.append("</$w:r>")
             i = j
         }
+        anchorsUpTo(Int.MAX_VALUE)
         b.append(p.tail).append("</$w:p>")
     }
 
@@ -379,8 +581,10 @@ class DocxEdit private constructor(
      * with the changed parts put in. Refused if the document part is no longer the one opened.
      */
     fun save(list: List<EditPara>, source: InputStream, out: OutputStream) {
-        val doc = documentXml(list).toByteArray(Charsets.UTF_8)
+        val docText = documentXml(list)
+        val doc = docText.toByteArray(Charsets.UTF_8)
         val changedParts = HashMap(this.changedParts)
+        commentPartsFor(docText)?.let { changedParts.putAll(it) }
         val written = HashSet<String>()
         var total = 0L
         ZipInputStream(source).use { zip ->
@@ -452,6 +656,7 @@ class DocxEdit private constructor(
             var doc: ByteArray? = null
             var styles: String? = null; var numbering: String? = null; var rels: String? = null; var types: String? = null
             val digests = HashMap<String, ByteArray>()
+            val commentParts = HashMap<String, String>()
             fun small(zip: InputStream, name: String): String { val b = readAll(zip, MAX_SMALL); digests[name] = MessageDigest.getInstance("SHA-256").digest(b); return text(b) }
             ZipInputStream(input).use { zip ->
                 var count = 0
@@ -464,6 +669,7 @@ class DocxEdit private constructor(
                         "word/numbering.xml" -> numbering = small(zip, e.name)
                         "word/_rels/document.xml.rels" -> rels = small(zip, e.name)
                         "[Content_Types].xml" -> types = small(zip, e.name)
+                        "word/comments.xml", "word/commentsExtended.xml", "word/commentsIds.xml", "word/commentsExtensible.xml" -> commentParts[e.name] = small(zip, e.name)
                     }
                 }
             }
@@ -490,7 +696,8 @@ class DocxEdit private constructor(
                 }
             }
             collect(XmlScan.children(xml, body), 0, 0)
-            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, digests, styles, numbering, rels, types, paras)
+            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, digests, styles, numbering, rels, types, paras,
+                commentParts["word/comments.xml"], commentParts)
         }
 
         private fun paragraph(xml: String, w: String, e: Elem, slot: Int, interned: HashMap<String, RunStyle>): EditPara {
@@ -500,6 +707,7 @@ class DocxEdit private constructor(
             val head = StringBuilder(); val tail = StringBuilder()
             val text = StringBuilder()
             val marks = ArrayList<RunStyle>()
+            val anchors = ArrayList<Anchor>()
             var editable = true
             for (c in XmlScan.children(xml, e)) {
                 if (!c.name.startsWith("$w:")) { editable = false; continue }
@@ -508,7 +716,17 @@ class DocxEdit private constructor(
                     "proofErr" -> {}
                     "bookmarkStart" -> head.append(xml, c.start, c.end)
                     "bookmarkEnd" -> tail.append(xml, c.start, c.end)
+                    "commentRangeStart", "commentRangeEnd" -> anchors += Anchor(text.length, xml.substring(c.start, c.end), c.attrs["$w:id"] ?: "",
+                        if (c.local == "commentRangeStart") Anchor.Kind.START else Anchor.Kind.END)
                     "r" -> {
+                        val kids = XmlScan.children(xml, c)
+                        val ref = kids.firstOrNull { it.local == "commentReference" }
+                        if (ref != null) {
+                            // A comment's mark: kept as a whole run at its place (it holds nothing else as Word writes it)
+                            anchors += Anchor(text.length, xml.substring(c.start, c.end), ref.attrs["$w:id"] ?: "", Anchor.Kind.REF)
+                            if (kids.any { it.local != "rPr" && it.local != "commentReference" }) editable = false
+                            continue
+                        }
                         var rPr = ""
                         for (rc in XmlScan.children(xml, c)) {
                             if (!rc.name.startsWith("$w:")) { editable = false; continue }
@@ -533,7 +751,7 @@ class DocxEdit private constructor(
                     else -> editable = false
                 }
             }
-            return EditPara(slot.toLong() + 1, slot, text.toString(), marks, pPr, startTag, head.toString(), tail.toString(), editable, raw, marks.lastOrNull() ?: RunStyle(""))
+            return EditPara(slot.toLong() + 1, slot, text.toString(), marks, pPr, startTag, head.toString(), tail.toString(), editable, raw, marks.lastOrNull() ?: RunStyle(""), anchors)
         }
 
         private fun text(b: ByteArray): String {

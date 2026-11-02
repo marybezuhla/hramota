@@ -184,7 +184,30 @@ def headers_doc():
     d.save(os.path.join(OUT, "07-headers.docx"))
 
 
+def comments_doc():
+    """Word comments: on a word, on a whole paragraph, and a second one in the same paragraph (for editing tests)."""
+    d = Document(); base(d)
+    d.add_heading("Коментарі", level=1)
+    p = d.add_paragraph("Строк поставки: ")
+    r = p.add_run("десять робочих днів")
+    p.add_run(" з дати оплати.")
+    d.add_comment(r, text="Може, п'ять?", author="Вигаданий рецензент", initials="ВР")
+    p2 = d.add_paragraph(UK)
+    d.add_comment(p2.runs, text="Перевірити з юристом.", author="Reviewer", initials="R")
+    p3 = d.add_paragraph("Оплата: ")
+    a = p3.add_run("протягом трьох днів")
+    p3.add_run(", ")
+    b = p3.add_run("безготівково")
+    p3.add_run(".")
+    d.add_comment(a, text="Уточнити.", author="Вигаданий рецензент", initials="ВР")
+    d.add_comment(b, text="Або готівкою?", author="Reviewer", initials="R")
+    d.add_paragraph(EN)
+    out = os.path.join(os.path.dirname(OUT), "docs-edit")
+    os.makedirs(out, exist_ok=True)
+    d.save(os.path.join(out, "comments.docx"))
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    fonts_doc(); paragraphs_doc(); lists_doc(); tables_doc(); flow_doc(); long_table_doc(); headers_doc()
+    fonts_doc(); paragraphs_doc(); lists_doc(); tables_doc(); flow_doc(); long_table_doc(); headers_doc(); comments_doc()
     print("written to", os.path.abspath(OUT))

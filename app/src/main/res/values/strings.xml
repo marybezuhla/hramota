@@ -279,4 +279,12 @@
     <string name="rescue_suffix">earlier version</string>
     <string name="rescue_saved">The earlier version was saved.</string>
     <string name="rescue_not_saved">Couldn’t save the earlier version. It is still kept.</string>
+    <string name="comment_add">Comment</string>
+    <string name="comment_text">Comment</string>
+    <string name="comment_author">Your name</string>
+    <string name="comment_author_hint">Shown with the comment in Word. Can be left empty.</string>
+    <string name="comment_done">Add</string>
+    <string name="comments_count">Comments (%1$d)</string>
+    <string name="comment_cannot_delete">This comment is partly in a paragraph that can’t be edited here, so it can’t be deleted.</string>
+    <string name="comment_delete">Delete</string>
 </resources>
