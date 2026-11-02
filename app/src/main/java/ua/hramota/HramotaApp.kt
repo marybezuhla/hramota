@@ -23,6 +23,7 @@ class HramotaApp : Application() {
         // Temporary copies left by a process that was stopped are removed at once
         ua.hramota.data.Shelf.clearOpened(this)
         java.io.File(cacheDir, "restore").deleteRecursively()
+        cacheDir.listFiles { f -> f.name.startsWith("notes-") && f.name.endsWith(".pdf") }?.forEach { it.delete() }
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { started++; main.removeCallbacks(lock) }
             override fun onActivityStopped(activity: Activity) {

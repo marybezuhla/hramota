@@ -86,6 +86,8 @@ object DocxReader {
     /** Styles, numbering, theme, settings and relationships are small in real documents. */
     const val MAX_SMALL_PART = 8L * 1024 * 1024
     const val MAX_MEDIA_TOTAL = 96L * 1024 * 1024
+    /** All headers and footers together. */
+    const val MAX_HEADERS = 16L * 1024 * 1024
     /** Paragraphs and table cells read; a longer document shows its first part. */
     const val MAX_BLOCKS = 400_000
     /** Tables inside tables, and wrappers (links, insertions) inside a paragraph. */
@@ -98,6 +100,7 @@ object DocxReader {
         val parts = HashMap<String, ByteArray>()
         val media = HashMap<String, ByteArray>()
         var mediaTotal = 0L
+        var headerBytes = 0L
         // For the document inspector: what the package carries besides the text
         var macros = false
         val embedded = ArrayList<String>()
@@ -111,7 +114,11 @@ object DocxReader {
                         name == "word/_rels/document.xml.rels" || name == "word/settings.xml" || name == "word/_rels/settings.xml.rels" ||
                         name == "word/comments.xml" || name == "docProps/core.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
                     // Headers and footers, and their own relationships (pictures)
-                    HEADER_PART.matches(name) || HEADER_RELS.matches(name) -> if (parts.size < 200) parts[name] = readLimited(zip, MAX_SMALL_PART)
+                    HEADER_PART.matches(name) || HEADER_RELS.matches(name) -> if (headerBytes < MAX_HEADERS && parts.size < 200) {
+                        val bytes = readLimited(zip, MAX_SMALL_PART)
+                        headerBytes += bytes.size
+                        if (headerBytes <= MAX_HEADERS) parts[name] = bytes
+                    }
                     // Package paths are matched without regard to case: Word itself opens "Word/Embeddings/…"
                     name.contains("vbaProject", ignoreCase = true) || name.contains("vbaData", ignoreCase = true) -> macros = true
                     (name.contains("/embeddings/", ignoreCase = true) || name.contains("/activeX/", ignoreCase = true)) && !name.endsWith("/") ->
@@ -174,12 +181,11 @@ object DocxReader {
         val inspection = inspect(parts, doc, macros, embedded)
         // Headers and footers: each part read with its own pictures, their ids kept apart from the body's
         val allRels = HashMap(rels)
-        fun part(kind: String, rid: String?, n: Int): List<Block> {
-            val target = rid?.let { rels[it] } ?: return emptyList()
+        fun partOf(target: String, n: Int): List<Block> {
             val name = "word/" + target.substringAfterLast('/')
             val bytes = parts[name] ?: return emptyList()
             val prefix = "hf$n:"
-            parts["word/_rels/" + name.substringAfterLast('/') + ".rels"]?.let { Xml.tree(ByteArrayInputStream(it)) }?.all("Relationship")?.forEach { r ->
+            parts["word/_rels/" + name.substringAfterLast('/') + ".rels"]?.let { try { Xml.tree(ByteArrayInputStream(it)) } catch (e: Exception) { null } }?.all("Relationship")?.forEach { r ->
                 val id = r.attr("Id"); val t = r.attr("Target")
                 if (id != null && t != null && r.attr("TargetMode") != "External") allRels[prefix + id] = t.removePrefix("/word/")
             }
@@ -189,11 +195,19 @@ object DocxReader {
             for (c in tree?.children.orEmpty()) { hfBody.blocks(c, out, 0); if (out.size > 200) break }
             return out
         }
+        val parsed = HashMap<String, List<Block>>()
+        fun part(kind: String, rid: String?, n: Int): List<Block> {
+            val target = rid?.let { rels[it] } ?: return emptyList()
+            // One part read once, however many times it is named
+            parsed[target]?.let { return it }
+            if (parsed.size >= 6) return emptyList()
+            return partOf(target, n).also { parsed[target] = it }
+        }
         var n = 0
         val hf = sectPr?.let { s ->
             HeadersFooters(
-                headers = s.all("headerReference").associate { (it.attr("type") ?: "default") to part("h", it.attr("id"), n++) },
-                footers = s.all("footerReference").associate { (it.attr("type") ?: "default") to part("f", it.attr("id"), n++) },
+                headers = s.all("headerReference").take(3).associate { (it.attr("type") ?: "default") to part("h", it.attr("id"), n++) },
+                footers = s.all("footerReference").take(3).associate { (it.attr("type") ?: "default") to part("f", it.attr("id"), n++) },
                 firstPage = s.child("titlePg").isOn() == true,
                 evenPages = settings?.child("evenAndOddHeaders").isOn() == true,
             )

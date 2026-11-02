@@ -38,9 +38,9 @@ fun DictionarySheet(word: String, onDismiss: () -> Unit) {
     // The first word of what was selected
     val query = word.trim().split(Regex("\\s+")).firstOrNull().orEmpty()
     val result by produceState<List<Article>?>(null, query) {
-        value = withContext(Dispatchers.IO) { try { Dictionaries.lookUp(context, query) } catch (e: Exception) { emptyList() } }
+        value = withContext(Dispatchers.IO) { try { Dictionaries.lookUp(context, query) } catch (e: Exception) { emptyList() } catch (e: OutOfMemoryError) { emptyList() } }
     }
-    val none = remember(query) { Dictionaries.list(context).isEmpty() }
+    val none by produceState(false, query) { value = withContext(Dispatchers.IO) { Dictionaries.list(context).isEmpty() } }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(query, style = MaterialTheme.typography.headlineSmall.copy(fontFamily = Literata))

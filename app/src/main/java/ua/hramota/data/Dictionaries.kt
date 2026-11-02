@@ -24,7 +24,7 @@ data class Article(val dictionary: String, val word: String, val text: String)
  * a ZIP), chosen by the person and kept in Hramota's own storage. Nothing is looked up anywhere else.
  */
 object Dictionaries {
-    private const val MAX_WORDS = 2_000_000
+    private const val MAX_WORDS = 1_000_000
     private const val MAX_DICT = 512L * 1024 * 1024
     private const val MAX_IDX = 128L * 1024 * 1024
     private const val MAX_ARTICLE = 256 * 1024
@@ -104,7 +104,7 @@ object Dictionaries {
     private fun readIfo(f: File): Map<String, String>? {
         if (!f.exists() || f.length() > 64 * 1024) return null
         val lines = f.readLines()
-        if (lines.firstOrNull()?.trim() != "StarDict's dict ifo file") return null
+        if (lines.firstOrNull()?.trim()?.removePrefix("\uFEFF") != "StarDict's dict ifo file") return null
         return lines.drop(1).mapNotNull { l -> l.indexOf('=').takeIf { it > 0 }?.let { l.substring(0, it).trim() to l.substring(it + 1).trim() } }.toMap()
     }
 
@@ -129,11 +129,12 @@ object Dictionaries {
                         entries += Triple(word.toString("UTF-8"), off, size)
                     }
                 }
-                // Sorted again by our own key: the file's order is not trusted
-                val sorted = entries.sortedBy { key(it.first) }
+                // Sorted again by our own key (worked out once per word): the file's order is not trusted
+                val keys = Array(entries.size) { key(entries[it].first) }
+                val order = entries.indices.sortedWith { a, b -> keys[a].compareTo(keys[b]) }
                 return Index(
-                    sorted.map { it.first }.toTypedArray(), sorted.map { key(it.first) }.toTypedArray(),
-                    sorted.map { it.second }.toLongArray(), sorted.map { it.third }.toIntArray(), ifo["sametypesequence"] ?: "",
+                    Array(order.size) { entries[order[it]].first }, Array(order.size) { keys[order[it]] },
+                    LongArray(order.size) { entries[order[it]].second }, IntArray(order.size) { entries[order[it]].third }, ifo["sametypesequence"] ?: "",
                 )
             }
         }
@@ -156,7 +157,13 @@ object Dictionaries {
         if (w.isEmpty() || w.length > 80) return emptyList()
         val out = ArrayList<Article>()
         for (d in list(context)) {
-            val index = try { cache.getOrPut(d.id) { Index.load(d.dir) } } catch (e: Exception) { continue }
+            val index = try {
+                cache[d.id] ?: Index.load(d.dir).also {
+                    // A few indexes kept in memory; the rest read again when needed
+                    if (cache.size >= 4) cache.clear()
+                    cache[d.id] = it
+                }
+            } catch (e: Exception) { continue } catch (e: OutOfMemoryError) { cache.clear(); continue }
             val hits = find(index, key(w))
             for (i in hits.take(3)) {
                 val text = article(d.dir, index, i) ?: continue
