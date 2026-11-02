@@ -164,6 +164,14 @@ class ViewerActivity : ComponentActivity() {
                             }
                         }
                     }
+                    // A document just made opens ready to edit (once: not again when the window is made again)
+                    LaunchedEffect(state) {
+                        if (!intent.getBooleanExtra(EXTRA_EDIT, false) || held.autoEdited) return@LaunchedEffect
+                        when {
+                            format == Format.DOCX && state is ViewerState.Paged -> { held.autoEdited = true; startEditing(uri) }
+                            format == Format.XLSX && state is ViewerState.Sheets -> { held.autoEdited = true; startSheetEditing(uri, (state as ViewerState.Sheets).workbook) }
+                        }
+                    }
                     // The first page becomes the document's cover on the shelf
                     LaunchedEffect(state, docId) {
                         val pages = (state as? ViewerState.Paged)?.pages ?: return@LaunchedEffect
@@ -618,6 +626,8 @@ class ViewerActivity : ComponentActivity() {
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
         /** Why the edits went into a copy (what is said when it is saved). */
         var copyReason: EditSaving.Result? = null
+        /** A new document was opened into editing already. */
+        var autoEdited = false
         /** The editing view opens with the list of comments. */
         var withComments = false
         /** The edits wait for the place of their copy (the file picker is open). */
@@ -630,6 +640,8 @@ class ViewerActivity : ComponentActivity() {
         /** The document's name, for a copy kept inside Hramota (whose file is named by its fingerprint). */
         const val EXTRA_NAME = "ua.hramota.NAME"
         const val EXTRA_TOKEN = "ua.hramota.TOKEN"
+        /** Open straight into editing (a document just made). */
+        const val EXTRA_EDIT = "ua.hramota.EDIT"
         /** Known only inside this process: proves an own copy was opened by Hramota, not by another app. */
         val TOKEN: String = java.util.UUID.randomUUID().toString()
     }

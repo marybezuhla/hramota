@@ -28,7 +28,12 @@ class Recents private constructor(private val context: Context) {
         // Hramota's own copies are on the shelf, not in the recent list; nothing is written while locked
         if (Shelf.isOwn(context, uri) || Vault.locked(context)) return
         try {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // Keeping the right to write too (when given) lets an edited file be saved into itself later
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            } catch (_: SecurityException) {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
         } catch (_: SecurityException) {
             // Some apps only grant one-time access; the file then just will not reopen from the list.
         }
@@ -54,6 +59,10 @@ class Recents private constructor(private val context: Context) {
     private fun release(uri: String) {
         try {
             context.contentResolver.releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+        }
+        try {
+            context.contentResolver.releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         } catch (_: SecurityException) {
         }
     }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
@@ -60,6 +61,7 @@ fun HomeScreen(
     comparePrompt: String?,
     onOpenFile: () -> Unit,
     onCompare: () -> Unit,
+    onCreate: () -> Unit = {},
     onOpenRecent: (RecentFile) -> Unit,
     onRemove: (RecentFile) -> Unit,
     onClear: () -> Unit,
@@ -123,8 +125,13 @@ fun HomeScreen(
                 Text(stringResource(R.string.open_file))
             }
             if (comparePrompt == null) {
-                OutlinedButton(onClick = onCompare, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                    Text(stringResource(R.string.compare_versions))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onCreate, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
+                        Text(stringResource(R.string.create_new), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                    OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1.4f).heightIn(min = 52.dp)) {
+                        Text(stringResource(R.string.compare_versions), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
                 }
             }
             Text(

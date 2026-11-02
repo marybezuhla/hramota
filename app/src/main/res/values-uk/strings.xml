@@ -304,4 +304,11 @@
     <string name="slide_box_text">Текст</string>
     <string name="slide_box_table">Таблиця</string>
     <string name="slide_locked_paragraph">Цей абзац поки не можна змінити: у ньому номер слайда, поле дати, формула або щось подібне. Він лишиться як є.</string>
+    <string name="create_new">Створити</string>
+    <string name="create_docx">Документ Word (DOCX)</string>
+    <string name="create_xlsx">Таблиця Excel (XLSX)</string>
+    <string name="new_document_name">Новий документ</string>
+    <string name="new_sheet_file_name">Нова таблиця</string>
+    <string name="new_sheet_name">Аркуш1</string>
+    <string name="create_failed">Не вдалося створити файл.</string>
 </resources>

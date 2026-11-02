@@ -296,4 +296,11 @@
     <string name="slide_box_text">Text</string>
     <string name="slide_box_table">Table</string>
     <string name="slide_locked_paragraph">This paragraph can’t be edited yet: it holds a slide number, a date field, an equation or something similar. It stays as it is.</string>
+    <string name="create_new">New</string>
+    <string name="create_docx">Word document (DOCX)</string>
+    <string name="create_xlsx">Excel workbook (XLSX)</string>
+    <string name="new_document_name">New document</string>
+    <string name="new_sheet_file_name">New workbook</string>
+    <string name="new_sheet_name">Sheet1</string>
+    <string name="create_failed">Couldn’t create the file.</string>
 </resources>

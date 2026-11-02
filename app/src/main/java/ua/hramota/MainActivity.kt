@@ -57,6 +57,31 @@ class MainActivity : ComponentActivity() {
 
     // The system file picker: Hramota sees only the file chosen there
     private val pick = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> onPicked(uri) }
+    // A new document: the kind chosen, then the place the person picks for it
+    private var creating by mutableStateOf(false)
+    private val createDocx = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { uri -> onCreated(uri, "docx") }
+    private val createXlsx = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri -> onCreated(uri, "xlsx") }
+
+    /** Writes the empty document into the new file and opens it ready to edit. */
+    private fun onCreated(uri: Uri?, kind: String) {
+        if (uri == null) return
+        lifecycleScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val bytes = if (kind == "docx") ua.hramota.doc.Templates.docx(java.util.Locale.getDefault().toLanguageTag())
+                        else ua.hramota.doc.Templates.xlsx(getString(R.string.new_sheet_name))
+                    contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) } != null
+                } catch (e: Exception) { false }
+            }
+            if (!ok) { android.widget.Toast.makeText(this@MainActivity, getString(R.string.create_failed), android.widget.Toast.LENGTH_LONG).show(); return@launch }
+            val name = Recents.displayName(this@MainActivity, uri)
+            val intent = Intent(this@MainActivity, ViewerActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                .putExtra(ViewerActivity.EXTRA_NAME, name).putExtra(ViewerActivity.EXTRA_EDIT, true)
+            recents.add(uri, name)
+            startActivity(intent)
+        }
+    }
     // Originals kept by saves that did not finish (Hramota stopped, or the file could not be put back)
     private var rescues by mutableStateOf<List<EditSaving.Rescue>>(emptyList())
     private var savingRescue: EditSaving.Rescue? = null
@@ -110,6 +135,18 @@ class MainActivity : ComponentActivity() {
                     // The shelf holds only documents kept inside Hramota
                     val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
                     BackHandler(showSettings) { showSettings = false }
+                    if (creating) androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { creating = false },
+                        title = { androidx.compose.material3.Text(getString(R.string.create_new)) },
+                        text = {
+                            androidx.compose.foundation.layout.Column {
+                                androidx.compose.material3.TextButton(onClick = { creating = false; createDocx.launch(getString(R.string.new_document_name) + ".docx") }) { androidx.compose.material3.Text(getString(R.string.create_docx)) }
+                                androidx.compose.material3.TextButton(onClick = { creating = false; createXlsx.launch(getString(R.string.new_sheet_file_name) + ".xlsx") }) { androidx.compose.material3.Text(getString(R.string.create_xlsx)) }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = { creating = false }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
+                    )
                     // Looked for once Hramota is open (a sealed one needs the storage unlocked)
                     androidx.compose.runtime.LaunchedEffect(Unit) {
                         rescues = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -182,6 +219,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenFile = { pick.launch(arrayOf("*/*")) },
                         onCompare = { comparing = true; compareFirst = null; choosing = true },
+                        onCreate = { creating = true },
                         onOpenRecent = { openViewer(Uri.parse(it.uri), it.name) },
                         // The recent list only: bookmarks and the shelf stay with the documents
                         onRemove = { recents.remove(it.uri) },
