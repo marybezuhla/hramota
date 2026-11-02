@@ -172,6 +172,8 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
         val canvas = Canvas(bitmap)
         canvas.scale(w / layout.pageWidth, w / layout.pageWidth)
         painter.draw(canvas, page)
+        // Header and footer with this page's number (and the number of pages laid out)
+        painter.draw(canvas, LaidOutPage(layout.headerFooter(index, count)))
         return bitmap
     }
 }

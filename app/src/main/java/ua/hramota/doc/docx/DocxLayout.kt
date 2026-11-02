@@ -93,8 +93,9 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
     val pageHeight = tw(doc.page.height)
     private val left = tw(doc.page.left)
     private val contentWidth = tw(doc.page.width - doc.page.left - doc.page.right)
-    private val top = tw(doc.page.top)
-    private val bottom = pageHeight - tw(doc.page.bottom)
+    // As in Word, a header taller than the top margin pushes the text down (and a footer pushes it up)
+    private val top by lazy { max(tw(doc.page.top), tw(doc.page.header) + headerHeight(true)) }
+    private val bottom by lazy { min(pageHeight - tw(doc.page.bottom), pageHeight - tw(doc.page.footer) - headerHeight(false)) }
 
     private val basePaint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.LINEAR_TEXT_FLAG).apply {
         // Word neither kerns nor joins letters by default
@@ -306,7 +307,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val height: Float get() = tops[lines]
     }
 
-    fun paragraph(b: Block.Para, width: Float): Para {
+    fun paragraph(b: Block.Para, width: Float, fields: IntArray? = null): Para {
         val pp = b.props
         val l = tw(pp.left ?: 0)
         val r = tw(pp.right ?: 0)
@@ -317,7 +318,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val layoutWidth = max(U, width - baseX - r).roundToInt()
         val before = tw(if (pp.beforeAuto == true) 280 else pp.before ?: 0)
         val after = tw(if (pp.afterAuto == true) 280 else pp.after ?: 0)
-        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth) }
+        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields) }
         val measured = source.fresh()
         val n = measured.lineCount
         val tops = FloatArray(n + 1) { if (it < n) measured.getLineTop(it).toFloat() else measured.getLineBottom(n - 1).toFloat() }
@@ -326,7 +327,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         return Para(source, tops, baseX, before, after, pp.widowControl != false, pp.shading, l, r)
     }
 
-    private fun build(b: Block.Para, width: Float, baseX: Float, firstIndent: Float, restIndent: Float, layoutWidth: Int): StaticLayout {
+    private fun build(b: Block.Para, width: Float, baseX: Float, firstIndent: Float, restIndent: Float, layoutWidth: Int, fields: IntArray? = null): StaticLayout {
         val pp = b.props
         val l = tw(pp.left ?: 0)
         val f = tw(pp.firstLine ?: 0)
@@ -365,6 +366,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 Inline.Tab -> { text.append('\t'); runSpans(start, b.mark) }
                 Inline.LineBreak -> { text.append('\n'); runSpans(start, b.mark) }
                 Inline.PageBreak -> Unit
+                // The page's number (or the number of pages), as on the page drawn
+                is Inline.Field -> { text.append(((if (i.total) fields?.getOrNull(1) else fields?.getOrNull(0)?.plus(1)) ?: 1).toString()); runSpans(start, i.props) }
                 is Inline.Image -> {
                     var w = i.width * U
                     var h = i.height * U
@@ -417,6 +420,63 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             .setIndents(intArrayOf(firstIndent.roundToInt(), restIndent.roundToInt()), null)
         if (pp.align == "both" || pp.align == "distribute") builder.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
         return builder.build()
+    }
+
+    /** The tallest header (or footer) of the document, for the room the text leaves for it. */
+    private fun headerHeight(header: Boolean): Float {
+        val hf = doc.headersFooters
+        if (hf.isEmpty) return 0f
+        val variants = (if (header) hf.headers.values else hf.footers.values)
+        return variants.maxOfOrNull { stack(it, intArrayOf(98, 99), ArrayList()) } ?: 0f
+    }
+
+    /**
+     * Header and footer of page [index] (counting from 0) of [total] pages, with page numbers filled in:
+     * the header from its distance below the top edge, the footer ending at its distance above the bottom.
+     */
+    fun headerFooter(index: Int, total: Int): List<PageItem> {
+        val hf = doc.headersFooters
+        if (hf.isEmpty) return emptyList()
+        val fields = intArrayOf(index, total)
+        val out = ArrayList<PageItem>()
+        val head = ArrayList<PageItem>()
+        stack(hf.header(index), fields, head)
+        head.forEach { out += it.moved(0f, tw(doc.page.header)) }
+        val foot = ArrayList<PageItem>()
+        val h = stack(hf.footer(index), fields, foot)
+        val y = pageHeight - tw(doc.page.footer) - h
+        foot.forEach { out += it.moved(0f, y) }
+        return out
+    }
+
+    /** Lays [blocks] one under another from the top (0); returns their height. */
+    private fun stack(blocks: List<Block>, fields: IntArray, out: MutableList<PageItem>): Float {
+        var y = 0f
+        var pendingAfter = 0f
+        var first = true
+        for (b in blocks) when (b) {
+            is Block.Para -> {
+                val p = paragraph(b, contentWidth, fields)
+                y += if (first) 0f else gap(pendingAfter, p.before)
+                p.shading?.let { out += PageItem.Fill(RectF(left + p.shadeLeft, y, left + contentWidth - p.shadeRight, y + p.height), it) }
+                out += PageItem.Text(p.source, 0, p.lines - 1, left + p.x, y)
+                y += p.height
+                pendingAfter = p.after
+                first = false
+            }
+            is Block.Table -> {
+                y += pendingAfter; pendingAfter = 0f
+                val g = geometry(b)
+                for (row in b.rows) {
+                    val laid = tableRow(row, g)
+                    val seg = laid.segment(IntArray(laid.cells.size), Float.MAX_VALUE, 0f, forceOne = true) ?: continue
+                    seg.items.forEach { out += it.moved(0f, y) }
+                    y += seg.height
+                }
+                first = false
+            }
+        }
+        return y
     }
 
     /** The gap between two paragraphs: the larger of the two spacings, or their sum if the document asks. */

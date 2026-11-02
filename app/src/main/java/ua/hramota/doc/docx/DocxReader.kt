@@ -11,7 +11,29 @@ import java.util.zip.ZipInputStream
 data class PageSetup(
     val width: Int = 11906, val height: Int = 16838,
     val top: Int = 1440, val bottom: Int = 1440, val left: Int = 1440, val right: Int = 1440,
+    /** Distance of the header from the page's top edge and of the footer from its bottom edge. */
+    val header: Int = 708, val footer: Int = 708,
 )
+
+/**
+ * Headers and footers of the document, by kind ("default", "first", "even"); [firstPage] when the
+ * first page has its own ("different first page"), [evenPages] when even pages have their own.
+ */
+data class HeadersFooters(
+    val headers: Map<String, List<Block>> = emptyMap(),
+    val footers: Map<String, List<Block>> = emptyMap(),
+    val firstPage: Boolean = false,
+    val evenPages: Boolean = false,
+) {
+    private fun pick(map: Map<String, List<Block>>, page: Int): List<Block> = when {
+        firstPage && page == 0 -> map["first"].orEmpty()
+        evenPages && page % 2 == 1 -> map["even"].orEmpty()
+        else -> map["default"].orEmpty()
+    }
+    fun header(page: Int) = pick(headers, page)
+    fun footer(page: Int) = pick(footers, page)
+    val isEmpty get() = headers.values.all { it.isEmpty() } && footers.values.all { it.isEmpty() }
+}
 
 /** A piece of a paragraph. */
 sealed interface Inline {
@@ -21,6 +43,8 @@ sealed interface Inline {
     data object Tab : Inline
     data object LineBreak : Inline
     data object PageBreak : Inline
+    /** The page's number, or the number of pages: filled in when the page is drawn. */
+    data class Field(val total: Boolean, val props: RunProps) : Inline
 }
 
 sealed interface Block {
@@ -45,6 +69,7 @@ class DocxDocument(
     /** Word version the document was laid out for (15 = Word 2013 and later). */
     val compatibilityMode: Int = 15,
     val inspection: Inspection = Inspection(),
+    val headersFooters: HeadersFooters = HeadersFooters(),
 ) {
     fun picture(rel: String): ByteArray? = rels[rel]?.let { media[it] }
 }
@@ -85,6 +110,8 @@ object DocxReader {
                     name == "word/styles.xml" || name == "word/numbering.xml" || name == "word/theme/theme1.xml" ||
                         name == "word/_rels/document.xml.rels" || name == "word/settings.xml" || name == "word/_rels/settings.xml.rels" ||
                         name == "word/comments.xml" || name == "docProps/core.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
+                    // Headers and footers, and their own relationships (pictures)
+                    HEADER_PART.matches(name) || HEADER_RELS.matches(name) -> if (parts.size < 200) parts[name] = readLimited(zip, MAX_SMALL_PART)
                     // Package paths are matched without regard to case: Word itself opens "Word/Embeddings/…"
                     name.contains("vbaProject", ignoreCase = true) || name.contains("vbaData", ignoreCase = true) -> macros = true
                     (name.contains("/embeddings/", ignoreCase = true) || name.contains("/activeX/", ignoreCase = true)) && !name.endsWith("/") ->
@@ -113,6 +140,7 @@ object DocxReader {
         val body = Body(styles, numbering, rels)
         val blocks = ArrayList<Block>()
         var page = PageSetup()
+        var sectPr: XmlNode? = null
         val p = Xml.parser(ByteArrayInputStream(doc))
         var inBody = false
         // Streams the body one top-level element at a time: a large document is never one big tree
@@ -128,7 +156,7 @@ object DocxReader {
                     inBody && (p.name == "p" || p.name == "sectPr" || p.name == "sdt") -> {
                         val node = Xml.subtree(p)
                         when (node.name) {
-                            "sectPr" -> page = pageSetup(node)
+                            "sectPr" -> { page = pageSetup(node); sectPr = node }
                             else -> body.blocks(node, blocks, 0)
                         }
                         if (body.count > MAX_BLOCKS) break
@@ -144,7 +172,33 @@ object DocxReader {
             // No setting means an older Word document
             ?: if (settings != null) 12 else 15
         val inspection = inspect(parts, doc, macros, embedded)
-        return DocxDocument(page, blocks, media, fonts, rels, addSpacing, compat, inspection)
+        // Headers and footers: each part read with its own pictures, their ids kept apart from the body's
+        val allRels = HashMap(rels)
+        fun part(kind: String, rid: String?, n: Int): List<Block> {
+            val target = rid?.let { rels[it] } ?: return emptyList()
+            val name = "word/" + target.substringAfterLast('/')
+            val bytes = parts[name] ?: return emptyList()
+            val prefix = "hf$n:"
+            parts["word/_rels/" + name.substringAfterLast('/') + ".rels"]?.let { Xml.tree(ByteArrayInputStream(it)) }?.all("Relationship")?.forEach { r ->
+                val id = r.attr("Id"); val t = r.attr("Target")
+                if (id != null && t != null && r.attr("TargetMode") != "External") allRels[prefix + id] = t.removePrefix("/word/")
+            }
+            val tree = try { Xml.tree(ByteArrayInputStream(bytes)) } catch (e: Exception) { return emptyList() }
+            val hfBody = Body(styles, numbering, allRels, prefix)
+            val out = ArrayList<Block>()
+            for (c in tree.children) { hfBody.blocks(c, out, 0); if (out.size > 200) break }
+            return out
+        }
+        var n = 0
+        val hf = sectPr?.let { s ->
+            HeadersFooters(
+                headers = s.all("headerReference").associate { (it.attr("type") ?: "default") to part("h", it.attr("id"), n++) },
+                footers = s.all("footerReference").associate { (it.attr("type") ?: "default") to part("f", it.attr("id"), n++) },
+                firstPage = s.child("titlePg").isOn() == true,
+                evenPages = settings?.child("evenAndOddHeaders").isOn() == true,
+            )
+        } ?: HeadersFooters()
+        return DocxDocument(page, blocks, media, fonts, allRels, addSpacing, compat, inspection, hf)
     }
 
     /** What the inspector reports: risky parts (never run or fetched) and things to know before sending. */
@@ -236,6 +290,8 @@ object DocxReader {
             bottom = margin(m?.attr("bottom"), d.bottom, h),
             left = margin(m?.attr("left") ?: m?.attr("start"), d.left, w),
             right = margin(m?.attr("right") ?: m?.attr("end"), d.right, w),
+            header = (m?.attr("header")?.toIntOrNull() ?: d.header).coerceIn(0, h / 3),
+            footer = (m?.attr("footer")?.toIntOrNull() ?: d.footer).coerceIn(0, h / 3),
         )
     }
 
@@ -254,7 +310,20 @@ object DocxReader {
     }
 
     /** Turns body elements into blocks, resolving styles and numbering. */
-    private class Body(val styles: Styles, val numbering: Numbering, val rels: Map<String, String>) {
+    private val HEADER_PART = Regex("word/(header|footer)[0-9]{0,4}\\.xml")
+    private val HEADER_RELS = Regex("word/_rels/(header|footer)[0-9]{0,4}\\.xml\\.rels")
+
+    /** PAGE → the page's number, NUMPAGES (or SECTIONPAGES) → the number of pages; other fields keep their text. */
+    private fun fieldKind(instr: String?): Boolean? {
+        val name = instr?.trim()?.substringBefore(' ')?.uppercase() ?: return null
+        return when (name) { "PAGE" -> false; "NUMPAGES", "SECTIONPAGES" -> true; else -> null }
+    }
+
+    private class Body(val styles: Styles, val numbering: Numbering, val rels: Map<String, String>, val relPrefix: String = "") {
+        // A field being read (begin … separate … end): its instruction, and whether its shown result is replaced
+        private val instr = StringBuilder()
+        private var fieldDepth = 0
+        private var replacing = false
         /** Paragraphs and cells read so far, against [MAX_BLOCKS]. */
         var count = 0
 
@@ -309,7 +378,12 @@ object DocxReader {
             for (c in parent.children) when (c.name) {
                 "r" -> run(c, base, out)
                 // Inserted text in tracked changes is part of the current text; deleted text is not
-                "hyperlink", "ins", "smartTag", "fldSimple", "customXml", "bdo", "dir" -> collectRuns(c, base, out, depth + 1)
+                "fldSimple" -> {
+                    // A page number field shows the page it is on, not the number saved in the file
+                    val kind = if (relPrefix.isEmpty()) null else fieldKind(c.attr("instr"))
+                    if (kind != null) out += Inline.Field(kind, base) else collectRuns(c, base, out, depth + 1)
+                }
+                "hyperlink", "ins", "smartTag", "customXml", "bdo", "dir" -> collectRuns(c, base, out, depth + 1)
                 "sdt" -> c.child("sdtContent")?.let { collectRuns(it, base, out, depth + 1) }
             }
         }
@@ -320,7 +394,14 @@ object DocxReader {
             val props = base.with(styles.character(charStyle)).with(direct)
             if (props.vanish == true) return
             for (c in r.children) when (c.name) {
-                "t" -> if (c.text.isNotEmpty()) out += Inline.Text(c.text, props)
+                "fldChar" -> when (c.attr("fldCharType")) {
+                    "begin" -> { fieldDepth++; if (fieldDepth == 1) instr.setLength(0) }
+                    // Only in headers and footers: the body keeps the number Word saved
+                    "separate" -> if (fieldDepth == 1 && relPrefix.isNotEmpty()) fieldKind(instr.toString())?.let { out += Inline.Field(it, props); replacing = true }
+                    "end" -> { fieldDepth = (fieldDepth - 1).coerceAtLeast(0); if (fieldDepth == 0) replacing = false }
+                }
+                "instrText" -> if (fieldDepth == 1 && instr.length < 1000) instr.append(c.text)
+                "t" -> if (c.text.isNotEmpty() && !replacing) out += Inline.Text(c.text, props)
                 "tab", "ptab" -> out += Inline.Tab
                 "br" -> out += if (c.attr("type") == "page") Inline.PageBreak else Inline.LineBreak
                 "cr" -> out += Inline.LineBreak
@@ -328,7 +409,8 @@ object DocxReader {
                 "softHyphen" -> Unit
                 "sym" -> out += Inline.Text(Numbering.bullet(c.attr("char")?.toIntOrNull(16)?.toChar()?.toString() ?: ""), props)
                 "drawing" -> image(c)?.let { out += it }
-                "pict", "object" -> c.find("imagedata")?.attr("id")?.let { id ->
+                "pict", "object" -> c.find("imagedata")?.attr("id")?.let { raw ->
+                    val id = relPrefix + raw
                     rels[id]?.let { out += Inline.Image(id, 0f, 0f) }
                 }
             }
@@ -339,7 +421,7 @@ object DocxReader {
             val ext = holder.child("extent") ?: return null
             val cx = ext.attr("cx")?.toLongOrNull() ?: return null
             val cy = ext.attr("cy")?.toLongOrNull() ?: return null
-            val embed = holder.find("blip")?.attr("embed") ?: return null
+            val embed = relPrefix + (holder.find("blip")?.attr("embed") ?: return null)
             // Sizes in EMU (12 700 per point), no larger than the largest page
             return Inline.Image(embed, (cx / 12700f).coerceIn(0f, 1584f), (cy / 12700f).coerceIn(0f, 1584f))
         }
