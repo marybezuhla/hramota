@@ -65,10 +65,6 @@ class Recents(private val context: Context) {
     }
 
     private fun load(): List<RecentFile> = read(context)
-        (0 until json.length()).map {
-            val o = json.getJSONObject(it)
-            RecentFile(o.getString("uri"), o.getString("name"), o.getLong("at"))
-        }
 
     companion object {
         const val MAX = 30
