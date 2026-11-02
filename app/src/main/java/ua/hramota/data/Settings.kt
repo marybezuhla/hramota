@@ -63,6 +63,34 @@ class Settings private constructor(context: Context) {
         flow.value = s
     }
 
+    /** The settings as JSON, for a backup. */
+    fun toJson(): org.json.JSONObject {
+        val s = flow.value
+        return org.json.JSONObject().apply {
+            put("theme", s.theme); put("docxReading", s.docxReading); put("inspector", s.inspector); put("rememberRecent", s.rememberRecent)
+            put("secureScreen", s.secureScreen); put("dynamicColor", s.dynamicColor)
+            put("readPaper", s.readPaper); put("readFont", s.readFont); put("readSize", s.readSize.toDouble()); put("readSpacing", s.readSpacing.toDouble())
+            put("readMargin", s.readMargin.toDouble()); put("readJustify", s.readJustify); put("readPaged", s.readPaged); put("readTurn", s.readTurn); put("readVolumeKeys", s.readVolumeKeys)
+        }
+    }
+
+    /** Settings from a backup, each checked as when read from this phone. */
+    fun restore(o: org.json.JSONObject) = update { s ->
+        fun f(k: String, d: Float, r: ClosedFloatingPointRange<Float>) = o.optDouble(k, d.toDouble()).toFloat().takeIf { it.isFinite() }?.coerceIn(r) ?: d
+        s.copy(
+            theme = o.optString("theme", s.theme).takeIf { it in setOf("system", "light", "dark") } ?: s.theme,
+            docxReading = o.optBoolean("docxReading", s.docxReading), inspector = o.optBoolean("inspector", s.inspector),
+            rememberRecent = o.optBoolean("rememberRecent", s.rememberRecent), secureScreen = o.optBoolean("secureScreen", s.secureScreen),
+            dynamicColor = o.optBoolean("dynamicColor", s.dynamicColor),
+            readPaper = o.optString("readPaper", s.readPaper).takeIf { it in PAPERS } ?: s.readPaper,
+            readFont = if (o.optString("readFont", s.readFont) == "sans") "sans" else "serif",
+            readSize = f("readSize", s.readSize, 12f..40f), readSpacing = f("readSpacing", s.readSpacing, 1.1f..2.2f), readMargin = f("readMargin", s.readMargin, 8f..64f),
+            readJustify = o.optBoolean("readJustify", s.readJustify), readPaged = o.optBoolean("readPaged", s.readPaged),
+            readTurn = o.optString("readTurn", s.readTurn).takeIf { it in setOf("slide", "curl", "none") } ?: s.readTurn,
+            readVolumeKeys = o.optBoolean("readVolumeKeys", s.readVolumeKeys),
+        )
+    }
+
     private fun load() = AppSettings(
         theme = prefs.getString("theme", "system").takeIf { it in setOf("system", "light", "dark") } ?: "system",
         docxReading = prefs.getBoolean("docxReading", false),

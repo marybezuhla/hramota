@@ -57,6 +57,13 @@ object Shelf {
         else coverFile(context, id, false).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path) }
     } catch (e: Exception) { null }
 
+    /** The cover as PNG bytes (opened if sealed), for a backup. */
+    fun loadCoverBytes(context: Context, id: String): ByteArray? = try {
+        val sealed = coverFile(context, id, true)
+        if (sealed.exists()) Vault.key()?.let { Sealed.open(it, sealed.readBytes()) }
+        else coverFile(context, id, false).takeIf { it.exists() }?.readBytes()
+    } catch (e: Exception) { null }
+
     /** Saves a small picture of the first page as the document's cover (once). */
     fun saveCover(context: Context, id: String, bitmap: Bitmap) {
         if (hasCover(context, id)) return

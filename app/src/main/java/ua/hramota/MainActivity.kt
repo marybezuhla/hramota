@@ -37,6 +37,14 @@ class MainActivity : ComponentActivity() {
     // Locked storage: whether it is on (changes when turned on or off here), and a prompt under way
     private var vaultOn by mutableStateOf(false)
     private var unlocking = false
+    // Backup: the dialog, the password waiting for the chosen file, a restore's file and work under way
+    private var backupDialog by mutableStateOf(false)
+    private var pendingBackup: Pair<CharArray, Set<String>>? = null
+    private var restoreUri by mutableStateOf<Uri?>(null)
+    private var restoreWrong by mutableStateOf(false)
+    private var busy by mutableStateOf<Triple<String, Int, Int>?>(null)
+    private val saveBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> onBackupTarget(uri) }
+    private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) { restoreWrong = false; restoreUri = uri } }
 
     // The system file picker: Hramota sees only the file chosen there
     private val pick = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> onPicked(uri) }
@@ -62,6 +70,13 @@ class MainActivity : ComponentActivity() {
                     // The shelf holds only documents kept inside Hramota
                     val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
                     BackHandler(showSettings) { showSettings = false }
+                    if (backupDialog) ua.hramota.ui.BackupDialog(shelf, shelves, onCreate = { pw, ids ->
+                        backupDialog = false
+                        pendingBackup = pw to ids
+                        saveBackup.launch(ua.hramota.data.Backup.suggestedName())
+                    }, onDismiss = { backupDialog = false })
+                    restoreUri?.let { u -> ua.hramota.ui.RestoreDialog(restoreWrong, onRestore = { pw -> restore(u, pw) }, onDismiss = { restoreUri = null }) }
+                    busy?.let { (t, d, n) -> ua.hramota.ui.BusyDialog(t, d, n) }
                     if (showSettings) SettingsScreen(
                         settings = settings,
                         version = appVersion(),
@@ -71,6 +86,8 @@ class MainActivity : ComponentActivity() {
                         vault = vaultOn,
                         vaultPossible = ua.hramota.data.Vault.canUse(this),
                         onVault = { on -> setVault(on) },
+                        onBackup = { backupDialog = true },
+                        onRestore = { openBackup.launch(arrayOf("*/*")) },
                     ) else HomeScreen(
                         recents = files,
                         comparePrompt = when {
@@ -95,6 +112,40 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    private fun onBackupTarget(uri: Uri?) {
+        val (pw, ids) = pendingBackup ?: return
+        pendingBackup = null
+        if (uri == null) { pw.fill(' '); return }
+        busy = Triple(getString(R.string.backup_writing), 0, 0)
+        lifecycleScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                        ua.hramota.data.Backup.write(this@MainActivity, out, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) }
+                    } != null
+                } catch (e: Exception) { false } finally { pw.fill(' ') }
+            }
+            if (!ok) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
+            busy = null
+            android.widget.Toast.makeText(this@MainActivity, getString(if (ok) R.string.backup_written else R.string.backup_failed), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun restore(uri: Uri, pw: CharArray) {
+        busy = Triple(getString(R.string.backup_reading), 0, 0)
+        lifecycleScope.launch {
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try { contentResolver.openInputStream(uri)?.use { ua.hramota.data.Backup.restore(this@MainActivity, it, pw) } }
+                catch (e: Exception) { null } finally { pw.fill(' ') }
+            }
+            busy = null
+            if (result == null) { restoreWrong = true; return@launch }
+            restoreUri = null
+            recents.reload()
+            android.widget.Toast.makeText(this@MainActivity, getString(R.string.backup_restored, result.added, result.updated, result.documents), android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

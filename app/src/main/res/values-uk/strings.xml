@@ -196,4 +196,25 @@
     <string name="unlock">Відімкнути</string>
     <string name="unlock_title">Відімкнути Грамоту</string>
     <string name="unlock_subtitle">PIN, графічний ключ, пароль або відбиток телефону</string>
+    <string name="backup_section">Резервна копія</string>
+    <string name="backup_section_hint">Один зашифрований файл із закладками, нотатками, місцями читання, полицями й налаштуваннями, а за бажанням — і з документами, збереженими в Грамоті. Збережіть його куди завгодно; відновлення поєднує копію з тим, що є, і нічого не видаляє.</string>
+    <string name="backup_create">Створити резервну копію</string>
+    <string name="backup_restore">Відновити з резервної копії</string>
+    <string name="backup_memory_always">Закладки, нотатки, місця читання, полиці й налаштування додаються завжди.</string>
+    <string name="backup_with_documents">Додати документи</string>
+    <string name="backup_selected">%1$d з %2$d · %3$s</string>
+    <string name="backup_password">Пароль</string>
+    <string name="backup_password_again">Пароль ще раз</string>
+    <string name="backup_password_short">Щонайменше 8 символів</string>
+    <string name="backup_password_differs">Паролі різні</string>
+    <string name="backup_password_hint">Без пароля копію не відкриє ніхто, навіть ви: запишіть його.</string>
+    <string name="backup_save">Зберегти…</string>
+    <string name="backup_writing">Записую резервну копію…</string>
+    <string name="backup_written">Резервну копію збережено</string>
+    <string name="backup_failed">Не вдалося записати резервну копію</string>
+    <string name="backup_reading">Читаю резервну копію…</string>
+    <string name="backup_restore_hint">Вміст копії поєднується з тим, що є: нічого не видаляється.</string>
+    <string name="backup_wrong">Неправильний пароль або це не резервна копія Грамоти</string>
+    <string name="backup_restore_go">Відновити</string>
+    <string name="backup_restored">Відновлено: нових %1$d, поєднано %2$d, документів %3$d</string>
 </resources>

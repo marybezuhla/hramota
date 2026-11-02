@@ -53,6 +53,8 @@ fun SettingsScreen(
     vault: Boolean = false,
     vaultPossible: Boolean = true,
     onVault: (Boolean) -> Unit = {},
+    onBackup: () -> Unit = {},
+    onRestore: () -> Unit = {},
 ) {
     var licenses by rememberSaveable { mutableStateOf(false) }
     var cleared by rememberSaveable { mutableStateOf(false) }
@@ -107,6 +109,15 @@ fun SettingsScreen(
                     stringResource(if (cleared) R.string.settings_cleared else R.string.settings_clear),
                     style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary,
                 )
+            }
+
+            Section(stringResource(R.string.backup_section))
+            Text(stringResource(R.string.backup_section_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            Row(Modifier.fillMaxWidth().clickable { onBackup() }.padding(horizontal = 20.dp, vertical = 14.dp)) {
+                Text(stringResource(R.string.backup_create), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+            }
+            Row(Modifier.fillMaxWidth().clickable { onRestore() }.padding(horizontal = 20.dp, vertical = 14.dp)) {
+                Text(stringResource(R.string.backup_restore), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
             }
 
             Section(stringResource(R.string.settings_about))
