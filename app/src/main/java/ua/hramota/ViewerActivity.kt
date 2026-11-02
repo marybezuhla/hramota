@@ -325,11 +325,11 @@ class ViewerActivity : ComponentActivity() {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         lifecycleScope.launch {
             val edit = withContext(Dispatchers.IO) {
-                try { contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) } }
+                try { contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) }?.let { ua.hramota.ui.EditorState(it) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
             }
             if (edit == null) android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
-            else held.editor = ua.hramota.ui.EditorState(edit)
+            else held.editor = edit
         }
     }
 
@@ -372,7 +372,7 @@ class ViewerActivity : ComponentActivity() {
 
     /** The edited document written to [temp] and checked to open as a document. */
     private fun buildEdited(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, temp: java.io.File): Boolean = try {
-        contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { editor.edit.save(editor.paras, input.buffered(), it) } } ?: false
+        contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { editor.edit.save(editor.paras, input.buffered(), it) } } ?: return false
         temp.inputStream().buffered().use { DocxReader.read(it) }
         true
     } catch (e: Exception) { temp.delete(); false } catch (e: OutOfMemoryError) { temp.delete(); false }
@@ -392,7 +392,7 @@ class ViewerActivity : ComponentActivity() {
         } catch (e: java.io.FileNotFoundException) { return Saved.NEEDS_COPY to null
         } catch (e: Exception) { return Saved.FAILED to null }
         val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return Saved.DONE to null
-        if (entry != null && newId != id) {
+        if (entry != null && id != null && newId != id) {
             library.update(newId) { entry.copy(id = newId) }
             library.update(id) { null }
             // The first page may look different now: its picture is made again

@@ -27,11 +27,11 @@ class DocxEditTest {
         @Suppress("UNREACHABLE_CODE") null
     }
 
-    private fun save(name: String, edit: DocxEdit, list: List<EditPara>): ByteArray {
+    private fun save(name: String, edit: DocxEdit, list: List<EditPara>, label: String = "edited"): ByteArray {
         val out = ByteArrayOutputStream()
         edit.save(list, ByteArrayInputStream(bytes(name)), out)
         // Kept for CI, where LibreOffice opens each edited file to show it is a valid document
-        File("build/edited").apply { mkdirs() }.let { File(it, "edited-$name").writeBytes(out.toByteArray()) }
+        File("build/edited").apply { mkdirs() }.let { File(it, "$label-$name").writeBytes(out.toByteArray()) }
         return out.toByteArray()
     }
 
@@ -40,7 +40,7 @@ class DocxEditTest {
     @Test fun unchangedSaveKeepsTheDocumentToTheByte() {
         for (name in listOf("01-fonts.docx", "02-paragraphs.docx", "03-lists.docx", "04-tables.docx", "05-flow.docx", "07-headers.docx")) {
             val edit = DocxEdit.open(ByteArrayInputStream(bytes(name)))
-            val saved = save("same-$name", edit, edit.paragraphs)
+            val saved = save(name, edit, edit.paragraphs, "same")
             assertTrue(name, part(bytes(name), "word/document.xml")!!.contentEquals(part(saved, "word/document.xml")!!))
             assertEquals(name, texts(bytes(name)), texts(saved))
         }
