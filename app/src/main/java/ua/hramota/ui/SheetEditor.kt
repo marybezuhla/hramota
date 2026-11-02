@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ua.hramota.EditSaving
 import ua.hramota.R
@@ -44,7 +45,7 @@ import java.io.OutputStream
  * A workbook being edited: what is shown (the file's workbook with the changed cells and the
  * formulas depending on them worked out again), and what was done, to undo and redo.
  */
-class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
+class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     var workbook by mutableStateOf(original)
         private set
     var dirty by mutableStateOf(false)
@@ -56,11 +57,19 @@ class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
     /** Bumped on each change; the screen works the values out again for it. */
     var version by mutableIntStateOf(0)
         private set
+    /** Rows being inserted or deleted (the cells wait meanwhile). */
+    var busy by mutableStateOf(false)
+        private set
+    /** What to tell the person (rows could not be changed), once. */
+    var notice by mutableStateOf<Int?>(null)
 
     // Shown sheets (the file's visible ones) in the editor's numbering of all sheets
     private val shownSheets: List<Int> = original.sheets.map { s -> edit.sheets.indexOfFirst { it.visible && it.name == s.name } }
 
-    private class Step(val key: CellKey, val before: Input?, val after: Input?)
+    private sealed class Step
+    private class CellStep(val key: CellKey, val before: Input?, val after: Input?) : Step()
+    /** Rows inserted or deleted: the whole workbook before and after (a few kept, they can be large). */
+    private class RowStep(val before: XlsxEdit.Snapshot, val after: XlsxEdit.Snapshot, val shownBefore: Workbook, val shownAfter: Workbook) : Step()
     private val undoStack = ArrayList<Step>()
     private val redoStack = ArrayList<Step>()
 
@@ -83,20 +92,74 @@ class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
         val input = edit.parse(typed, dateCell, shown.date1904) ?: return false
         val before = edit.changes[key]
         edit.set(key, input)
-        undoStack += Step(key, before, input); if (undoStack.size > 500) undoStack.removeAt(0)
-        redoStack.clear()
+        push(CellStep(key, before, input))
         changed()
         return true
     }
 
+    private fun push(step: Step) {
+        undoStack += step
+        if (undoStack.size > 500) undoStack.removeAt(0)
+        // Only the last few row changes can be undone: older steps go with them (they refer to rows as they were)
+        while (undoStack.count { it is RowStep } > MAX_ROW_STEPS) {
+            val first = undoStack.indexOfFirst { it is RowStep }
+            repeat(first + 1) { undoStack.removeAt(0) }
+        }
+        redoStack.clear()
+    }
+
     fun undo() {
+        if (busy) return
         val st = undoStack.removeLastOrNull() ?: return
-        edit.set(st.key, st.before); redoStack += st; changed()
+        when (st) {
+            is CellStep -> edit.set(st.key, st.before)
+            is RowStep -> { edit.restore(st.before); original = st.shownBefore }
+        }
+        redoStack += st
+        changed()
     }
 
     fun redo() {
+        if (busy) return
         val st = redoStack.removeLastOrNull() ?: return
-        edit.set(st.key, st.after); undoStack += st; changed()
+        when (st) {
+            is CellStep -> edit.set(st.key, st.after)
+            is RowStep -> { edit.restore(st.after); original = st.shownAfter }
+        }
+        undoStack += st
+        changed()
+    }
+
+    /**
+     * Inserts an empty row before ([below] false) or after row [row], or deletes it ([delete]), on
+     * shown sheet [sheet]. Everything that refers to the rows follows; when that cannot be done here,
+     * [notice] says why and nothing changes.
+     */
+    suspend fun rows(sheet: Int, row: Int, delete: Boolean, below: Boolean = false) {
+        if (busy) return
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
+        val at = if (delete || !below) row else row + 1
+        val n = if (delete) -1 else 1
+        busy = true
+        try {
+            val before = edit.snapshot()
+            val shownBefore = original
+            val refusal = try { withContext(Dispatchers.Default) { edit.moveRows(s, at, n) } }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return }
+            if (refusal != null) { notice = refusalText(refusal); return }
+            original = withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) sh.withRowsMoved(at, n) else sh }, original.inspection) }
+            push(RowStep(before, edit.snapshot(), shownBefore, original))
+            changed()
+        } finally { busy = false }
+    }
+
+    private fun refusalText(r: XlsxEdit.RowRefusal) = when (r) {
+        XlsxEdit.RowRefusal.WORKBOOK -> R.string.rows_refused_workbook
+        XlsxEdit.RowRefusal.SHEET -> R.string.rows_refused_sheet
+        XlsxEdit.RowRefusal.LOCKED -> R.string.rows_refused_locked
+        XlsxEdit.RowRefusal.FORMULAS -> R.string.rows_refused_formulas
+        XlsxEdit.RowRefusal.FULL -> R.string.rows_refused_full
     }
 
     private fun changed() {
@@ -140,6 +203,8 @@ class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
         return Workbook(sheets, original.inspection)
     }
 
+    companion object { private const val MAX_ROW_STEPS = 10 }
+
     /** What saving needs: the edits written into the workbook read again. */
     fun maker() = object : EditSaving.Maker {
         override val ext = "xlsx"
@@ -156,6 +221,14 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
     val view = remember { SheetViewState() }
     BackHandler { if (state.dirty) askClose = true else onClose() }
     LaunchedEffect(state.version) { if (state.version > 0) state.refresh() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    state.notice?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { state.notice = null },
+            text = { Text(stringResource(msg)) },
+            confirmButton = { TextButton(onClick = { state.notice = null }) { Text(stringResource(R.string.ok)) } },
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -166,9 +239,9 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     }
                 },
                 actions = {
-                    TextButton(onClick = { state.undo() }, enabled = state.canUndo && !saving) { Text("↶") }
-                    TextButton(onClick = { state.redo() }, enabled = state.canRedo && !saving) { Text("↷") }
-                    TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
+                    TextButton(onClick = { state.undo() }, enabled = state.canUndo && !saving && !state.busy) { Text("↶") }
+                    TextButton(onClick = { state.redo() }, enabled = state.canRedo && !saving && !state.busy) { Text("↷") }
+                    TextButton(onClick = onSave, enabled = state.dirty && !saving && !state.busy) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
         },
@@ -176,7 +249,10 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
         Box(Modifier.fillMaxSize().padding(padding)) {
             WorkbookDocument(
                 state.workbook, sheetIndex, onSheet = { sheetIndex = it }, state = view,
-                editing = SheetEditing(content = state::content, commit = state::commit, enabled = !saving),
+                editing = SheetEditing(
+                    content = state::content, commit = state::commit, enabled = !saving && !state.busy,
+                    rows = { sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } },
+                ),
                 startCell = startCell,
             )
         }

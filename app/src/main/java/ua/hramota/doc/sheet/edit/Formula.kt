@@ -249,6 +249,136 @@ object Formula {
         return b.toString()
     }
 
+    /** Rows inserted ([n] > 0) or deleted ([n] < 0) at row [at] (from 0), as Excel moves what refers to them. */
+    class RowMove(val at: Int, val n: Int) {
+        /** The row's new number; null when it was deleted. */
+        fun row(r: Int): Int? = when {
+            r < at -> r
+            n > 0 -> (r + n).takeIf { it < MAX_ROWS }
+            r < at - n -> null
+            else -> r + n
+        }
+
+        /** A range of rows afterwards: it grows or shrinks with rows inside it; null when all of it was deleted. */
+        fun range(top: Int, bottom: Int): Pair<Int, Int>? {
+            if (n > 0) return (if (top >= at) top + n else top).coerceAtMost(MAX_ROWS - 1) to (if (bottom >= at) bottom + n else bottom).coerceAtMost(MAX_ROWS - 1)
+            val end = at - n
+            val t = when { top < at -> top; top >= end -> top + n; else -> at }
+            val b = when { bottom < at -> bottom; bottom >= end -> bottom + n; else -> at - 1 }
+            return if (t > b) null else t to b
+        }
+    }
+
+    private const val MAX_ROWS = 1_048_576
+    private val CELL_RANGE = Regex("(\\$?)([A-Za-z]{1,3})(\\$?)([0-9]{1,7})(?::(\\$?)([A-Za-z]{1,3})(\\$?)([0-9]{1,7}))?")
+    private val ROW_RANGE = Regex("(\\$?)([0-9]{1,7}):(\\$?)([0-9]{1,7})")
+    private val COL_RANGE = Regex("\\$?[A-Za-z]{1,3}:\\$?[A-Za-z]{1,3}")
+
+    /**
+     * The formula after rows moved on sheet [target]: references to it (and, when [own] is true, those
+     * without a sheet) follow their rows; one wholly deleted becomes #REF!. Null when the formula has
+     * references this cannot follow (several sheets at once).
+     */
+    fun moveRows(text: String, own: Boolean, target: String, move: RowMove): String? {
+        val b = StringBuilder(text.length + 8)
+        var i = 0
+        var sheet: String? = null   // the sheet named just before (for the reference that follows)
+        var external = false
+        fun boundaryAfter(end: Int) = end >= text.length || !(text[end].isLetterOrDigit() || text[end] == '(' || text[end] == '_' || text[end] == '.')
+        while (i < text.length) {
+            val c = text[i]
+            val named = sheet
+            val ext = external
+            sheet = null; external = false
+            when {
+                c == '"' -> {
+                    b.append(c); i++
+                    while (i < text.length) { b.append(text[i]); if (text[i] == '"') { if (i + 1 < text.length && text[i + 1] == '"') { b.append('"'); i += 2; continue }; i++; break }; i++ }
+                    continue
+                }
+                c == '\'' -> {
+                    // A quoted sheet name: 'Мій аркуш'!A1 (or '[1]Аркуш'!A1, in another workbook)
+                    val sb = StringBuilder(); var j = i + 1
+                    while (j < text.length) { if (text[j] == '\'') { if (j + 1 < text.length && text[j + 1] == '\'') { sb.append('\''); j += 2; continue }; break }; sb.append(text[j]); j++ }
+                    b.append(text, i, minOf(j + 1, text.length)); i = j + 1
+                    if (i < text.length && text[i] == '!') {
+                        val name = sb.toString()
+                        if (name.contains(':')) return null
+                        b.append('!'); i++
+                        sheet = name.substringAfter(']'); external = name.startsWith("[")
+                    }
+                    continue
+                }
+                c == '[' -> {
+                    // A table's columns (Таблиця1[[#This Row],[Сума]]) or another workbook ([1]Аркуш!A1)
+                    var depth = 0; var j = i
+                    while (j < text.length) { if (text[j] == '[') depth++ else if (text[j] == ']') { depth--; if (depth == 0) break }; j++ }
+                    val inner = text.substring(i + 1, minOf(j, text.length))
+                    b.append(text, i, minOf(j + 1, text.length)); i = j + 1
+                    if (inner.isNotEmpty() && inner.all { it.isDigit() }) external = true
+                    continue
+                }
+                c == '#' -> {
+                    // An error written in the formula (#REF!, #N/A): not a sheet's name
+                    var j = i + 1
+                    while (j < text.length && (text[j].isLetterOrDigit() || text[j] == '/' || text[j] == '_')) j++
+                    if (j < text.length && (text[j] == '!' || text[j] == '?')) j++
+                    b.append(text, i, j); i = j
+                    continue
+                }
+            }
+            val prevOk = named != null || i == 0 || !(text[i - 1].isLetterOrDigit() || text[i - 1] == '_' || text[i - 1] == '.' || text[i - 1] == '\'' || text[i - 1] == ']')
+            val applies = if (named != null) !ext && named.equals(target, ignoreCase = true) else own && !ext
+            if (prevOk) {
+                val cr = COL_RANGE.matchAt(text, i)
+                if (cr != null && boundaryAfter(i + cr.value.length)) { b.append(cr.value); i += cr.value.length; continue }
+                val rr = ROW_RANGE.matchAt(text, i)
+                if (rr != null && boundaryAfter(i + rr.value.length) && (i == 0 || !text[i - 1].isDigit())) {
+                    if (!applies) b.append(rr.value) else {
+                        val g = rr.groupValues
+                        val top = g[2].toInt() - 1; val bottom = g[4].toInt() - 1
+                        val moved = move.range(minOf(top, bottom), maxOf(top, bottom))
+                        if (moved == null) b.append("#REF!") else b.append(g[1]).append(moved.first + 1).append(':').append(g[3]).append(moved.second + 1)
+                    }
+                    i += rr.value.length
+                    continue
+                }
+                val m = CELL_RANGE.matchAt(text, i)
+                if (m != null && boundaryAfter(i + m.value.length)) {
+                    val g = m.groupValues
+                    if (!applies) b.append(m.value)
+                    else if (g[6].isEmpty()) {
+                        val r = move.row(g[4].toInt() - 1)
+                        if (r == null) b.append("#REF!") else b.append(g[1]).append(g[2]).append(g[3]).append(r + 1)
+                    } else {
+                        val r1 = g[4].toInt() - 1; val r2 = g[8].toInt() - 1
+                        val moved = move.range(minOf(r1, r2), maxOf(r1, r2))
+                        if (moved == null) b.append("#REF!")
+                        else {
+                            val (t, bt) = if (r1 <= r2) moved else moved.second to moved.first
+                            b.append(g[1]).append(g[2]).append(g[3]).append(t + 1).append(':').append(g[5]).append(g[6]).append(g[7]).append(bt + 1)
+                        }
+                    }
+                    i += m.value.length
+                    continue
+                }
+            }
+            // A name: a function, a sheet before "!", or a defined name; copied whole
+            if (c.isLetter() || c == '_' || c == '\\') {
+                var e = i
+                while (e < text.length && (text[e].isLetterOrDigit() || text[e] == '_' || text[e] == '.' || text[e] == '\\')) e++
+                b.append(text, i, e)
+                if (e < text.length && text[e] == '!') { sheet = text.substring(i, e); b.append('!'); e++ }
+                // Several sheets at once (Аркуш1:Аркуш3!A1)
+                else if (e < text.length && text[e] == ':' && Regex("[^\\s!:()]+!").matchAt(text, e + 1) != null && !CELL_RANGE.matchesAt(text, e + 1)) return null
+                i = e
+                continue
+            }
+            b.append(c); i++
+        }
+        return b.toString()
+    }
+
     /** Where a calculation gets cell values (other cells' formulas are worked out on the way). */
     interface Cells {
         fun value(sheet: String?, row: Int, col: Int): Value

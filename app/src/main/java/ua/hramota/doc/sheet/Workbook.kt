@@ -92,6 +92,16 @@ class Sheet(
     /** True when cell [k] holds a number (shown on the right unless the cell says otherwise). */
     fun isNumber(row: SheetRow, k: Int): Boolean = row.texts[k] == null
 
+    /** The sheet after rows were inserted ([n] > 0) or deleted ([n] < 0) at [at]: cells, heights and merges move with them. */
+    fun withRowsMoved(at: Int, n: Int): Sheet {
+        val m = ua.hramota.doc.sheet.edit.Formula.RowMove(at, n)
+        val moved = rows.mapNotNull { r -> m.row(r.index)?.let { SheetRow(it, r.cols, r.styles, r.numbers, r.texts) } }
+        val h = HashMap<Int, Float>()
+        for ((k, v) in heights) m.row(k)?.let { h[it] = v }
+        val merged = merges.mapNotNull { g -> m.range(g.top, g.bottom)?.let { (t, b) -> Merge(t, g.left, b, g.right) }?.takeIf { it.top != it.bottom || it.left != it.right } }
+        return Sheet(name, moved, styles, widths, defaultWidth, h, defaultHeight, merged, frozenRows, frozenCols, date1904, hidden)
+    }
+
     /** The same sheet with other rows (after editing): sizes, styles and merges stay. */
     fun withRows(newRows: List<SheetRow>) = Sheet(name, newRows, styles, widths, defaultWidth, heights, defaultHeight, merges, frozenRows, frozenCols, date1904, hidden)
 }

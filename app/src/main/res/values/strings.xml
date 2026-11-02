@@ -321,5 +321,14 @@
     <string name="convert_note_doc">A new DOCX file is made; the old one stays as it is. Text, formatting, tables, pictures in the text, headers, footers and page size carry over; list numbers become text. Footnotes, comments, link addresses, text boxes and floating shapes do not.</string>
     <string name="convert_note_xls">A new XLSX file is made; the old one stays as it is. Values, the look of cells, column widths, merged cells and hidden sheets carry over. Formulas keep only their results; charts, pictures and cell comments do not carry over.</string>
     <string name="convert_go">Choose where</string>
+    <string name="rows_insert_above">Insert row above</string>
+    <string name="rows_insert_below">Insert row below</string>
+    <string name="rows_delete">Delete row %1$d</string>
+    <string name="rows_failed">Couldn’t change the rows.</string>
+    <string name="rows_refused_workbook">This workbook has charts or pivot tables: rows aren’t inserted or deleted here, so they don’t shift.</string>
+    <string name="rows_refused_sheet">This sheet has pictures, charts, notes or tables: rows aren’t inserted or deleted here, so they don’t shift.</string>
+    <string name="rows_refused_locked">This sheet has array formulas or data tables: rows aren’t inserted or deleted here.</string>
+    <string name="rows_refused_formulas">Some formulas refer to several sheets at once: rows aren’t inserted or deleted here.</string>
+    <string name="rows_refused_full">The sheet is full to its last row: there is no room for another.</string>
     <string name="create_exists">That file already exists: choose a new name.</string>
 </resources>

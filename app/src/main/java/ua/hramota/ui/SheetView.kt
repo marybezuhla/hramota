@@ -463,6 +463,8 @@ class SheetEditing(
     /** Puts [typed] into the cell; false if the cell cannot be changed here. */
     val commit: (sheet: Int, row: Int, col: Int, typed: String) -> Boolean,
     val enabled: Boolean = true,
+    /** Inserts a row above or below ([below]), or deletes it ([delete]); null where rows are not changed. */
+    val rows: ((sheet: Int, row: Int, delete: Boolean, below: Boolean) -> Unit)? = null,
 )
 
 /** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */
@@ -492,6 +494,25 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
             TextButton(onClick = { if (put()) onDone(row to col) }, enabled = editing.enabled) { Text("✓") }
+            editing.rows?.let { rows ->
+                var menu by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { menu = true }, enabled = editing.enabled) { Text("⋮") }
+                    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        // What was typed is put in first (a wrong formula stays, and the rows wait)
+                        fun act(delete: Boolean, below: Boolean) {
+                            menu = false
+                            if (value.text != editing.content(sheet, row, col) && !put()) return
+                            rows(sheet, row, delete, below)
+                            // The rows move under the field: it is closed, and the new place chosen again by a tap
+                            onClose()
+                        }
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_above)) }, onClick = { act(false, false) })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_below)) }, onClick = { act(false, true) })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_delete, row + 1), color = MaterialTheme.colorScheme.error) }, onClick = { act(true, false) })
+                    }
+                }
+            }
             TextButton(onClick = onClose) { Text("✕") }
         }
     }

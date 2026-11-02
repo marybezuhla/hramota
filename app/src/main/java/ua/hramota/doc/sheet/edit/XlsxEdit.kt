@@ -31,14 +31,35 @@ data class CellKey(val sheet: Int, val row: Int, val col: Int)
  * workbook's note to recalculate); every other row, sheet and part stays as the file had it.
  */
 class XlsxEdit private constructor(
-    val sheets: List<SheetPart>,
+    first: Layout,
     private val strings: List<String>,
-    private val workbookXml: String,
     private val relsXml: String?,
     private val typesXml: String?,
     private val digests: Map<String, ByteArray>,
     private val calcChain: String?,
+    /** Parts that may point at rows (charts, pivot tables, slicers): while there are any, rows are not inserted or deleted. */
+    private val rowBlockers: Boolean,
 ) {
+    /**
+     * The workbook's parts as they stand after rows were inserted or deleted (the file's own until
+     * then): sheets, workbook.xml, parts written anew, and formulas to work out again.
+     */
+    class Layout internal constructor(
+        val sheets: List<SheetPart>,
+        internal val workbookXml: String,
+        internal val overrides: Map<String, String>,
+        internal val forced: Set<CellKey>,
+        internal val moved: Boolean,
+    ) {
+        @Volatile internal var calc: Calc? = null
+    }
+
+    /** What undo needs to go back to: the parts and the typed cells. */
+    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>)
+
+    @Volatile private var layout: Layout = first
+    val sheets: List<SheetPart> get() = layout.sheets
+
     /** A cell as the file has it: where it is, its style, type, value and formula. */
     class RawCell(val elem: Elem, val s: String?, val t: String?, val v: String?, val inline: String?, val f: String?, val fElem: Elem?, val fKind: String?, val si: String?)
 
@@ -123,38 +144,43 @@ class XlsxEdit private constructor(
 
     private class FormulaCell(val key: CellKey, val parsed: Formula.Parsed, val refs: List<Pair<Int, IntArray>>)
 
-    // The formulas in the file that can be worked out here, with what they refer to
-    private val fileFormulas: List<FormulaCell> by lazy {
-        val out = ArrayList<FormulaCell>()
-        for ((si, sh) in sheets.withIndex()) for ((k, raw) in sh.cells) {
-            if (raw.f == null || raw.fKind == "array" || raw.fKind == "dataTable") continue
-            val parsed = Formula.parse(raw.f)
-            if (parsed.node == null) continue
-            out += FormulaCell(CellKey(si, (k ushr 14).toInt(), (k and 0x3FFF).toInt()), parsed, refsOf(parsed.node, si))
+    /** The formulas of a layout that can be worked out here, and which of them refer to a cell or a range. */
+    internal class Calc(
+        val formulas: List<Any>,
+        val single: Map<CellKey, List<Any>>,
+        val ranges: List<Triple<Int, IntArray, Any>>,
+    )
+
+    private fun calcOf(l: Layout): Calc {
+        l.calc?.let { return it }
+        synchronized(l) {
+            l.calc?.let { return it }
+            val out = ArrayList<FormulaCell>()
+            for ((si, sh) in l.sheets.withIndex()) for ((k, raw) in sh.cells) {
+                if (raw.f == null || raw.fKind == "array" || raw.fKind == "dataTable") continue
+                val parsed = Formula.parse(raw.f)
+                if (parsed.node == null) continue
+                out += FormulaCell(CellKey(si, (k ushr 14).toInt(), (k and 0x3FFF).toInt()), parsed, refsOf(l.sheets, parsed.node, si))
+            }
+            val single = HashMap<CellKey, MutableList<Any>>()
+            val ranges = ArrayList<Triple<Int, IntArray, Any>>()
+            for (f in out) for ((s, b) in f.refs) {
+                if (b[0] == b[2] && b[1] == b[3]) single.getOrPut(CellKey(s, b[0], b[1])) { ArrayList() } += f
+                else ranges += Triple(s, b, f)
+            }
+            return Calc(out, single, ranges).also { l.calc = it }
         }
-        out
     }
 
-    // Which formulas refer to a cell: by the cell itself, and the ranges to look through
-    private val dependents: Pair<Map<CellKey, List<FormulaCell>>, List<Triple<Int, IntArray, FormulaCell>>> by lazy {
-        val single = HashMap<CellKey, MutableList<FormulaCell>>()
-        val ranges = ArrayList<Triple<Int, IntArray, FormulaCell>>()
-        for (f in fileFormulas) for ((s, b) in f.refs) {
-            if (b[0] == b[2] && b[1] == b[3]) single.getOrPut(CellKey(s, b[0], b[1])) { ArrayList() } += f
-            else ranges += Triple(s, b, f)
-        }
-        single to ranges
-    }
-
-    private fun sheetIndex(name: String?, own: Int): Int = if (name == null) own else sheets.indexOfFirst { it.name.equals(name, ignoreCase = true) }
+    private fun sheetIndex(sheets: List<SheetPart>, name: String?, own: Int): Int = if (name == null) own else sheets.indexOfFirst { it.name.equals(name, ignoreCase = true) }
 
     /** What a formula refers to: sheet and [top, left, bottom, right] of each cell or range. */
-    private fun refsOf(node: Formula.Node, own: Int): List<Pair<Int, IntArray>> {
+    private fun refsOf(sheets: List<SheetPart>, node: Formula.Node, own: Int): List<Pair<Int, IntArray>> {
         val out = ArrayList<Pair<Int, IntArray>>()
         fun walk(n: Formula.Node) {
             when (n) {
-                is Formula.Node.Cell -> out += sheetIndex(n.ref.sheet, own) to intArrayOf(n.ref.row, n.ref.col, n.ref.row, n.ref.col)
-                is Formula.Node.Range -> out += sheetIndex(n.from.sheet, own) to intArrayOf(minOf(n.from.row, n.to.row), minOf(n.from.col, n.to.col), maxOf(n.from.row, n.to.row), maxOf(n.from.col, n.to.col))
+                is Formula.Node.Cell -> out += sheetIndex(sheets, n.ref.sheet, own) to intArrayOf(n.ref.row, n.ref.col, n.ref.row, n.ref.col)
+                is Formula.Node.Range -> out += sheetIndex(sheets, n.from.sheet, own) to intArrayOf(minOf(n.from.row, n.to.row), minOf(n.from.col, n.to.col), maxOf(n.from.row, n.to.row), maxOf(n.from.col, n.to.col))
                 is Formula.Node.Unary -> walk(n.a)
                 is Formula.Node.Percent -> walk(n.a)
                 is Formula.Node.Bin -> { walk(n.a); walk(n.b) }
@@ -167,7 +193,7 @@ class XlsxEdit private constructor(
                         val from = when (sum) { is Formula.Node.Cell -> sum.ref; is Formula.Node.Range -> sum.from.let { r -> r.copy(row = minOf(sum.from.row, sum.to.row), col = minOf(sum.from.col, sum.to.col)) }; else -> null }
                         if (from != null) {
                             val h = Math.abs(cond.to.row - cond.from.row); val w = Math.abs(cond.to.col - cond.from.col)
-                            out += sheetIndex(from.sheet, own) to intArrayOf(from.row, from.col, from.row + h, from.col + w)
+                            out += sheetIndex(sheets, from.sheet, own) to intArrayOf(from.row, from.col, from.row + h, from.col + w)
                         }
                     }
                 }
@@ -184,22 +210,28 @@ class XlsxEdit private constructor(
      */
     fun recalc(): Map<CellKey, Value> {
         // What was typed, taken at once: the screen can go on changing cells while this works
-        val snapshot: Pair<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>> = synchronized(this) { HashMap(inputs) to HashMap(parsedInputs) }
+        val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
         // A long chain of formulas (each row adding to the one above) is followed by recursion:
         // done on a thread with room for it, so it never overflows the caller's stack
         var result: Map<CellKey, Value>? = null
         var failure: Throwable? = null
-        val t = Thread(null, { try { result = recalcHere(snapshot.first, snapshot.second) } catch (e: Throwable) { failure = e } }, "recalc", 256L * 1024 * 1024)
+        val t = Thread(null, { try { result = recalcHere(snapshot.third, snapshot.first, snapshot.second) } catch (e: Throwable) { failure = e } }, "recalc", 256L * 1024 * 1024)
         t.start(); t.join()
         failure?.let { if (it is StackOverflowError) throw IOException("Formulas too deep") else throw it }
         return result!!
     }
 
-    private fun recalcHere(inputs: Map<CellKey, Input>, parsedInputs: Map<CellKey, Formula.Parsed>): Map<CellKey, Value> {
-        // From each changed cell to the formulas that refer to it, and on from those (each formula once)
-        val dirty = HashSet<CellKey>(inputs.keys)
-        val queue = ArrayDeque<CellKey>(inputs.keys)
-        val (single, ranges) = dependents
+    private fun recalcHere(l: Layout, inputs: Map<CellKey, Input>, parsedInputs: Map<CellKey, Formula.Parsed>): Map<CellKey, Value> {
+        val sheets = l.sheets
+        val calc = calcOf(l)
+        @Suppress("UNCHECKED_CAST") val single = calc.single as Map<CellKey, List<FormulaCell>>
+        @Suppress("UNCHECKED_CAST") val ranges = calc.ranges as List<Triple<Int, IntArray, FormulaCell>>
+        @Suppress("UNCHECKED_CAST") val fileFormulas = calc.formulas as List<FormulaCell>
+        // From each changed cell (and each formula whose references moved with rows) to the formulas
+        // that refer to it, and on from those (each formula once)
+        val seeds = inputs.keys + l.forced
+        val dirty = HashSet<CellKey>(seeds)
+        val queue = ArrayDeque<CellKey>(seeds)
         val reached = HashSet<FormulaCell>()
         while (queue.isNotEmpty()) {
             val k = queue.removeFirst()
@@ -215,7 +247,7 @@ class XlsxEdit private constructor(
         val cells = object : Formula.Cells {
             var own = 0
             override fun value(sheet: String?, row: Int, col: Int): Value {
-                val s = sheetIndex(sheet, own)
+                val s = sheetIndex(sheets, sheet, own)
                 if (s < 0) return Value.REF
                 return valueOf(CellKey(s, row, col))
             }
@@ -230,7 +262,10 @@ class XlsxEdit private constructor(
                         try { Formula.eval(parsed.node, this) } finally { own = saved; busy.remove(k) }
                     }
                     else -> when (val i = inputs[k]) {
-                        null -> sheets.getOrNull(k.sheet)?.cell(k.row, k.col)?.let { rawValue(it) } ?: Value.Empty
+                        // A formula whose rows moved and that is not worked out here: its old value no longer holds (Excel works it out on opening)
+                        null -> sheets.getOrNull(k.sheet)?.cell(k.row, k.col)?.let { raw ->
+                            if (k in l.forced && raw.f != null) { if (raw.f.contains("#REF!")) Value.REF else Value.NAME } else rawValue(raw)
+                        } ?: Value.Empty
                         Input.Clear -> Value.Empty
                         is Input.Number -> Value.Num(i.v)
                         is Input.Text -> Value.Text(i.v)
@@ -270,24 +305,280 @@ class XlsxEdit private constructor(
         return Input.Text(t.take(32_767))
     }
 
+    // --- Rows ---
+
+    /** Why rows could not be inserted or deleted. */
+    enum class RowRefusal { WORKBOOK, SHEET, LOCKED, FORMULAS, FULL }
+
+    private class Refused(val why: RowRefusal) : Exception()
+
+    @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs))
+
+    @Synchronized fun restore(s: Snapshot) {
+        layout = s.layout
+        inputs.clear(); inputs.putAll(s.inputs)
+        parsedInputs.clear()
+        for ((k, i) in inputs) if (i is Input.Formula) parsedInputs[k] = Formula.parse(i.text)
+    }
+
+    /**
+     * Inserts [n] empty rows before row [at] of [sheet] ([n] > 0), or deletes [-n] rows from [at]
+     * ([n] < 0). Every reference to the sheet's rows follows, as in Excel: formulas on all sheets,
+     * defined names, merged cells, conditional formats, data checks, links, the filter. Null when done,
+     * otherwise why not (nothing is changed then). Call off the main thread.
+     */
+    @Synchronized
+    fun moveRows(sheet: Int, at: Int, n: Int): RowRefusal? {
+        if (n == 0) return null
+        if (rowBlockers) return RowRefusal.WORKBOOK
+        val l = layout
+        val target = l.sheets.getOrNull(sheet) ?: return RowRefusal.SHEET
+        val x = target.xml
+        val root = XmlScan.children(x, 0, x.length).first { it.local == "worksheet" }
+        val top = XmlScan.children(x, root)
+        // Pictures, charts, notes and tables are anchored to rows in parts not moved here
+        if (top.any { it.local in SHEET_BLOCKERS }) return RowRefusal.SHEET
+        top.firstOrNull { it.local == "extLst" }?.let { e -> if (x.substring(e.start, e.end).let { it.contains("sqref") || it.contains(":f>") || it.contains(":f ") }) return RowRefusal.SHEET }
+        if (target.lockedAreas.isNotEmpty() || target.lockedShared.isNotEmpty() || target.cells.values.any { it.fKind == "array" || it.fKind == "dataTable" }) return RowRefusal.LOCKED
+        if (n > 0) {
+            val last = maxOf(target.rows.lastEntry()?.key ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.row } ?: -1)
+            if (last + n >= 1_048_576) return RowRefusal.FULL
+        }
+        val move = Formula.RowMove(at, n)
+        val name = target.name
+        try {
+            val forced = HashSet<CellKey>()
+            for (k in l.forced) if (k.sheet != sheet) forced += k else move.row(k.row)?.let { forced += k.copy(row = it) }
+            val newSheets = ArrayList<SheetPart>(l.sheets.size)
+            val overrides = HashMap(l.overrides)
+            for ((si, sh) in l.sheets.withIndex()) {
+                val changed = HashSet<Long>()
+                val xml = rewriteSheet(sh, si == sheet, name, move, changed)
+                if (xml == null) { newSheets += sh; continue }
+                val part = sheet(sh.name, sh.path, sh.visible, xml, MAX_CELLS)
+                part.lockedAreas.addAll(sh.lockedAreas.filter { si != sheet })
+                newSheets += part
+                overrides[sh.path] = xml
+                for (k in changed) forced += CellKey(si, (k ushr 14).toInt(), (k and 0x3FFF).toInt())
+            }
+            val wb = moveNames(l.workbookXml, name, move)
+            // What was typed moves with its row; formulas typed follow too
+            val newInputs = HashMap<CellKey, Input>()
+            for ((k, i) in inputs) {
+                val key = if (k.sheet != sheet) k else move.row(k.row)?.let { k.copy(row = it) } ?: continue
+                newInputs[key] = if (i is Input.Formula) Input.Formula(Formula.moveRows(i.text, k.sheet == sheet, name, move) ?: throw Refused(RowRefusal.FORMULAS)) else i
+            }
+            layout = Layout(newSheets, wb, overrides, forced, true)
+            inputs.clear(); inputs.putAll(newInputs)
+            parsedInputs.clear()
+            for ((k, i) in inputs) if (i is Input.Formula) parsedInputs[k] = Formula.parse(i.text)
+            return null
+        } catch (e: Refused) {
+            return e.why
+        }
+    }
+
+    private fun moved(text: String, own: Boolean, target: String, move: Formula.RowMove): String =
+        Formula.moveRows(text, own, target, move) ?: throw Refused(RowRefusal.FORMULAS)
+
+    /** "B2:D5 F1" with rows moved; areas wholly deleted left out (null when none is left). */
+    private fun movedAreas(list: String, move: Formula.RowMove): String? {
+        val out = ArrayList<String>()
+        for (a in list.trim().split(Regex("\\s+"))) {
+            if (a.isEmpty()) continue
+            val m = Regex("(\\$?[A-Za-z]{1,3})(\\$?)([0-9]{1,7})(?::(\\$?[A-Za-z]{1,3})(\\$?)([0-9]{1,7}))?").matchEntire(a) ?: run { out += a; null } ?: continue
+            val g = m.groupValues
+            val r1 = g[3].toInt() - 1
+            if (g[4].isEmpty()) { move.row(r1)?.let { out += g[1] + g[2] + (it + 1) }; continue }
+            val r2 = g[6].toInt() - 1
+            val (t, b) = move.range(minOf(r1, r2), maxOf(r1, r2)) ?: continue
+            out += g[1] + g[2] + (t + 1) + ":" + g[4] + g[5] + (b + 1)
+        }
+        return out.takeIf { it.isNotEmpty() }?.joinToString(" ")
+    }
+
+    private fun setAttr(tag: String, attr: String, value: String): String {
+        val re = Regex("(\\s$attr=\")[^\"]*(\")")
+        return if (re.containsMatchIn(tag)) tag.replace(re) { it.groupValues[1] + XmlScan.escape(value) + it.groupValues[2] }
+            else tag.replaceFirst(Regex("^(<[^\\s>/]+)"), "$1 $attr=\"${XmlScan.escape(value)}\"")
+    }
+
+    /**
+     * A sheet with rows moved: the target sheet's rows, cells and areas, and on every sheet the
+     * formulas that refer to the target. Null when nothing in it changes. [changed] gets the
+     * cells (in their new places) whose formula changed.
+     */
+    private fun rewriteSheet(sh: SheetPart, isTarget: Boolean, target: String, move: Formula.RowMove, changed: MutableSet<Long>): String? {
+        val x = sh.xml
+        val p = sh.p
+        // A shared formula written out of its group is a plain one; any other keeps its own tag (an array formula stays one)
+        fun newF(raw: RawCell, text: String): String {
+            val fe = raw.fElem!!
+            return if (raw.fKind == "shared" || fe.selfClosing || fe.empty) "<${p}f>${XmlScan.escape(text)}</${p}f>"
+                else x.substring(fe.start, fe.openEnd) + XmlScan.escape(text) + x.substring(fe.closeStart, fe.end)
+        }
+        val root = XmlScan.children(x, 0, x.length).first { it.local == "worksheet" }
+        val out = StringBuilder(x.length + 1024)
+        out.append(x, 0, root.openEnd)
+        var pos = root.openEnd
+        var any = false
+        for (e in XmlScan.children(x, root)) {
+            val replaced: String? = when {
+                e.local == "sheetData" -> {
+                    val b = StringBuilder()
+                    var edited = false
+                    // Shared formulas: a group is written cell by cell when any of its cells changes (always on the target sheet)
+                    val newText = HashMap<Long, String>()
+                    val unshare = HashSet<String>()
+                    for ((k, c) in sh.cells) {
+                        val f = c.f ?: continue
+                        val t = moved(f, isTarget, target, move)
+                        if (t != f || isTarget) { newText[k] = t; if (c.fKind == "shared" && c.si != null) unshare += c.si }
+                    }
+                    for ((k, c) in sh.cells) if (c.fKind == "shared" && c.si in unshare && k !in newText) newText[k] = c.f ?: continue
+                    if (!isTarget && newText.isEmpty()) null else {
+                        b.append(x, e.start, if (e.selfClosing) e.end else e.openEnd)
+                        if (!e.selfClosing) {
+                            var at = e.openEnd
+                            for ((r, rowElem) in sh.rows) {
+                                val nr = if (isTarget) move.row(r) else r
+                                b.append(x, at, rowElem.start); at = rowElem.end
+                                if (nr == null) { edited = true; continue }
+                                val cells = XmlScan.children(x, rowElem)
+                                if (!isTarget && cells.none { c -> c.local == "c" && newText.containsKey(key(r, c.attrs["r"]?.let { ua.hramota.doc.sheet.columnOf(it) } ?: -1)) }) {
+                                    // A row with no change: as the file has it (cells without an address are rare and written below)
+                                    if (cells.all { it.local != "c" || it.attrs["r"] != null }) { b.append(x, rowElem.start, rowElem.end); continue }
+                                }
+                                edited = true
+                                var tag = x.substring(rowElem.start, rowElem.openEnd)
+                                if (isTarget) tag = setAttr(tag, "r", (nr + 1).toString())
+                                b.append(tag)
+                                if (rowElem.selfClosing) continue
+                                var cpos = rowElem.openEnd
+                                var nextCol = 0
+                                for (c in cells) {
+                                    b.append(x, cpos, c.start); cpos = c.end
+                                    if (c.local != "c") { b.append(x, c.start, c.end); continue }
+                                    val col = c.attrs["r"]?.let { ua.hramota.doc.sheet.columnOf(it) }?.takeIf { it >= 0 } ?: nextCol
+                                    nextCol = col + 1
+                                    val raw = sh.cell(r, col)
+                                    val ctag = setAttr(x.substring(c.start, c.openEnd), "r", columnName(col) + (nr + 1))
+                                    val text = newText[key(r, col)]
+                                    if (raw?.fElem != null && text != null) {
+                                        changed += key(nr, col)
+                                        b.append(ctag).append(x, c.openEnd, raw.fElem.start).append(newF(raw, text)).append(x, raw.fElem.end, c.end)
+                                    } else b.append(ctag).append(x, c.openEnd, c.end)
+                                }
+                                b.append(x, cpos, rowElem.end)
+                            }
+                            b.append(x, at, e.end)
+                        }
+                        if (edited) b.toString() else null
+                    }
+                }
+                // Where the cells end: worked out again by Excel
+                isTarget && e.local == "dimension" -> ""
+                else -> rewriteElem(x, e, isTarget, target, move).let { if (it == x.substring(e.start, e.end)) null else it ?: "" }
+            }
+            if (replaced != null) { any = true; out.append(x, pos, e.start).append(replaced); pos = e.end }
+        }
+        if (!any) return null
+        out.append(x, pos, x.length)
+        return out.toString()
+    }
+
+    /** An element outside the cells with rows moved; null when it is to go (nothing of it is left). */
+    private fun rewriteElem(x: String, e: Elem, isTarget: Boolean, target: String, move: Formula.RowMove): String? {
+        var tag = x.substring(e.start, e.openEnd)
+        if (isTarget) {
+            when (e.local) {
+                "mergeCell", "hyperlink", "autoFilter", "sortState", "sortCondition" -> {
+                    val ref = e.attrs["ref"]
+                    if (ref != null) {
+                        val m = movedAreas(ref, move) ?: return null
+                        // A merge of one cell is no merge (Excel would call the file damaged)
+                        if (e.local == "mergeCell" && !m.contains(':')) return null
+                        tag = setAttr(tag, "ref", m)
+                    }
+                }
+                "conditionalFormatting", "dataValidation", "protectedRange", "ignoredError" -> {
+                    val ref = e.attrs["sqref"]
+                    if (ref != null) tag = setAttr(tag, "sqref", movedAreas(ref, move) ?: return null)
+                }
+                // Which cell was chosen: Excel chooses again
+                "selection" -> return null
+                "pane" -> e.attrs["topLeftCell"]?.let { t -> tag = setAttr(tag, "topLeftCell", movedAreas(t, move) ?: (Regex("[A-Za-z]+").find(t)?.value ?: "A") + (move.at + 1)) }
+                "brk" -> {
+                    val id = e.attrs["id"]?.toIntOrNull()
+                    if (id != null && id > 0) tag = setAttr(tag, "id", ((move.row(id - 1) ?: return null) + 1).toString())
+                }
+            }
+        }
+        if (e.selfClosing || e.empty) return tag + x.substring(e.openEnd, e.end)
+        if (e.local == "formula" || e.local == "formula1" || e.local == "formula2") {
+            val text = XmlScan.unescape(x.substring(e.openEnd, e.closeStart))
+            return tag + XmlScan.escape(moved(text, isTarget, target, move)) + x.substring(e.closeStart, e.end)
+        }
+        val kids = XmlScan.children(x, e)
+        if (kids.isEmpty()) return tag + x.substring(e.openEnd, e.end)
+        val b = StringBuilder(tag)
+        var pos = e.openEnd
+        var kept = 0
+        for (k in kids) {
+            b.append(x, pos, k.start); pos = k.end
+            val r = rewriteElem(x, k, isTarget, target, move)
+            if (r != null) { b.append(r); kept++ }
+        }
+        b.append(x, pos, e.end)
+        // A list left empty goes (an empty one is not allowed); the count follows what is left
+        if (kept == 0 && e.local in LISTS) return null
+        var res = b.toString()
+        if (kept != kids.size && e.local in LISTS) {
+            val head = res.substring(0, tag.length)
+            var h = head
+            if (e.attrs.containsKey("count")) h = setAttr(h, "count", kept.toString())
+            if (e.attrs.containsKey("manualBreakCount")) h = setAttr(h, "manualBreakCount", kept.toString())
+            res = h + res.substring(tag.length)
+        }
+        return res
+    }
+
+    /** workbook.xml with its defined names (print areas, named ranges) following the rows. */
+    private fun moveNames(wb: String, target: String, move: Formula.RowMove): String {
+        val root = XmlScan.children(wb, 0, wb.length).first { it.local == "workbook" }
+        val names = XmlScan.children(wb, root).firstOrNull { it.local == "definedNames" } ?: return wb
+        val b = StringBuilder()
+        var pos = 0
+        for (d in XmlScan.children(wb, names)) {
+            if (d.local != "definedName" || d.empty) continue
+            val text = XmlScan.unescape(wb.substring(d.openEnd, d.closeStart))
+            val t = moved(text, false, target, move)
+            if (t != text) { b.append(wb, pos, d.openEnd).append(XmlScan.escape(t)); pos = d.closeStart }
+        }
+        if (pos == 0) return wb
+        return b.append(wb, pos, wb.length).toString()
+    }
+
     // --- Saving ---
 
     /** Writes the edited workbook: the package is read again from [source] and copied entry by entry. Off the main thread. */
     @Synchronized
     fun save(source: InputStream, out: OutputStream) {
         val values = recalc()
-        val parts = HashMap<String, String>()
-        var formulasChanged = false
+        val l = layout
+        val sheets = l.sheets
+        val parts = HashMap<String, String>(l.overrides)
+        var formulasChanged = l.moved
         for ((si, sh) in sheets.withIndex()) {
             val mine = values.keys.filter { it.sheet == si }
             if (mine.isEmpty()) continue
             if (mine.any { k -> inputs[k] is Input.Formula || sh.cell(k.row, k.col)?.f != null && k in inputs }) formulasChanged = true
-            parts[sh.path] = writeSheet(si, sh, mine, values)
+            parts[sh.path] = writeSheet(si, sh, mine, values, inputs)
         }
         // Nothing changed (all undone): the file is written as it was
         if (parts.isEmpty()) { copy(source, out, emptyMap(), emptySet()); return }
         // Excel works every formula out again when it opens the file (formulas not done here included)
-        parts["xl/workbook.xml"] = fullCalcOnLoad(workbookXml)
+        parts["xl/workbook.xml"] = fullCalcOnLoad(l.workbookXml)
         // Excel's list of formula cells would no longer match: it is left out, and Excel makes it again
         val dropped = HashSet<String>()
         if (calcChain != null && formulasChanged) {
@@ -298,7 +589,7 @@ class XlsxEdit private constructor(
         copy(source, out, parts, dropped)
     }
 
-    private fun writeSheet(si: Int, sh: SheetPart, keys: List<CellKey>, values: Map<CellKey, Value>): String {
+    private fun writeSheet(si: Int, sh: SheetPart, keys: List<CellKey>, values: Map<CellKey, Value>, inputs: Map<CellKey, Input>): String {
         val p = sh.p
         val byRow = keys.groupBy { it.row }
         // A shared formula touched anywhere is written out cell by cell in its whole group
@@ -473,11 +764,18 @@ class XlsxEdit private constructor(
         private const val MAX_TOTAL = 1024L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
 
+        /** Parts that can point at a sheet's rows from outside it, and are not moved here. */
+        /** A sheet with these is not changed in its rows: what they hold is anchored to rows in other parts. */
+        private val SHEET_BLOCKERS = setOf("drawing", "legacyDrawing", "tableParts", "oleObjects", "controls", "customSheetViews", "scenarios")
+        private val LISTS = setOf("mergeCells", "conditionalFormatting", "dataValidations", "hyperlinks", "protectedRanges", "ignoredErrors", "rowBreaks", "sortState")
+        private val ROW_BLOCKERS = listOf("xl/charts/", "xl/chartsheets/", "xl/pivotcache/", "xl/pivottables/", "xl/slicers/", "xl/slicercaches/", "xl/timelines/", "xl/timelinecaches/", "xl/querytables/", "xl/model/", "xl/richdata/")
+
         internal fun key(row: Int, col: Int): Long = (row.toLong() shl 14) or col.toLong()
 
         /** Opens an XLSX for editing. Call off the main thread. */
         fun open(input: InputStream): XlsxEdit {
             val raw = HashMap<String, ByteArray>()
+            var blockers = false
             ZipInputStream(input).use { zip ->
                 var count = 0
                 var total = 0L
@@ -486,6 +784,7 @@ class XlsxEdit private constructor(
                     if (++count > MAX_ENTRIES) throw IOException("Too many entries")
                     val name = e.name.removePrefix("/")
                     val lower = name.lowercase()
+                    if (ROW_BLOCKERS.any { lower.startsWith(it) }) blockers = true
                     if (lower.endsWith(".xml") && (lower.startsWith("xl/worksheets/") || lower.startsWith("xl/tables/") || lower == "xl/workbook.xml" || lower == "xl/sharedstrings.xml") ||
                         lower.startsWith("xl/worksheets/_rels/") && lower.endsWith(".rels") ||
                         lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml") {
@@ -541,7 +840,7 @@ class XlsxEdit private constructor(
                 parts += part
             }
             if (parts.isEmpty()) throw IOException("No sheets")
-            return XlsxEdit(parts, strings, wb, rels, types, digests, calcChain)
+            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, blockers)
         }
 
         private fun sheet(name: String, path: String, visible: Boolean, xml: String, budget: Int): SheetPart {

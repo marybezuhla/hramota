@@ -111,4 +111,53 @@ class XlsxEditTest {
         assertTrue(part(saved, "xl/worksheets/sheet1.xml")!!.contains("<x:f>B4*Ціни!A3</x:f>"))
         XlsxReader.read(ByteArrayInputStream(saved))
     }
+
+    @Test fun rowsMovingFollowRows() {
+        val m = Formula.RowMove(4, 2)
+        assertEquals("SUM(A1:A12)", Formula.moveRows("SUM(A1:A10)", true, "Дані", m))
+        assertEquals("\$A\$9+A3", Formula.moveRows("\$A\$7+A3", true, "Дані", m))
+        assertEquals("'Дані'!A7+Інший!A5", Formula.moveRows("'Дані'!A5+Інший!A5", false, "Дані", m))
+        assertEquals("\"A5\"&LOG10(A7)", Formula.moveRows("\"A5\"&LOG10(A5)", true, "Дані", m))
+        assertEquals("[1]Дані!A5", Formula.moveRows("[1]Дані!A5", false, "Дані", m))
+        assertEquals("SUM(7:8)+SUM(A:A)", Formula.moveRows("SUM(5:6)+SUM(A:A)", true, "Дані", m))
+        assertNull(Formula.moveRows("SUM(Аркуш1:Аркуш3!A1)", true, "Дані", m))
+        val d = Formula.RowMove(4, -2)
+        assertEquals("#REF!+A5+SUM(A4:A4)+SUM(#REF!)", Formula.moveRows("A5+A7+SUM(A4:A6)+SUM(A5:A6)", true, "Дані", d))
+    }
+
+    @Test fun insertedAndDeletedRowsMoveEverythingThatRefersToThem() {
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
+        assertNull(edit.moveRows(0, 4, 2))
+        // The total takes in the moved rows, and works out at once
+        assertEquals(Value.Num(550.0), edit.recalc()[CellKey(0, 0, 2)])
+        assertEquals("=A7", edit.content(CellKey(0, 1, 2)))
+        val out = save("docs-edit/rows.xlsx", edit, "rows-inserted")
+        val sheet = part(out, "xl/worksheets/sheet1.xml")!!
+        assertTrue(sheet.contains("<mergeCell ref=\"D3:E7\"/>"))
+        assertTrue(sheet.contains("sqref=\"F2:F10\""))
+        assertTrue(sheet.contains("<autoFilter ref=\"A1:B12\"/>"))
+        assertTrue(part(out, "xl/worksheets/sheet2.xml")!!.contains("'Дані'!A7+1"))
+        assertTrue(part(out, "xl/workbook.xml")!!.contains("'Дані'!\$A\$2:\$A\$11"))
+        // Read again as the viewer does: the values are in their new rows
+        val back = XlsxReader.read(ByteArrayInputStream(out)).sheets[0]
+        assertEquals("50", back.text(back.row(6)!!, 0))
+        assertNull(back.row(4))
+
+        val del = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
+        assertNull(del.moveRows(0, 4, -2))
+        assertEquals(Value.REF, del.recalc()[CellKey(0, 1, 2)])
+        val d = save("docs-edit/rows.xlsx", del, "rows-deleted")
+        assertTrue(part(d, "xl/worksheets/sheet1.xml")!!.contains("<f>SUM(A1:A8)</f>"))
+        // Undone: the file as it was
+        val again = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
+        val before = again.snapshot()
+        again.moveRows(0, 0, 3)
+        again.restore(before)
+        assertEquals("=A5", again.content(CellKey(0, 1, 2)))
+    }
+
+    @Test fun rowsAreNotMovedUnderTables() {
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows-table.xlsx")))
+        assertEquals(XlsxEdit.RowRefusal.SHEET, edit.moveRows(0, 2, 1))
+    }
 }
