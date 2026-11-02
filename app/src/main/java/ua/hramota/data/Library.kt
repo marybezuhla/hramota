@@ -141,8 +141,8 @@ class Library private constructor(private val context: Context) {
 
     fun clearAll() {
         state.value.keys.toList().forEach(::forget)
-        // Earlier versions kept by saves that did not finish go too
-        File(context.filesDir, "rescue").deleteRecursively()
+        // Earlier versions kept by saves that did not finish go too (not while a save is under way)
+        if (!ua.hramota.EditSaving.Rescue.busy()) File(context.filesDir, "rescue").deleteRecursively()
         synchronized(this) { shelfState.value = shelfState.value.filter { it.id == ShelfDef.ALL }; saveShelves(shelfState.value) }
     }
 
@@ -279,6 +279,8 @@ class Library private constructor(private val context: Context) {
         }
         writer.submit {}.get()
         Recents.convert(context, seal)
+        // Earlier versions kept by unfinished saves follow the storage too
+        for (r in ua.hramota.EditSaving.Rescue.left(context)) try { r.convert(key, seal) } catch (_: Exception) {}
     }
 
     companion object {
