@@ -126,8 +126,11 @@ class BookReadersTest {
     @Test fun ignoresDefinedEntities() {
         val bomb = """<?xml version="1.0"?><!DOCTYPE FictionBook [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;"><!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">]>
 <FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body><section><p>Безпечно</p></section></body></FictionBook>"""
-        val book = Fb2Reader.read(ByteArrayInputStream(bomb.toByteArray()))
-        assertEquals("Безпечно", (book.blocks.single() as BookBlock.Text).text)
+        // Refused outright: a book has no need to define its own entities
+        assertTrue(runCatching { Fb2Reader.read(ByteArrayInputStream(bomb.toByteArray())) }.isFailure)
+        // A plain DOCTYPE without entities is fine
+        val plain = """<?xml version="1.0"?><!DOCTYPE FictionBook SYSTEM "x.dtd"><FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body><section><p>Безпечно</p></section></body></FictionBook>"""
+        assertEquals("Безпечно", (Fb2Reader.read(ByteArrayInputStream(plain.toByteArray())).blocks.single() as BookBlock.Text).text)
     }
 
     /** The ways round a first-bytes check: a long comment first, or the file in UTF-16. */
