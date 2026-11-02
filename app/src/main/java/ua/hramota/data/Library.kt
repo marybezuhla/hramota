@@ -56,10 +56,8 @@ data class LibraryEntry(
  * hundred bytes per document. Exported only by the person, inside an encrypted backup.
  */
 class Library private constructor(private val context: Context) {
-    private val file = AtomicFile(File(context.filesDir, "library.json"))
     private val state = MutableStateFlow(load())
     val entries: StateFlow<Map<String, LibraryEntry>> = state.asStateFlow()
-    private val shelfFile = AtomicFile(File(context.filesDir, "shelves.json"))
     private val shelfState = MutableStateFlow(loadShelves())
     /** "All" first, then one's own shelves in the order they were made. */
     val shelves: StateFlow<List<ShelfDef>> = shelfState.asStateFlow()
@@ -80,8 +78,8 @@ class Library private constructor(private val context: Context) {
     fun setShelves(id: String, shelves: Set<String>) = update(id) { e -> e?.copy(shelves = shelves.filter { s -> shelfState.value.any { it.id == s } }.toSet()) }
 
     private fun loadShelves(): List<ShelfDef> {
-        val list = try {
-            val json = JSONArray(String(shelfFile.readFully()))
+        val list = if (Vault.locked(context)) emptyList() else try {
+            val json = JSONArray(String(Vault.readSmall(context, "shelves.json") ?: throw java.io.FileNotFoundException()))
             (0 until minOf(json.length(), MAX_SHELVES)).mapNotNull { i ->
                 val o = json.optJSONObject(i) ?: return@mapNotNull null
                 ShelfDef(o.optString("id").ifEmpty { return@mapNotNull null }, o.optString("name").take(80), o.optString("style").takeIf { it in STYLES } ?: "modern",
@@ -96,8 +94,8 @@ class Library private constructor(private val context: Context) {
     private fun saveShelves(list: List<ShelfDef>) {
         val json = JSONArray()
         for (d in list) json.put(JSONObject().apply { put("id", d.id); put("name", d.name); put("style", d.style); put("hue", d.hue.toDouble()); put("created", d.created) })
-        val out = shelfFile.startWrite()
-        try { out.write(json.toString().toByteArray()); shelfFile.finishWrite(out) } catch (e: Exception) { shelfFile.failWrite(out) }
+        if (Vault.locked(context)) return
+        try { Vault.writeSmall(context, "shelves.json", json.toString().toByteArray()) } catch (_: Exception) {}
     }
 
     fun get(id: String): LibraryEntry? = state.value[id]
@@ -145,14 +143,23 @@ class Library private constructor(private val context: Context) {
         synchronized(this) { shelfState.value = shelfState.value.filter { it.id == ShelfDef.ALL }; saveShelves(shelfState.value) }
     }
 
+    /** Reads the memory again: after the locked storage is opened or locked. */
+    @Synchronized fun reload() {
+        state.value = load()
+        shelfState.value = loadShelves()
+    }
+
+    private fun keepAside(name: String) {
+        // Unreadable: kept aside rather than overwritten, so nothing is lost for good
+        for (f in listOf(File(context.filesDir, name + Vault.SUFFIX), File(context.filesDir, name)))
+            if (f.exists()) try { f.copyTo(File(context.filesDir, "$name.broken-${System.currentTimeMillis()}")) } catch (_: Exception) {}
+    }
+
     private fun load(): Map<String, LibraryEntry> {
-        val text = try { String(file.readFully()) } catch (e: java.io.FileNotFoundException) { return emptyMap() } catch (e: Exception) { null }
-        val json = try { text?.let(::JSONArray) } catch (e: Exception) { null }
-        if (json == null) {
-            // Unreadable: kept aside rather than overwritten, so nothing is lost for good
-            try { file.baseFile.copyTo(File(context.filesDir, "library.broken-${System.currentTimeMillis()}.json")) } catch (_: Exception) {}
-            return emptyMap()
-        }
+        // Locked: nothing is shown, and nothing is written over the sealed memory
+        if (Vault.locked(context)) return emptyMap()
+        val bytes = try { Vault.readSmall(context, "library.json") } catch (e: Exception) { keepAside("library.json"); return emptyMap() } ?: return emptyMap()
+        val json = try { JSONArray(String(bytes)) } catch (e: Exception) { keepAside("library.json"); return emptyMap() }
         val out = HashMap<String, LibraryEntry>()
         for (i in 0 until json.length()) {
             // One damaged entry is skipped, not the whole memory
@@ -203,8 +210,32 @@ class Library private constructor(private val context: Context) {
                 for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
             })
         })
-        val out = file.startWrite()
-        try { out.write(json.toString().toByteArray()); file.finishWrite(out) } catch (e: Exception) { file.failWrite(out) }
+        if (Vault.locked(context)) return
+        try { Vault.writeSmall(context, "library.json", json.toString().toByteArray()) } catch (_: Exception) {}
+    }
+
+    /** Seals every remembered file (locked storage turned on, unlocked): memory, shelves, covers, copies, recents. */
+    fun sealAll() = convert(seal = true)
+
+    /** The other way: everything back to plain files. */
+    fun unsealAll() = convert(seal = false)
+
+    private fun convert(seal: Boolean) {
+        val key = Vault.key() ?: throw java.io.IOException("Locked")
+        // Memory and shelves: written again in the new form (the old one is removed by the writer)
+        writer.submit {}.get()
+        write(state.value)
+        saveShelves(shelfState.value)
+        for (f in coversDir(context).listFiles().orEmpty()) Shelf.convertFile(key, f, seal)
+        for (e in state.value.values) {
+            val path = e.copy ?: continue
+            val f = File(path)
+            if (!f.exists()) continue
+            val now = Shelf.convertFile(key, f, seal) ?: continue
+            update(e.id) { it?.copy(copy = now.path) }
+        }
+        writer.submit {}.get()
+        Recents.convert(context, seal)
     }
 
     companion object {

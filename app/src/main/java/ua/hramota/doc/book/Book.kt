@@ -59,11 +59,22 @@ internal class BlockBuilder {
         if (full) return
         // Spaces and line ends in the source collapse to single spaces, as in a browser
         for (c in t) {
+            // The text limit holds inside one huge piece of text too
+            if (total + sb.length >= Book.MAX_TEXT) return
             val ch = if (c == '\n' || c == '\r' || c == '\t') ' ' else c
             if (ch == ' ' && (sb.isEmpty() || sb.last() == ' ' || sb.last() == '\n')) continue
             sb.append(ch)
         }
     }
+
+    /** Text whose line ends are kept (preformatted). */
+    fun preformatted(t: String) {
+        val lines = t.split('\n')
+        lines.forEachIndexed { i, line -> if (i > 0) { if (sb.isNotEmpty() && sb.last() != '\n') sb.append('\n') }; text(line) }
+    }
+
+    /** After a damaged part: no bold or italic carried into the rest of the book. */
+    fun resetStyle() { styleChanging(); bold = 0; italic = 0; raised = 0; styleChanged() }
 
     fun lineBreak() { if (sb.isNotEmpty() && sb.last() != '\n') { if (sb.last() == ' ') sb.setLength(sb.length - 1); sb.append('\n') } }
 
@@ -75,16 +86,28 @@ internal class BlockBuilder {
             val all = spans.filter { it.start < text.length }.map { if (it.end > text.length) it.copy(end = text.length) else it }
             // A paragraph pages long is cut after a sentence, so no page waits for one huge layout
             var from = 0
+            var k = 0
             if (text.isEmpty()) blocks += BookBlock.Text(text, emptyList(), kind)
             while (from < text.length) {
                 var to = text.length
                 if (to - from > LONG) {
-                    val window = text.lastIndexOf(". ", from + LONG).takeIf { it > from + LONG / 2 }?.plus(2)
-                        ?: text.lastIndexOf(' ', from + LONG).takeIf { it > from + LONG / 2 }?.plus(1) ?: (from + LONG)
-                    to = window
+                    to = text.lastIndexOf(". ", from + LONG - 2).takeIf { it > from + LONG / 2 }?.plus(2)
+                        ?: text.lastIndexOf(' ', from + LONG - 1).takeIf { it > from + LONG / 2 }?.plus(1) ?: (from + LONG)
+                    // Never between the two halves of one character (an emoji, say)
+                    if (Character.isHighSurrogate(text[to - 1])) to--
                 }
                 val part = text.substring(from, to).trimEnd()
-                val partSpans = all.filter { it.end > from && it.start < to }.map { Span(maxOf(0, it.start - from), minOf(part.length, it.end - from), it.bold, it.italic, it.raised) }.filter { it.start < it.end }
+                // Spans are in order: one pass over them for all parts
+                while (k < all.size && all[k].end <= from) k++
+                val partSpans = ArrayList<Span>()
+                var j = k
+                while (j < all.size && all[j].start < to) {
+                    val sp = all[j]
+                    val a = maxOf(0, sp.start - from); val e = minOf(part.length, sp.end - from)
+                    if (a < e) partSpans += Span(a, e, sp.bold, sp.italic, sp.raised)
+                    j++
+                }
+                if (blocks.size >= Book.MAX_BLOCKS) break
                 blocks += BookBlock.Text(part, partSpans, if (from == 0 || kind != BookBlock.Kind.PARAGRAPH) kind else BookBlock.Kind.CONTINUED)
                 from = to
             }
@@ -100,20 +123,50 @@ internal class BlockBuilder {
 
 /** Removes a DOCTYPE (with any internal subset) so no entity defined in the file can be expanded. */
 internal fun stripDoctype(xml: ByteArray): ByteArray {
-    val head = String(xml, 0, minOf(xml.size, 4096), Charsets.ISO_8859_1)
-    val at = head.indexOf("<!DOCTYPE", ignoreCase = true)
+    // A file that declares its own entities is refused outright, in any of the encodings a parser
+    // would recognise (UTF-8, UTF-16 either way round); then a DOCTYPE is cut out as a second guard
+    if (declaresEntities(xml)) throw java.io.IOException("Entities declared in the file")
+    val at = indexOf(xml, "<!DOCTYPE".toByteArray(), ignoreCase = true)
     if (at < 0) return xml
     var i = at
     var depth = 0
+    var quote = 0
     while (i < xml.size) {
-        when (xml[i].toInt().toChar()) {
-            '[' -> depth++
-            ']' -> depth--
-            '>' -> if (depth <= 0) break
+        val c = xml[i].toInt().toChar()
+        when {
+            quote != 0 -> if (c.code == quote) quote = 0
+            c == '"' || c == '\'' -> quote = c.code
+            c == '[' -> depth++
+            c == ']' -> depth--
+            c == '>' -> if (depth <= 0) break
         }
         i++
     }
     return xml.copyOfRange(0, at) + xml.copyOfRange(minOf(i + 1, xml.size), xml.size)
+}
+
+internal fun declaresEntities(xml: ByteArray): Boolean {
+    val ascii = "<!ENTITY".toByteArray()
+    if (indexOf(xml, ascii, ignoreCase = true) >= 0) return true
+    val le = ByteArray(ascii.size * 2) { if (it % 2 == 0) ascii[it / 2] else 0 }
+    val be = ByteArray(ascii.size * 2) { if (it % 2 == 1) ascii[it / 2] else 0 }
+    return indexOf(xml, le, false) >= 0 || indexOf(xml, be, false) >= 0
+}
+
+private fun indexOf(data: ByteArray, pattern: ByteArray, ignoreCase: Boolean): Int {
+    fun low(b: Byte) = if (ignoreCase && b in 'A'.code.toByte()..'Z'.code.toByte()) (b + 32).toByte() else b
+    val first = low(pattern[0])
+    var i = 0
+    val end = data.size - pattern.size
+    while (i <= end) {
+        if (low(data[i]) == first) {
+            var k = 1
+            while (k < pattern.size && low(data[i + k]) == low(pattern[k])) k++
+            if (k == pattern.size) return i
+        }
+        i++
+    }
+    return -1
 }
 
 /** Named HTML characters common in books (the parser knows only the five XML ones). */
@@ -123,4 +176,20 @@ internal val HTML_ENTITIES = mapOf(
     "deg" to "°", "middot" to "·", "bull" to "•", "times" to "×", "minus" to "−", "sect" to "§", "para" to "¶", "euro" to "€",
     "thinsp" to " ", "ensp" to " ", "emsp" to " ", "zwnj" to "‌", "zwj" to "‍", "prime" to "′", "Prime" to "″",
     "frac12" to "½", "frac14" to "¼", "frac34" to "¾", "iexcl" to "¡", "iquest" to "¿", "acute" to "´", "uml" to "¨",
-)
+    "lsaquo" to "‹", "rsaquo" to "›", "sbquo" to "‚", "dagger" to "†", "Dagger" to "‡", "permil" to "‰", "larr" to "←", "rarr" to "→",
+    "uarr" to "↑", "darr" to "↓", "hArr" to "⇔", "ne" to "≠", "le" to "≤", "ge" to "≥", "infin" to "∞", "plusmn" to "±", "divide" to "÷",
+    "cent" to "¢", "pound" to "£", "yen" to "¥", "curren" to "¤", "ordf" to "ª", "ordm" to "º", "sup1" to "¹", "sup2" to "²", "sup3" to "³",
+    "micro" to "µ", "not" to "¬", "macr" to "¯", "cedil" to "¸", "brvbar" to "¦", "oline" to "‾", "circ" to "ˆ", "tilde" to "˜",
+) + latinLetters()
+
+/** The accented Latin letters by their HTML names (À–ÿ): "eacute", "Ouml", "ccedil"… */
+private fun latinLetters(): Map<String, String> {
+    val names = listOf(
+        "Agrave", "Aacute", "Acirc", "Atilde", "Auml", "Aring", "AElig", "Ccedil", "Egrave", "Eacute", "Ecirc", "Euml", "Igrave", "Iacute", "Icirc", "Iuml",
+        "ETH", "Ntilde", "Ograve", "Oacute", "Ocirc", "Otilde", "Ouml", "", "Oslash", "Ugrave", "Uacute", "Ucirc", "Uuml", "Yacute", "THORN", "szlig",
+        "agrave", "aacute", "acirc", "atilde", "auml", "aring", "aelig", "ccedil", "egrave", "eacute", "ecirc", "euml", "igrave", "iacute", "icirc", "iuml",
+        "eth", "ntilde", "ograve", "oacute", "ocirc", "otilde", "ouml", "", "oslash", "ugrave", "uacute", "ucirc", "uuml", "yacute", "thorn", "yuml",
+    )
+    return names.withIndex().filter { it.value.isNotEmpty() }.associate { (i, n) -> n to (0xC0 + i).toChar().toString() } +
+        mapOf("OElig" to "Œ", "oelig" to "œ", "Scaron" to "Š", "scaron" to "š", "Yuml" to "Ÿ", "fnof" to "ƒ")
+}

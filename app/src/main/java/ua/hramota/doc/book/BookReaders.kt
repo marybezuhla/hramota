@@ -27,34 +27,63 @@ private fun readLimited(input: InputStream, limit: Long): ByteArray {
     return out.toByteArray()
 }
 
-/** Every entry of a ZIP (small ones), by path; nothing in it is run. */
-private fun unzip(input: InputStream, perEntry: Long, total: Long): Map<String, ByteArray> {
+/** The parts of an EPUB worth reading (text and pictures), by path; nothing in it is run. */
+private fun unzip(input: InputStream, perEntry: Long, total: Long, keep: (String) -> Boolean): Map<String, ByteArray> {
     val out = HashMap<String, ByteArray>()
     var sum = 0L
+    var count = 0
     ZipInputStream(input).use { zip ->
         while (true) {
             val e = zip.nextEntry ?: break
+            // Names count too: a ZIP of countless empty parts with long names is still large
+            sum += e.name.length * 2L
+            if (++count > MAX_ENTRIES || sum > total) throw IOException("Book too large")
             if (e.isDirectory) continue
+            val name = e.name.removePrefix("/")
+            if (!keep(name.lowercase())) continue
             val bytes = readLimited(zip, perEntry)
             sum += bytes.size
             if (sum > total) throw IOException("Book too large")
-            out[e.name.removePrefix("/")] = bytes
+            out[name] = bytes
         }
     }
     return out
 }
 
+private const val MAX_ENTRIES = 10_000
+private val EPUB_PARTS = listOf(".xhtml", ".html", ".htm", ".xml", ".opf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+/** A link's path: %XX escapes decoded (as UTF-8), anything malformed left as it is. */
+internal fun decodePath(s: String): String {
+    if ('%' !in s) return s
+    val bytes = java.io.ByteArrayOutputStream()
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        if (c == '%' && i + 2 < s.length && s[i + 1].digitToIntOrNull(16) != null && s[i + 2].digitToIntOrNull(16) != null) {
+            bytes.write(s.substring(i + 1, i + 3).toInt(16)); i += 3
+        } else { bytes.write(c.toString().toByteArray()); i++ }
+    }
+    return bytes.toString("UTF-8")
+}
+
+/** Text of an element, or nothing if it holds other elements. */
+private fun XmlPullParser.textOrEmpty(): String = try { nextText().trim() } catch (e: Exception) { "" }
+
+// Elements that end a paragraph (and so keep notes, lists and tables apart from the text)
+private val BLOCKS = setOf("p", "div", "li", "ul", "ol", "section", "article", "aside", "nav", "header", "footer", "figure", "table", "dd", "dt", "dl", "figcaption", "tr", "caption")
+
 /** EPUB 2 and 3: the reading order of the package, chapter XHTML turned into blocks, pictures and the cover. */
 object EpubReader {
     fun read(input: InputStream, withImages: Boolean = true): Book {
-        val files = unzip(input, 64L * 1024 * 1024, 320L * 1024 * 1024)
+        val files = unzip(input, 16L * 1024 * 1024, 100L * 1024 * 1024) { n -> n == "mimetype" || EPUB_PARTS.any { n.endsWith(it) } }
         val container = files["META-INF/container.xml"] ?: throw IOException("Not an EPUB")
         var opfPath: String? = null
         parser(container).let { p -> while (p.next() != XmlPullParser.END_DOCUMENT) if (p.eventType == XmlPullParser.START_TAG && p.name == "rootfile") { opfPath = p.getAttributeValue(null, "full-path"); break } }
         val opf = opfPath?.let { files[it] } ?: throw IOException("Package missing")
         val base = opfPath!!.substringBeforeLast('/', "")
         fun resolve(from: String, href: String): String {
-            val clean = java.net.URLDecoder.decode(href.substringBefore('#'), "UTF-8")
+            val clean = decodePath(href.substringBefore('#'))
             val parts = (if (from.isEmpty()) emptyList() else from.split('/')) + clean.split('/')
             val out = ArrayList<String>()
             for (s in parts) when (s) { ".." -> if (out.isNotEmpty()) out.removeAt(out.size - 1); ".", "" -> Unit; else -> out += s }
@@ -68,9 +97,9 @@ object EpubReader {
         while (p.next() != XmlPullParser.END_DOCUMENT) {
             if (p.eventType != XmlPullParser.START_TAG) continue
             when (p.name) {
-                "title" -> if (title.isEmpty()) title = p.nextText().trim()
-                "creator" -> if (author.isEmpty()) author = p.nextText().trim()
-                "language" -> if (language.isEmpty()) language = p.nextText().trim()
+                "title" -> if (title.isEmpty()) title = p.textOrEmpty()
+                "creator" -> if (author.isEmpty()) author = p.textOrEmpty()
+                "language" -> if (language.isEmpty()) language = p.textOrEmpty()
                 "meta" -> if (p.getAttributeValue(null, "name") == "cover") coverId = p.getAttributeValue(null, "content")
                 "item" -> {
                     val id = p.getAttributeValue(null, "id") ?: continue
@@ -95,7 +124,8 @@ object EpubReader {
             val (path, type) = manifest[id] ?: continue
             if (!type.contains("html") && !path.endsWith("html") && !path.endsWith(".htm")) continue
             val bytes = files[path] ?: continue
-            try { xhtml(bytes, b) { src -> image(resolve(path.substringBeforeLast('/', ""), src)) } } catch (e: Exception) { b.end(BookBlock.Kind.PARAGRAPH) }
+            // A damaged chapter is left out; the rest of the book is read
+            try { xhtml(bytes, b) { src -> image(resolve(path.substringBeforeLast('/', ""), src)) } } catch (e: Exception) { b.end(BookBlock.Kind.PARAGRAPH); b.resetStyle() }
         }
         if (b.blocks.isEmpty()) throw IOException("Empty book")
         val coverPath = cover?.takeIf { withImages && files.containsKey(it) }?.also { c -> files[c]?.let { if (c !in images) images[c] = it } }
@@ -106,6 +136,7 @@ object EpubReader {
     private fun xhtml(bytes: ByteArray, b: BlockBuilder, image: (String) -> Unit) {
         val p = parser(bytes)
         var skip = 0
+        var pre = 0
         val kinds = ArrayList<BookBlock.Kind>()
         fun current() = kinds.lastOrNull() ?: BookBlock.Kind.PARAGRAPH
         while (true) {
@@ -118,7 +149,8 @@ object EpubReader {
                         "h2" -> { b.end(current()); kinds += BookBlock.Kind.HEADING2 }
                         "h3", "h4", "h5", "h6" -> { b.end(current()); kinds += BookBlock.Kind.HEADING3 }
                         "blockquote" -> { b.end(current()); kinds += BookBlock.Kind.QUOTE }
-                        "p", "div", "li", "section", "article", "dd", "dt", "pre", "figcaption", "tr" -> b.end(current())
+                        "pre" -> { b.end(current()); pre++ }
+                        in BLOCKS -> b.end(current())
                         "br" -> b.lineBreak()
                         "hr" -> { b.end(current()); b.end(BookBlock.Kind.BREAK) }
                         "b", "strong" -> { b.styleChanging(); b.bold++; b.styleChanged() }
@@ -133,14 +165,15 @@ object EpubReader {
                     if (skip > 0) { skip--; continue }
                     when (n) {
                         "h1", "h2", "h3", "h4", "h5", "h6", "blockquote" -> { b.end(current()); if (kinds.isNotEmpty()) kinds.removeAt(kinds.size - 1) }
-                        "p", "div", "li", "section", "article", "dd", "dt", "pre", "figcaption", "tr", "body" -> b.end(current())
+                        "pre" -> { b.end(current()); if (pre > 0) pre-- }
+                        in BLOCKS, "body" -> b.end(current())
                         "b", "strong" -> { b.styleChanging(); b.bold--; b.styleChanged() }
                         "i", "em", "cite", "dfn" -> { b.styleChanging(); b.italic--; b.styleChanged() }
                         "sup" -> { b.styleChanging(); b.raised--; b.styleChanged() }
                         "td", "th" -> b.text(" ")
                     }
                 }
-                XmlPullParser.TEXT, XmlPullParser.ENTITY_REF -> if (skip == 0) b.text(p.text ?: "")
+                XmlPullParser.TEXT, XmlPullParser.ENTITY_REF -> if (skip == 0) { if (pre > 0) b.preformatted(p.text ?: "") else b.text(p.text ?: "") }
                 XmlPullParser.END_DOCUMENT -> { b.end(current()); return }
             }
             if (b.full) return
@@ -153,80 +186,111 @@ object Fb2Reader {
     private const val XLINK = "http://www.w3.org/1999/xlink"
 
     fun read(input: InputStream, withImages: Boolean = true): Book {
-        val raw = readLimited(input, 256L * 1024 * 1024)
-        // A .fb2.zip holds the book as its only entry
-        val bytes = if (raw.size > 4 && raw[0] == 'P'.code.toByte() && raw[1] == 'K'.code.toByte()) {
-            unzip(ByteArrayInputStream(raw), 256L * 1024 * 1024, 256L * 1024 * 1024).entries.firstOrNull { it.key.lowercase().endsWith(".fb2") }?.value ?: throw IOException("No book in the archive")
-        } else raw
+        val buffered = java.io.BufferedInputStream(input)
+        buffered.mark(4)
+        val zipped = buffered.read() == 'P'.code && buffered.read() == 'K'.code
+        buffered.reset()
+        // A .fb2.zip holds the book as an entry: read as a stream, only that entry
+        val bytes = if (zipped) {
+            ZipInputStream(buffered).use { zip ->
+                var found: ByteArray? = null
+                var count = 0
+                while (found == null) {
+                    val e = zip.nextEntry ?: break
+                    if (++count > MAX_ENTRIES) break
+                    if (!e.isDirectory && e.name.lowercase().endsWith(".fb2")) found = readLimited(zip, MAX_FB2)
+                }
+                found ?: throw IOException("No book in the archive")
+            }
+        } else readLimited(buffered, MAX_FB2)
         val p = parser(bytes)
         val b = BlockBuilder()
         val images = HashMap<String, ByteArray>()
         var imageBytes = 0L
         var title = ""; var first = ""; var last = ""; var language = ""
         var coverId: String? = null
-        val path = ArrayList<String>()
+        // How deep inside each element that matters (counters, not a search through a stack)
+        val inside = HashMap<String, Int>()
+        fun into(n: String) = (inside[n] ?: 0) > 0
+        val tracked = setOf("description", "title-info", "author", "coverpage", "body", "poem", "epigraph", "cite", "binary")
         var sectionDepth = 0
         var inTitle = 0
-        while (true) {
-            when (p.next()) {
-                XmlPullParser.START_TAG -> {
-                    val n = p.name
-                    path += n
-                    val inDescription = "description" in path
-                    when {
-                        inDescription && n == "book-title" && title.isEmpty() -> { title = p.nextText().trim(); path.removeAt(path.size - 1) }
-                        inDescription && n == "lang" && language.isEmpty() && "title-info" in path -> { language = p.nextText().trim(); path.removeAt(path.size - 1) }
-                        inDescription && n == "first-name" && first.isEmpty() && "author" in path && "title-info" in path -> { first = p.nextText().trim(); path.removeAt(path.size - 1) }
-                        inDescription && n == "last-name" && last.isEmpty() && "author" in path && "title-info" in path -> { last = p.nextText().trim(); path.removeAt(path.size - 1) }
-                        inDescription && n == "image" && "coverpage" in path -> coverId = p.getAttributeValue(XLINK, "href")?.removePrefix("#")
-                        n == "binary" -> {
-                            val id = p.getAttributeValue(null, "id")
-                            val data = p.nextText()
-                            path.removeAt(path.size - 1)
-                            if (withImages && id != null && imageBytes < Book.MAX_IMAGES) try {
-                                val decoded = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-                                images[id] = decoded; imageBytes += decoded.size
-                            } catch (_: IllegalArgumentException) {}
+        try {
+            while (true) {
+                when (p.next()) {
+                    XmlPullParser.START_TAG -> {
+                        val n = p.name
+                        val inDescription = into("description")
+                        when {
+                            inDescription && n == "book-title" && title.isEmpty() -> { title = p.textOrEmpty(); continue }
+                            inDescription && n == "lang" && language.isEmpty() && into("title-info") -> { language = p.textOrEmpty(); continue }
+                            inDescription && n == "first-name" && first.isEmpty() && into("author") && into("title-info") -> { first = p.textOrEmpty(); continue }
+                            inDescription && n == "last-name" && last.isEmpty() && into("author") && into("title-info") -> { last = p.textOrEmpty(); continue }
+                            inDescription && n == "image" && into("coverpage") -> coverId = p.getAttributeValue(XLINK, "href")?.removePrefix("#")
+                            n == "binary" -> {
+                                val id = p.getAttributeValue(null, "id")
+                                val data = p.textOrEmpty()
+                                // The budget is checked before decoding: base64 is a third larger than the picture
+                                val size = data.length * 3L / 4
+                                if (withImages && id != null && size <= MAX_IMAGE && imageBytes + size <= Book.MAX_IMAGES) try {
+                                    val decoded = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+                                    images[id] = decoded; imageBytes += decoded.size
+                                } catch (_: IllegalArgumentException) {}
+                                continue
+                            }
+                            inDescription -> Unit
+                            n == "section" -> { b.end(BookBlock.Kind.PARAGRAPH); sectionDepth++ }
+                            n == "title" -> { b.end(BookBlock.Kind.PARAGRAPH); inTitle++ }
+                            n == "subtitle" -> b.end(BookBlock.Kind.PARAGRAPH)
+                            n == "p" || n == "v" || n == "text-author" || n == "tr" -> b.end(BookBlock.Kind.PARAGRAPH)
+                            n == "empty-line" -> b.end(BookBlock.Kind.BREAK)
+                            n == "strong" -> { b.styleChanging(); b.bold++; b.styleChanged() }
+                            n == "emphasis" -> { b.styleChanging(); b.italic++; b.styleChanged() }
+                            n == "sup" -> { b.styleChanging(); b.raised++; b.styleChanged() }
+                            n == "image" -> p.getAttributeValue(XLINK, "href")?.removePrefix("#")?.let { b.end(BookBlock.Kind.PARAGRAPH); b.image(it) }
                         }
-                        inDescription -> Unit
-                        n == "section" -> { b.end(BookBlock.Kind.PARAGRAPH); sectionDepth++ }
-                        n == "title" -> { b.end(BookBlock.Kind.PARAGRAPH); inTitle++ }
-                        n == "subtitle" -> b.end(BookBlock.Kind.PARAGRAPH)
-                        n == "p" || n == "v" || n == "text-author" -> b.end(BookBlock.Kind.PARAGRAPH)
-                        n == "empty-line" -> b.end(BookBlock.Kind.BREAK)
-                        n == "strong" -> { b.styleChanging(); b.bold++; b.styleChanged() }
-                        n == "emphasis" -> { b.styleChanging(); b.italic++; b.styleChanged() }
-                        n == "sup" -> { b.styleChanging(); b.raised++; b.styleChanged() }
-                        n == "image" -> p.getAttributeValue(XLINK, "href")?.removePrefix("#")?.let { b.end(BookBlock.Kind.PARAGRAPH); b.image(it) }
+                        if (n in tracked) inside[n] = (inside[n] ?: 0) + 1
                     }
+                    XmlPullParser.END_TAG -> {
+                        val n = p.name
+                        if (n in tracked) inside[n] = ((inside[n] ?: 0) - 1).coerceAtLeast(0)
+                        if (into("description") || n == "description") continue
+                        val kind = when {
+                            inTitle > 0 -> when (sectionDepth) { 0, 1 -> BookBlock.Kind.HEADING1; 2 -> BookBlock.Kind.HEADING2; else -> BookBlock.Kind.HEADING3 }
+                            into("poem") -> BookBlock.Kind.POEM
+                            into("epigraph") || into("cite") -> BookBlock.Kind.QUOTE
+                            else -> BookBlock.Kind.PARAGRAPH
+                        }
+                        when (n) {
+                            "p", "v", "text-author" -> b.end(kind)
+                            // A little space between the stanzas of a poem
+                            "stanza" -> { b.end(kind); b.end(BookBlock.Kind.BREAK) }
+                            "td", "th" -> b.text(" ")
+                            "tr" -> b.end(kind)
+                            "subtitle" -> b.end(BookBlock.Kind.SUBTITLE)
+                            "title" -> { b.end(kind); inTitle = (inTitle - 1).coerceAtLeast(0) }
+                            "section" -> { b.end(BookBlock.Kind.PARAGRAPH); sectionDepth = (sectionDepth - 1).coerceAtLeast(0) }
+                            "strong" -> { b.styleChanging(); b.bold--; b.styleChanged() }
+                            "emphasis" -> { b.styleChanging(); b.italic--; b.styleChanged() }
+                            "sup" -> { b.styleChanging(); b.raised--; b.styleChanged() }
+                        }
+                    }
+                    XmlPullParser.TEXT, XmlPullParser.ENTITY_REF -> if (!into("description") && !into("binary") && into("body")) b.text(p.text ?: "")
+                    XmlPullParser.END_DOCUMENT -> break
                 }
-                XmlPullParser.END_TAG -> {
-                    val n = p.name
-                    if (path.isNotEmpty()) path.removeAt(path.size - 1)
-                    if ("description" in path || n == "description") continue
-                    val kind = when {
-                        inTitle > 0 -> when (sectionDepth) { 0, 1 -> BookBlock.Kind.HEADING1; 2 -> BookBlock.Kind.HEADING2; else -> BookBlock.Kind.HEADING3 }
-                        "poem" in path -> BookBlock.Kind.POEM
-                        "epigraph" in path || "cite" in path -> BookBlock.Kind.QUOTE
-                        else -> BookBlock.Kind.PARAGRAPH
-                    }
-                    when (n) {
-                        "p", "v", "text-author" -> b.end(kind)
-                        "subtitle" -> b.end(BookBlock.Kind.SUBTITLE)
-                        "title" -> { b.end(kind); inTitle-- }
-                        "section" -> { b.end(BookBlock.Kind.PARAGRAPH); sectionDepth-- }
-                        "strong" -> { b.styleChanging(); b.bold--; b.styleChanged() }
-                        "emphasis" -> { b.styleChanging(); b.italic--; b.styleChanged() }
-                        "sup" -> { b.styleChanging(); b.raised--; b.styleChanged() }
-                    }
-                }
-                XmlPullParser.TEXT, XmlPullParser.ENTITY_REF -> if ("description" !in path && "binary" !in path && "body" in path) b.text(p.text ?: "")
-                XmlPullParser.END_DOCUMENT -> break
+                if (b.full) break
             }
+        } catch (e: Exception) {
+            // A book damaged part way: what was read is shown
+            b.end(BookBlock.Kind.PARAGRAPH)
+            if (b.blocks.isEmpty()) throw IOException("Damaged book", e)
         }
         // Pictures referred to but missing are dropped
         val blocks = b.blocks.filter { it !is BookBlock.Image || it.key in images }.ifEmpty { b.blocks.filter { it !is BookBlock.Image } }
         if (blocks.isEmpty()) throw IOException("Empty book")
         return Book(title, listOf(first, last).filter { it.isNotEmpty() }.joinToString(" "), blocks, images, coverId?.takeIf { it in images }, language)
     }
+
+    private const val MAX_FB2 = 64L * 1024 * 1024
+    private const val MAX_IMAGE = 16L * 1024 * 1024
 }
