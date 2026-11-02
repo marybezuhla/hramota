@@ -497,6 +497,7 @@ private class Parser(file: ByteArray) {
     // ---- Sections: page size and where new pages start ----
     private var page = PageSetup(width = 12240, height = 15840, top = 1440, bottom = 1440, left = 1800, right = 1800)
     /** Where each section starts, and those that start on a new page. */
+    private var titlePage = false
     private val sectionStarts = HashSet<Int>()
     private val sectionBreaks = HashSet<Int>()
     init {
@@ -517,6 +518,10 @@ private class Parser(file: ByteArray) {
                         0x9023 -> p = p.copy(top = kotlin.math.abs(s16(word, s.at)).coerceAtMost(ParaProps.MAX_LEN / 2))
                         0x9024 -> p = p.copy(bottom = kotlin.math.abs(s16(word, s.at)).coerceAtMost(ParaProps.MAX_LEN / 2))
                         0x3009 -> newPage = u8(word, s.at) != 0
+                        // Header and footer distances, and "different first page"
+                        0xB017 -> p = p.copy(header = u16(word, s.at).coerceAtMost(ParaProps.MAX_LEN / 2))
+                        0xB018 -> p = p.copy(footer = u16(word, s.at).coerceAtMost(ParaProps.MAX_LEN / 2))
+                        0x300A -> if (k == 0) titlePage = u8(word, s.at) != 0
                     }
                     if (k == 0) page = p
                 }
@@ -539,27 +544,36 @@ private class Parser(file: ByteArray) {
         if (lcb < 16 || plc.toLong() + lcb > clx.size) throw IOException("Piece table damaged")
         val n = (lcb - 4) / 12
 
-        val builder = BodyBuilder()
         val cp1252 = Charset.forName("windows-1252")
-        var lastEnd = 0
-        for (i in 0 until n) {
-            val cpStart = i32(clx, plc + i * 4)
-            val cpEnd = minOf(i32(clx, plc + (i + 1) * 4), ccpText)
-            if (cpStart >= ccpText) break
-            if (cpStart < lastEnd) throw IOException("Pieces out of order")
-            lastEnd = cpEnd
-            val count = cpEnd - cpStart
-            if (count <= 0) continue
-            val fcRaw = i32(clx, plc + (n + 1) * 4 + i * 8 + 2)
-            val compressed = fcRaw and 0x40000000 != 0
-            val fc = if (compressed) (fcRaw and 0x3FFFFFFF) / 2 else fcRaw
-            val width = if (compressed) 1 else 2
-            if (fc < 0 || fc.toLong() + count.toLong() * width > word.size) throw IOException("Text piece out of range")
-            val text = if (compressed) String(word, fc, count, cp1252) else String(word, fc, count * 2, Charsets.UTF_16LE)
-            for (k in 0 until count) { builder.char(text[k], cpStart + k, fc + k * width); if (builder.full) break }
-            if (builder.size > DocReader.MAX_CHARS || builder.full) break
+        /** Feeds the characters from [from] to [to] (character positions) through the piece table. */
+        fun feed(builder: BodyBuilder, from: Int, to: Int) {
+            var lastEnd = 0
+            for (i in 0 until n) {
+                val pieceStart = i32(clx, plc + i * 4)
+                val pieceEnd = i32(clx, plc + (i + 1) * 4)
+                if (pieceStart < lastEnd) throw IOException("Pieces out of order")
+                lastEnd = pieceEnd
+                if (pieceEnd <= from) continue
+                if (pieceStart >= to) break
+                val cpStart = maxOf(pieceStart, from)
+                val cpEnd = minOf(pieceEnd, to)
+                val count = cpEnd - cpStart
+                if (count <= 0) continue
+                val fcRaw = i32(clx, plc + (n + 1) * 4 + i * 8 + 2)
+                val compressed = fcRaw and 0x40000000 != 0
+                val width = if (compressed) 1 else 2
+                val fc = (if (compressed) (fcRaw and 0x3FFFFFFF) / 2 else fcRaw) + (cpStart - pieceStart) * width
+                if (fc < 0 || fc.toLong() + count.toLong() * width > word.size) throw IOException("Text piece out of range")
+                val text = if (compressed) String(word, fc, count, cp1252) else String(word, fc, count * 2, Charsets.UTF_16LE)
+                for (k in 0 until count) { builder.char(text[k], cpStart + k, fc + k * width); if (builder.full) break }
+                if (builder.size > DocReader.MAX_CHARS || builder.full) break
+            }
+            builder.finish()
         }
-        builder.finish()
+        val builder = BodyBuilder()
+        feed(builder, 0, ccpText)
+        // Headers and footers: the stories of the first section, from the header text after the main text
+        val hf = try { headersFooters { b, from, to -> feed(b, from, to) } } catch (e: Exception) { HeadersFooters() }
         val names = ole.names
         val inspection = Inspection(
             macros = names.any { it == "Macros" || it == "_VBA_PROJECT" || it == "VBA" },
@@ -573,12 +587,38 @@ private class Parser(file: ByteArray) {
         return DocxDocument(
             page = page, blocks = builder.blocks, media = builder.media, fonts = ThemeFonts(),
             rels = builder.media.keys.associateWith { it },
-            compatibilityMode = 12, inspection = inspection,
+            compatibilityMode = 12, inspection = inspection, headersFooters = hf,
+        )
+    }
+
+    private fun headersFooters(feed: (BodyBuilder, Int, Int) -> Unit): HeadersFooters {
+        val ccpFtn = i32(word, lwStart + 4 * 4).coerceIn(0, DocReader.MAX_CHARS)
+        val ccpHdd = i32(word, lwStart + 5 * 4).coerceIn(0, DocReader.MAX_CHARS)
+        val plc = part(11) ?: return HeadersFooters()
+        if (ccpHdd <= 0) return HeadersFooters()
+        val base = ccpText + ccpFtn
+        val count = plc.size / 4
+        // Six separator stories, then six per section: even/odd header, even/odd footer, first header, first footer
+        fun story(i: Int): List<Block> {
+            if (i + 1 >= count) return emptyList()
+            val s = i32(plc, i * 4); val e = i32(plc, (i + 1) * 4)
+            if (s < 0 || e <= s || e > ccpHdd) return emptyList()
+            val b = BodyBuilder(header = true)
+            feed(b, base + s, base + e)
+            // The story's closing mark leaves an empty last paragraph
+            return b.blocks.dropLastWhile { it is Block.Para && it.inlines.isEmpty() }
+        }
+        return HeadersFooters(
+            headers = mapOf("default" to story(7), "first" to story(10), "even" to story(6)),
+            footers = mapOf("default" to story(9), "first" to story(11), "even" to story(8)),
+            firstPage = titlePage,
         )
     }
 
     /** Turns characters into paragraphs and tables. */
-    private inner class BodyBuilder {
+    private inner class BodyBuilder(private val header: Boolean = false) {
+        // A page number field in a header or footer: its result is replaced by the page drawn
+        private var replacing = false
         val blocks = ArrayList<Block>()
         val media = HashMap<String, ByteArray>()
         var size = 0
@@ -624,12 +664,22 @@ private class Parser(file: ByteArray) {
             val run = chpRuns.find(fc)
             when (c.code) {
                 0x13 -> { if (fields.size < 20) fields += false else deeper++; fieldCode.clear(); return }
-                0x14 -> { if (deeper == 0 && fields.isNotEmpty()) { fields[fields.size - 1] = true; fieldDone() }; return }
-                0x15 -> { if (deeper > 0) deeper-- else if (fields.isNotEmpty()) { if (!fields.last()) fieldDone(); fields.removeAt(fields.size - 1) }; return }
+                0x14 -> {
+                    if (deeper == 0 && fields.isNotEmpty()) {
+                        val code = fieldCode.toString().trim().uppercase().substringBefore(' ')
+                        if (header && fields.size == 1 && (code == "PAGE" || code == "NUMPAGES" || code == "SECTIONPAGES")) {
+                            pieces += Inline.Field(code != "PAGE", chp(run, 0).props); replacing = true
+                        }
+                        fields[fields.size - 1] = true; fieldDone()
+                    }
+                    return
+                }
+                0x15 -> { if (deeper > 0) deeper-- else if (fields.isNotEmpty()) { if (!fields.last()) fieldDone(); fields.removeAt(fields.size - 1); if (fields.isEmpty()) replacing = false }; return }
             }
             // A field code never holds a paragraph mark: a field left open ends here, so the text goes on
             if ((c.code == 0x0D || c.code == 0x07) && fields.any { !it }) { fields.clear(); deeper = 0 }
             if (fields.isNotEmpty() && !fields.last()) { if (fieldCode.length < 200) fieldCode.append(c); return }
+            if (replacing && c.code != 0x0D && c.code != 0x07) return
             when (c.code) {
                 0x0D, 0x07 -> endParagraph(fc, c.code == 0x07, run)
                 // A section mark ends its paragraph; the next section starts on a new page (or not, as it says)

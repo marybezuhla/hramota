@@ -55,6 +55,20 @@ class DocRenderTest {
         }
     }
 
+    // Headers and footers of an old Word file, as in the .docx: the first page its own, page numbers drawn
+    @Test fun headersAndFooters() {
+        val doc = File(dir("docs-doc"), "07-headers.doc").inputStream().use { WordBinaryReader.read(it) }
+        val hf = doc.headersFooters
+        fun text(blocks: List<Block>) = blocks.filterIsInstance<Block.Para>().joinToString(" ") { p -> p.inlines.joinToString("") { (it as? Inline.Text)?.text ?: if (it is Inline.Field) "#" else "" } }
+        assertTrue(hf.toString(), text(hf.header(1)).contains("Вигадана компанія"))
+        assertTrue(text(hf.header(0)), hf.firstPage && text(hf.header(0)).contains("Титульна"))
+        assertTrue(text(hf.footer(1)), text(hf.footer(1)).contains("Сторінка # з #"))
+        val layout = DocxLayout(doc, fonts) { _, _, _ -> null }
+        val pages = layout.layout()
+        val second = layout.headerFooter(1, pages.size).filterIsInstance<PageItem.Text>().map { it.source.text }
+        assertTrue(second.toString(), second.any { it.contains("Сторінка 2 з ${pages.size}") })
+    }
+
     // Word-made files, including damaged ones: open or fail cleanly
     @Test fun wordFilesOpenOrFailCleanly() {
         for (file in dir("legacy").listFiles { f -> f.name.endsWith(".doc") }!!) {
