@@ -291,7 +291,9 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
     val colors = MaterialTheme.colorScheme
     val style = TextStyle(color = if (p.editable) colors.onSurface else colors.onSurface.copy(alpha = 0.6f), fontSize = if (title) 21.sp else 17.sp, lineHeight = if (title) 28.sp else 25.sp,
         fontWeight = if (title) FontWeight.SemiBold else null)
-    val boxModifier = Modifier.fillMaxWidth().background(colors.surfaceVariant.copy(alpha = 0.45f)).padding(horizontal = 10.dp, vertical = 4.dp)
+    // Deeper list levels sit further in, as on the slide
+    val level = Regex("\\blvl=\"(\\d)\"").find(p.pPr)?.groupValues?.get(1)?.toInt() ?: 0
+    val boxModifier = Modifier.fillMaxWidth().background(colors.surfaceVariant.copy(alpha = 0.45f)).padding(start = 10.dp + 18.dp * level, end = 10.dp, top = 4.dp, bottom = 4.dp)
     if (!p.editable) {
         Text(p.text.ifEmpty { "⋯" }, style = style, modifier = boxModifier.clickable(onClick = onLocked))
         return
