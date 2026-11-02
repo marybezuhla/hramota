@@ -217,7 +217,7 @@
     <string name="backup_no_space">Not enough room on the phone</string>
     <string name="backup_locked">Hramota locked meanwhile: unlock it and try again</string>
     <string name="clear_confirm_title">Forget all documents?</string>
-    <string name="clear_confirm">Hramota will forget the recent list, bookmarks, notes, reading places and shelves, and delete the documents kept in it with their covers. Documents in other places on the phone are not touched.</string>
+    <string name="clear_confirm">Hramota will forget the recent list, bookmarks, notes, reading places and shelves, and delete the documents kept in it with their covers and the earlier versions kept from unfinished saves. Documents in other places on the phone are not touched.</string>
     <string name="forget_confirm">Forget “%1$s”? Its bookmarks, notes and place are forgotten, and the copy kept in Hramota is deleted.</string>
     <string name="drop_confirm">Remove “%1$s” from Hramota? The copy kept in Hramota is deleted; bookmarks and notes stay remembered for the original file.</string>
     <string name="forget_go">Forget</string>
@@ -287,4 +287,7 @@
     <string name="comments_count">Comments (%1$d)</string>
     <string name="comment_cannot_delete">This comment is partly in a paragraph that can’t be edited here, so it can’t be deleted.</string>
     <string name="comment_delete">Delete</string>
+    <string name="edit_saved_copy_plain">A copy with your changes was saved.</string>
+    <string name="edit_locked_storage">The locked storage is closed. Unlock Hramota and save again.</string>
+    <string name="rescue_delete_sure">Delete for good</string>
 </resources>

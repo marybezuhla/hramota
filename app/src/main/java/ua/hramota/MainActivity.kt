@@ -60,14 +60,22 @@ class MainActivity : ComponentActivity() {
     // Originals kept by saves that did not finish (Hramota stopped, or the file could not be put back)
     private var rescues by mutableStateOf<List<EditSaving.Rescue>>(emptyList())
     private var savingRescue: EditSaving.Rescue? = null
+    // Which one was being saved, kept while the window is made again (the file picker open)
+    private var savingRescuePath: String? = null
+    private var confirmRescueDelete by mutableStateOf(false)
     private val saveRescue = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
-        val r = savingRescue ?: return@registerForActivityResult
-        savingRescue = null
+        val r = savingRescue ?: savingRescuePath?.let { p -> EditSaving.Rescue.left(applicationContext).firstOrNull { it.path == p } }
+        savingRescue = null; savingRescuePath = null
         if (target == null) return@registerForActivityResult
+        if (r == null) {
+            // Nothing to put in it: the empty file just made is removed
+            try { if (contentResolver.openInputStream(target)?.use { it.read() < 0 } == true) android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+            return@registerForActivityResult
+        }
         lifecycleScope.launch {
             val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { EditSaving.saveRescue(applicationContext, r, target) }
             android.widget.Toast.makeText(this@MainActivity, getString(if (ok) R.string.rescue_saved else R.string.rescue_not_saved), android.widget.Toast.LENGTH_LONG).show()
-            if (ok) rescues = rescues - r
+            if (ok) rescues = rescues.filter { it.path != r.path }
         }
     }
 
@@ -78,6 +86,7 @@ class MainActivity : ComponentActivity() {
         vaultOn = ua.hramota.data.Vault.isOn(this)
         compareFirst = savedInstanceState?.getString(KEY_FIRST)?.let(Uri::parse)
         compareFirstName = savedInstanceState?.getString(KEY_FIRST_NAME)
+        savingRescuePath = savedInstanceState?.getString(KEY_RESCUE)
         choosing = savedInstanceState?.getBoolean(KEY_CHOOSING) ?: false
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
         showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
@@ -108,17 +117,18 @@ class MainActivity : ComponentActivity() {
                     }
                     rescues.firstOrNull()?.let { r ->
                         androidx.compose.material3.AlertDialog(
-                            onDismissRequest = { rescues = rescues - r },
+                            onDismissRequest = { confirmRescueDelete = false; rescues = rescues - r },
                             title = { androidx.compose.material3.Text(getString(R.string.rescue_title)) },
                             text = { androidx.compose.material3.Text(getString(R.string.rescue_text, r.name.ifBlank { "?" })) },
                             confirmButton = {
-                                androidx.compose.material3.TextButton(onClick = { savingRescue = r; saveRescue.launch(r.name.substringBeforeLast('.', r.name).ifBlank { "document" } + " (" + getString(R.string.rescue_suffix) + ").docx") }) {
+                                androidx.compose.material3.TextButton(onClick = { savingRescue = r; savingRescuePath = r.path; saveRescue.launch(r.name.substringBeforeLast('.', r.name).ifBlank { "document" } + " (" + getString(R.string.rescue_suffix) + ").docx") }) {
                                     androidx.compose.material3.Text(getString(R.string.rescue_save))
                                 }
                             },
                             dismissButton = {
-                                androidx.compose.material3.TextButton(onClick = { r.delete(); rescues = rescues - r }) {
-                                    androidx.compose.material3.Text(getString(R.string.rescue_delete), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                                // Deleting is asked again: it may be the only good copy of a damaged file
+                                androidx.compose.material3.TextButton(onClick = { if (confirmRescueDelete) { confirmRescueDelete = false; r.delete(); rescues = rescues - r } else confirmRescueDelete = true }) {
+                                    androidx.compose.material3.Text(getString(if (confirmRescueDelete) R.string.rescue_delete_sure else R.string.rescue_delete), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
                                 }
                             },
                         )
@@ -308,6 +318,7 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         compareFirst?.let { outState.putString(KEY_FIRST, it.toString()) }
         compareFirstName?.let { outState.putString(KEY_FIRST_NAME, it) }
+        (savingRescue?.path ?: savingRescuePath)?.let { outState.putString(KEY_RESCUE, it) }
         outState.putBoolean(KEY_CHOOSING, choosing)
         outState.putBoolean(KEY_COMPARING, comparing)
         outState.putBoolean(KEY_SETTINGS, showSettings)
@@ -384,6 +395,7 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val KEY_FIRST = "compare_first"
         const val KEY_FIRST_NAME = "compare_first_name"
+        const val KEY_RESCUE = "rescue_saving"
         const val KEY_CHOOSING = "compare_choosing"
         const val KEY_COMPARING = "comparing"
         const val KEY_SETTINGS = "settings"

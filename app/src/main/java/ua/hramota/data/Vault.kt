@@ -92,7 +92,7 @@ object Vault {
      */
     fun reset(context: Context) {
         key = null
-        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context)))
+        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue")))
             dir.listFiles().orEmpty().filter { it.name.endsWith(SUFFIX) }.forEach { it.delete() }
         context.getSharedPreferences("recents", Context.MODE_PRIVATE).edit().clear().commit()
         File(context.filesDir, FILE).delete()

@@ -49,8 +49,9 @@ fun ComparePickerList(
     onShelf: (LibraryEntry) -> Unit, onRecent: (RecentFile) -> Unit, onOther: () -> Unit,
 ) {
     val kept = shelf.filter { Format.detect(it.title, null).hasText }
-    val keptTitles = kept.map { it.title }.toSet()
-    val recent = recents.filter { Format.detect(it.name, null).hasText && it.name !in keptTitles }
+    // A recent file is left out only when it is the very file a shelf document came from (same address)
+    val keptUris = kept.mapNotNull { it.uri }.toSet()
+    val recent = recents.filter { Format.detect(it.name, null).hasText && it.uri !in keptUris }
     // "Another file…" stays in sight below the list, however long it is
     Column {
     LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 420.dp)) {

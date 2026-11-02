@@ -377,11 +377,13 @@ class ViewerActivity : ComponentActivity() {
             EditSaving.Result.NOT_ALLOWED, EditSaving.Result.RESTORED, EditSaving.Result.BROKEN -> {
                 say(when (o.result) { EditSaving.Result.BROKEN -> R.string.edit_original_broken; EditSaving.Result.RESTORED -> R.string.edit_not_written; else -> R.string.edit_save_copy_hint })
                 held.copyPending = true
+                held.copyReason = o.result
                 saveEditCopy.launch(name.substringBeforeLast('.', name) + ".docx")
             }
             EditSaving.Result.FAILED -> say(R.string.edit_not_saved)
+            EditSaving.Result.LOCKED -> say(R.string.edit_locked_storage)
             EditSaving.Result.COPY_SAVED -> {
-                say(R.string.edit_saved_copy)
+                say(if (held.copyReason == EditSaving.Result.NOT_ALLOWED) R.string.edit_saved_copy else R.string.edit_saved_copy_plain)
                 held.editor = null
                 // The copy is opened in place of the original
                 o.copy?.let { target ->
@@ -559,6 +561,8 @@ class ViewerActivity : ComponentActivity() {
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
         var saving by mutableStateOf(false)
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
+        /** Why the edits went into a copy (what is said when it is saved). */
+        var copyReason: EditSaving.Result? = null
         /** The editing view opens with the list of comments. */
         var withComments = false
         /** The edits wait for the place of their copy (the file picker is open). */

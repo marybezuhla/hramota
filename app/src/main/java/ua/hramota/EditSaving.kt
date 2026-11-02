@@ -22,7 +22,7 @@ import javax.crypto.SecretKey
  * same, and kept for the person to save if even that fails or Hramota stops halfway.
  */
 object EditSaving {
-    enum class Result { SAVED, NOT_ALLOWED, RESTORED, BROKEN, FAILED, COPY_SAVED }
+    enum class Result { SAVED, NOT_ALLOWED, RESTORED, BROKEN, FAILED, COPY_SAVED, LOCKED }
 
     class Outcome(val result: Result, val newId: String? = null, val copy: Uri? = null)
 
@@ -57,9 +57,14 @@ object EditSaving {
             val copy = entry?.copy?.let { File(it) }
             val newId = Library.fingerprint(context, Uri.fromFile(made))
             val own = ua.hramota.data.Shelf.isOwn(context, uri)
+            // A document kept in Hramota is saved only into its copy: without one (taken off meanwhile) nothing is said to be saved
+            if (own && (copy == null || newId == null || !copy.exists())) return Outcome(Result.FAILED)
             if (!own) {
+                // Under lock the original could only be kept plain: not saved until the storage is open
+                if (Vault.sealing(context) && Vault.key() == null) return Outcome(Result.LOCKED)
                 val rescue = Rescue.create(context, name)
-                when (writeWhole(io(context, uri), made, rescue)) {
+                val written = try { writeWhole(io(context, uri), made, rescue) } finally { Rescue.done(rescue) }
+                when (written) {
                     Write.DONE -> rescue.delete()
                     Write.NOT_ALLOWED -> { rescue.delete(); return Outcome(Result.NOT_ALLOWED) }
                     Write.RESTORED -> { rescue.delete(); return Outcome(Result.RESTORED) }
@@ -148,11 +153,17 @@ object EditSaving {
 
     /** Writes the content whole and checks it reads back exactly; tries "rwt" where "wt" did not truncate. */
     fun writeChecked(io: Io, source: () -> InputStream): Boolean {
+        var refused: Exception? = null
+        var opened = false
         for (mode in listOf("wt", "rwt")) {
-            val out = io.write(mode) ?: throw java.io.FileNotFoundException("Cannot write")
+            // An app may refuse one mode and take the other
+            val out = try { io.write(mode) } catch (e: SecurityException) { refused = e; null } catch (e: java.io.FileNotFoundException) { refused = e; null } catch (e: IllegalArgumentException) { refused = e; null }
+                ?: continue
+            opened = true
             out.use { o -> source().use { it.copyTo(o) } }
             if (sameAs(io, source)) return true
         }
+        if (!opened) throw (refused as? SecurityException) ?: java.io.FileNotFoundException("Cannot write")
         return false
     }
 
@@ -200,8 +211,13 @@ object EditSaving {
      * finish is offered on the home screen.
      */
     class Rescue(private val file: File, private val label: File, private val key: SecretKey?, private val cache: File) {
-        val name: String get() = try { label.readText().take(200) } catch (e: Exception) { "" }
+        /** The document's name (sealed like the copy, so locked storage hides it too). */
+        val name: String get() = try {
+            if (label.name.endsWith(Vault.SUFFIX)) (key ?: Vault.key())?.let { String(Sealed.open(it, label.readBytes(), label.name.removeSuffix(Vault.SUFFIX)), Charsets.UTF_8).take(200) } ?: ""
+            else label.readText().take(200)
+        } catch (e: Exception) { "" }
         val sealed: Boolean get() = file.name.endsWith(Vault.SUFFIX)
+        val path: String get() = file.path
 
         /** Keeps the content: written beside, synced, then put in place, so only a whole copy is ever left. */
         fun keep(input: InputStream) {
@@ -228,27 +244,50 @@ object EditSaving {
             }
         }
 
-        fun delete() { file.delete(); label.delete() }
+        fun delete() { file.delete(); label.delete(); inUse.remove(file.path) }
+
+        /** Turned sealed or plain with the rest of the storage. */
+        fun convert(key: SecretKey, seal: Boolean) {
+            ua.hramota.data.Shelf.convertFile(key, file, seal)
+            ua.hramota.data.Shelf.convertFile(key, label, seal)
+        }
 
         companion object {
             private fun dir(context: Context) = File(context.filesDir, "rescue").apply { mkdirs() }
 
+            /** Rescues of saves under way in this process: never offered or removed meanwhile. */
+            private val inUse = java.util.Collections.synchronizedSet(HashSet<String>())
+
             fun create(context: Context, name: String): Rescue {
                 val stem = "r" + System.currentTimeMillis().toString(36) + System.nanoTime().toString(36).takeLast(4)
                 val key = if (Vault.sealing(context)) Vault.key() else null
-                val label = File(dir(context), "$stem.txt").apply { writeText(name.take(200)) }
-                return Rescue(File(dir(context), "$stem.docx" + if (key != null) Vault.SUFFIX else ""), label, key, File(context.cacheDir, "open"))
+                val suffix = if (key != null) Vault.SUFFIX else ""
+                val label = File(dir(context), "$stem.txt$suffix")
+                val bytes = name.take(200).toByteArray(Charsets.UTF_8)
+                label.writeBytes(if (key != null) Sealed.seal(key, bytes, "$stem.txt") else bytes)
+                val file = File(dir(context), "$stem.docx$suffix")
+                inUse += file.path
+                return Rescue(file, label, key, File(context.cacheDir, "open"))
             }
+
+            /** A save is over: its rescue (if still there) may be offered from now on. */
+            fun done(r: Rescue) { inUse.remove(r.path) }
+
+            fun busy(): Boolean = inUse.isNotEmpty()
 
             /** Originals left by saves that did not finish. */
             fun left(context: Context): List<Rescue> {
                 val files = dir(context).listFiles().orEmpty()
                 // A copy that was never finished holds nothing worth offering
                 files.filter { it.name.endsWith(".part") }.forEach { it.delete() }
-                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.docx(${Regex.escape(Vault.SUFFIX)})?")) }
-                // Labels whose copy never came to be
-                files.filter { it.name.endsWith(".txt") && kept.none { k -> k.name.removeSuffix(Vault.SUFFIX).removeSuffix(".docx") == it.name.removeSuffix(".txt") } }.forEach { it.delete() }
-                return kept.map { Rescue(it, File(it.parentFile, it.name.removeSuffix(Vault.SUFFIX).removeSuffix(".docx") + ".txt"), null, File(context.cacheDir, "open")) }
+                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.docx(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
+                fun stem(f: File) = f.name.removeSuffix(Vault.SUFFIX).substringBeforeLast('.')
+                // Labels whose copy never came to be (not of a save under way)
+                files.filter { it.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && files.none { k -> k.name.removeSuffix(Vault.SUFFIX).endsWith(".docx") && stem(k) == stem(it) } }.forEach { it.delete() }
+                return kept.map { k ->
+                    val label = File(k.parentFile, stem(k) + ".txt" + if (k.name.endsWith(Vault.SUFFIX)) Vault.SUFFIX else "")
+                    Rescue(k, label, null, File(context.cacheDir, "open"))
+                }
             }
         }
     }

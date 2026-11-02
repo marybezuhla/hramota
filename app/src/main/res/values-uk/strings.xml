@@ -225,7 +225,7 @@
     <string name="backup_no_space">Бракує місця на телефоні</string>
     <string name="backup_locked">Грамота тим часом замкнулася: відімкніть і спробуйте ще раз</string>
     <string name="clear_confirm_title">Забути всі документи?</string>
-    <string name="clear_confirm">Грамота забуде список нещодавніх, закладки, нотатки, місця читання й полиці та видалить збережені в ній документи разом з обкладинками. Документів в інших місцях телефону це не торкнеться.</string>
+    <string name="clear_confirm">Грамота забуде список нещодавніх, закладки, нотатки, місця читання й полиці та видалить збережені в ній документи разом з обкладинками й попередніми версіями після незавершених збережень. Документів в інших місцях телефону це не торкнеться.</string>
     <string name="forget_confirm">Забути «%1$s»? Закладки, нотатки й місце читання буде забуто, а копію в Грамоті — видалено.</string>
     <string name="drop_confirm">Прибрати «%1$s» з Грамоти? Копію в Грамоті буде видалено, а закладки й нотатки лишаться для оригінального файлу.</string>
     <string name="forget_go">Забути</string>
@@ -295,4 +295,7 @@
     <string name="comments_count">Коментарі (%1$d)</string>
     <string name="comment_cannot_delete">Цей коментар частково в абзаці, який тут не редагується, тож його не можна видалити.</string>
     <string name="comment_delete">Видалити</string>
+    <string name="edit_saved_copy_plain">Копію зі змінами збережено.</string>
+    <string name="edit_locked_storage">Сховище під замком закрите. Відімкніть Грамоту й збережіть знову.</string>
+    <string name="rescue_delete_sure">Видалити назавжди</string>
 </resources>
