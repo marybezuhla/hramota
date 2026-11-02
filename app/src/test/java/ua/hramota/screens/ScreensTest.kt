@@ -294,7 +294,7 @@ class ScreensTest {
         ua.hramota.data.LibraryEntry("a4", "Кобзар.epub", "EPUB", null, position = 120, total = 600, copy = "x", shelves = setOf("read")),
         ua.hramota.data.LibraryEntry("a5", "Презентація проєкту.pptx", "PPTX", null, position = 3, total = 14, copy = "x", shelves = setOf("work")),
     )
-    private fun comparePicker(title: String) {
+    @Composable private fun comparePicker(title: String) {
         androidx.compose.material3.Surface(androidx.compose.ui.Modifier.fillMaxSize()) {
             androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(24.dp)) {
                 androidx.compose.material3.Text(title, style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
