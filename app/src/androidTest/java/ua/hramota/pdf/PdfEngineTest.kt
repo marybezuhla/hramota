@@ -117,11 +117,12 @@ class PdfEngineTest {
     @Test fun savesNotesAsHighlights() = runBlocking {
         val pages = PdfiumPages.open(context, asset("sample.pdf"))
         val out = File(context.cacheDir, "with-notes.pdf")
+        var before = 0
         try {
             val text = pages.pageText(0)
             val at = text.indexOf("Hramota")
             assertTrue(at >= 0)
-            val before = pages.annotations(0)
+            before = pages.annotations(0)
             val notes = listOf(ua.hramota.data.Note(0, at, 0, at + 7, 1, "Вигадана думка", at = 1))
             val ok = ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE)
                 .use { pages.saveNotes(notes, { 0xFF8ED081.toInt() }, it) }
