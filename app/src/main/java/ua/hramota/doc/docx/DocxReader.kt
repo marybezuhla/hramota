@@ -186,7 +186,7 @@ object DocxReader {
             val tree = try { Xml.tree(ByteArrayInputStream(bytes)) } catch (e: Exception) { return emptyList() }
             val hfBody = Body(styles, numbering, allRels, prefix)
             val out = ArrayList<Block>()
-            for (c in tree.children) { hfBody.blocks(c, out, 0); if (out.size > 200) break }
+            for (c in tree?.children.orEmpty()) { hfBody.blocks(c, out, 0); if (out.size > 200) break }
             return out
         }
         var n = 0
