@@ -55,8 +55,9 @@ class ViewerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val uri = intent.data
         // Only documents handed over by address (content://); Hramota's own copies only when Hramota itself asks
-        if (uri == null || uri.scheme != "content") { finish(); return }
-        val ownCopy = uri.authority == "$packageName.files"
+        // An address with a "user@" part is refused: Android would ignore it and reach the same files
+        if (uri == null || uri.scheme != "content" || uri.encodedAuthority?.contains('@') != false) { finish(); return }
+        val ownCopy = ua.hramota.data.Shelf.isOwn(this, uri)
         if (ownCopy && intent.getStringExtra(EXTRA_TOKEN) != TOKEN) { finish(); return }
         // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
         val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
@@ -69,6 +70,8 @@ class ViewerActivity : ComponentActivity() {
         // The document as Hramota knows it (by content), found before it is shown
         var docId by mutableStateOf<String?>(null)
         var startPosition by mutableIntStateOf(0)
+        // Taking the copy out of Hramota deletes it: asked first
+        var confirmDrop by mutableStateOf<String?>(null)
 
         applySecureScreen()
         setContent {
@@ -172,6 +175,14 @@ class ViewerActivity : ComponentActivity() {
                     DisposableEffect(state) {
                         onDispose { ((state as? ViewerState.Paged)?.pages as? java.io.Closeable)?.close() }
                     }
+                    confirmDrop?.let { id ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { confirmDrop = null },
+                            text = { androidx.compose.material3.Text(getString(R.string.drop_confirm, name.substringBeforeLast('.', name))) },
+                            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmDrop = null; library.dropCopy(id) }) { androidx.compose.material3.Text(getString(R.string.drop_go), color = MaterialTheme.colorScheme.error) } },
+                            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDrop = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
+                        )
+                    }
                     ViewerScreen(
                         name, state, onBack = { finishAndRemoveTask() },
                         startInReading = settings.docxReading,
@@ -196,7 +207,7 @@ class ViewerActivity : ComponentActivity() {
                                         android.widget.Toast.makeText(this@ViewerActivity, getString(if (ok) R.string.shelf_copy_kept else R.string.shelf_copy_failed), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                     Unit
-                                } else if (!ownCopy) getString(R.string.shelf_drop_copy) to { library.dropCopy(id); Unit } else null,
+                                } else if (!ownCopy) getString(R.string.shelf_drop_copy) to { confirmDrop = id; Unit } else null,
                                 // Notes as text, sent where the person chooses
                                 (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
                                     getString(R.string.notes_export) to {
@@ -282,7 +293,7 @@ class ViewerActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         // A copy kept under lock is not left on screen once Hramota has locked again
-        if (intent.data?.authority == "$packageName.files" && ua.hramota.data.Vault.locked(this)) { finishAndRemoveTask(); return }
+        if (ua.hramota.data.Shelf.isOwn(this, intent.data) && ua.hramota.data.Vault.locked(this)) { finishAndRemoveTask(); return }
         // Another document, after Hramota locked: ask again, so bookmarks and notes are not lost unseen
         if (!startedOnce) { startedOnce = true; return }
         if (ua.hramota.data.Vault.locked(this) && !asking) {

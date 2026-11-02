@@ -38,7 +38,7 @@ object Shelf {
     /** Deletes a temporary copy, if it is one this process made (never anything named from outside). */
     fun closeOpened(context: Context, uri: Uri) {
         val segments = uri.pathSegments
-        if (uri.authority != context.packageName + ".files" || segments.size != 2 || segments[0] != "open") return
+        if (!isOwn(context, uri) || segments.size != 2 || segments[0] != "open") return
         val name = segments[1]
         if (name.contains('/') || name.contains("..")) return
         val f = File(File(context.cacheDir, "open"), name)
@@ -53,10 +53,13 @@ object Shelf {
         opened.clear()
     }
 
+    /** True for an address of Hramota's own files, however it is written (Android ignores a "user@" part). */
+    fun isOwn(context: Context, uri: Uri?): Boolean = uri != null && uri.host == context.packageName + ".files"
+
     /** Copies the document into Hramota's private storage, so it opens from the shelf whatever happens to the original. */
     fun keepCopy(context: Context, e: LibraryEntry): Boolean {
         val source = e.uri?.let(Uri::parse) ?: return false
-        val ext = e.title.substringAfterLast('.', "").lowercase().filter { it.isLetterOrDigit() }.take(5).ifEmpty { e.format.lowercase() }
+        val ext = e.title.substringAfterLast('.', "").ifEmpty { e.format }.lowercase().filter { it.isLetterOrDigit() }.take(5).ifEmpty { "bin" }
         val sealing = Vault.sealing(context)
         val key = Vault.key()
         if (sealing && key == null) return false
