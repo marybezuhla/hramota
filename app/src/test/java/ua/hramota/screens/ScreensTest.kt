@@ -276,7 +276,8 @@ class ScreensTest {
             canvas.translate(k * (size + 40f), 0f)
             val path = android.graphics.Path().apply { addCircle(size / 2f, size / 2f, size / 3f, android.graphics.Path.Direction.CW) }
             canvas.clipPath(path)
-            canvas.drawColor(if (k == 0) app.getColor(ua.hramota.R.color.icon_bg) else 0xFFD8E2FF.toInt())
+            if (k == 0) app.getDrawable(ua.hramota.R.drawable.ic_launcher_background)!!.apply { setBounds(0, 0, size, size) }.draw(canvas)
+            else canvas.drawColor(0xFFD8E2FF.toInt())
             val d = app.getDrawable(fg)!!
             if (k == 1) d.setTint(0xFF0F3A70.toInt())
             d.setBounds(0, 0, size, size)
