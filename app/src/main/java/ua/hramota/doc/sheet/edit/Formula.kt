@@ -368,7 +368,7 @@ object Formula {
                 var e = i
                 while (e < text.length && (text[e].isLetterOrDigit() || text[e] == '_' || text[e] == '.' || text[e] == '\\')) e++
                 b.append(text, i, e)
-                if (e < text.length && text[e] == '!') { sheet = text.substring(i, e); b.append('!'); e++ }
+                if (e < text.length && text[e] == '!') { sheet = text.substring(i, e); external = ext; b.append('!'); e++ }
                 // Several sheets at once (Аркуш1:Аркуш3!A1)
                 else if (e < text.length && text[e] == ':' && Regex("[^\\s!:()]+!").matchAt(text, e + 1) != null && !CELL_RANGE.matchesAt(text, e + 1)) return null
                 i = e
