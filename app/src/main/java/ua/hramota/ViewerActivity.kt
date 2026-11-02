@@ -212,9 +212,11 @@ class ViewerActivity : ComponentActivity() {
                         )
                     }
                     val editor = held.editor
+                    // A save finished (perhaps while the window was being made again): said and acted on here
+                    held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
                     if (editor != null) {
                         ua.hramota.ui.DocxEditorScreen(name, editor, held.saving,
-                            onSave = { saveEdits(editor, uri, docId, name) },
+                            onSave = { saveEdits(editor, uri, docId) },
                             onClose = { held.editor = null })
                         return@Surface
                     }
@@ -333,125 +335,72 @@ class ViewerActivity : ComponentActivity() {
         }
     }
 
-    private enum class Saved { DONE, NEEDS_COPY, FAILED }
-
-    /**
-     * Saves the edits: into the kept copy, or into the file itself through the app that holds it. When
-     * that app does not let the file be changed, a copy is offered instead.
-     */
-    private fun saveEdits(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, id: String?, name: String) {
+    /** Saves the edits off the main thread, in work that outlives the window (turning the phone); the outcome is shown when it is back. */
+    private fun saveEdits(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, id: String?) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         if (held.saving) return
         held.saving = true
-        lifecycleScope.launch {
-            val temp = java.io.File(cacheDir, "edit-${System.nanoTime()}.docx")
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    if (!buildEdited(editor, uri, temp)) return@withContext Saved.FAILED to null
-                    writeEdited(temp, uri, id)
-                }
-                when (result.first) {
-                    Saved.DONE -> {
-                        android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_saved), android.widget.Toast.LENGTH_SHORT).show()
-                        held.editor = null
-                        // Shown again from the saved file
-                        result.second?.let { reopen(it) } ?: recreate()
-                    }
-                    Saved.NEEDS_COPY -> {
-                        pendingEdit = editor
-                        saveEditCopy.launch(name.substringBeforeLast('.', name) + ".docx")
-                    }
-                    Saved.FAILED -> android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_not_saved), android.widget.Toast.LENGTH_LONG).show()
-                }
-            } finally {
-                temp.delete()
-                held.saving = false
-            }
+        val list = editor.paras
+        val app = applicationContext
+        held.scope.launch {
+            val outcome = try {
+                withContext(Dispatchers.IO) { ua.hramota.data.Vault.holding { EditSaving.saveInto(app, editor.edit, list, uri, id) } }
+            } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
+            held.saving = false
+            held.outcome = outcome
         }
     }
 
-    /** The edited document written to [temp] and checked to open as a document. */
-    private fun buildEdited(editor: ua.hramota.ui.EditorState, uri: android.net.Uri, temp: java.io.File): Boolean = try {
-        contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { editor.edit.save(editor.paras, input.buffered(), it) } } ?: return false
-        temp.inputStream().buffered().use { DocxReader.read(it) }
-        true
-    } catch (e: Exception) { temp.delete(); false } catch (e: OutOfMemoryError) { temp.delete(); false }
-
-    /** Puts the checked file in place; the document's memory (shelves, bookmarks, notes) moves to its new fingerprint. */
-    private fun writeEdited(temp: java.io.File, uri: android.net.Uri, id: String?): Pair<Saved, String?> {
-        val library = Library.get(applicationContext)
-        val entry = id?.let { library.get(it) }
-        val copy = entry?.copy?.let { java.io.File(it) }
-        try {
-            if (ua.hramota.data.Shelf.isOwn(this, uri)) {
-                if (copy == null || !replaceKeptCopy(copy, temp)) return Saved.FAILED to null
-            } else {
-                if (!writeWhole(uri, temp)) return Saved.NEEDS_COPY to null
-            }
-        } catch (e: SecurityException) { return Saved.NEEDS_COPY to null
-        } catch (e: java.io.FileNotFoundException) { return Saved.NEEDS_COPY to null
-        } catch (e: Exception) { return Saved.FAILED to null }
-        val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return Saved.DONE to null
-        if (entry != null && id != null && newId != id) {
-            library.update(newId) { entry.copy(id = newId) }
-            library.update(id) { null }
-            // The first page may look different now: its picture is made again
-            java.io.File(Library.coversDir(this), "$id.png").delete()
-            java.io.File(Library.coversDir(this), "$id.png${ua.hramota.data.Vault.SUFFIX}").delete()
-        }
-        return Saved.DONE to newId
-    }
-
-    /** Writes the whole file through its app and checks it reads back the same; some apps ignore "truncate". */
-    private fun writeWhole(uri: android.net.Uri, temp: java.io.File): Boolean {
-        for (mode in listOf("wt", "rwt")) {
-            val out = contentResolver.openOutputStream(uri, mode) ?: return false
-            out.use { o -> temp.inputStream().use { it.copyTo(o) } }
-            val size = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
-            val same = (size < 0 || size == temp.length()) && contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, temp.length()) && a.read() < 0 } } == true
-            if (same) return true
-        }
-        throw java.io.IOException("Written file differs")
-    }
-
-    /** Replaces a copy kept in Hramota (sealed again if it was) through a file put in place at once. */
-    private fun replaceKeptCopy(copy: java.io.File, temp: java.io.File): Boolean {
-        val part = java.io.File(copy.path + ".part")
-        try {
-            if (copy.name.endsWith(ua.hramota.data.Vault.SUFFIX)) {
-                val key = ua.hramota.data.Vault.key() ?: return false
-                temp.inputStream().buffered().use { input -> part.outputStream().buffered().use { ua.hramota.data.Sealed.seal(key, input, it, copy.name.removeSuffix(ua.hramota.data.Vault.SUFFIX)) } }
-            } else temp.copyTo(part, overwrite = true)
-            if (!part.renameTo(copy)) { part.delete(); return false }
-            return true
-        } catch (e: Exception) { part.delete(); return false }
-    }
-
-    // The edits waiting for the place of their copy
-    private var pendingEdit: ua.hramota.ui.EditorState? = null
-    private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
-        val editor = pendingEdit ?: return@registerForActivityResult
-        pendingEdit = null
-        val uri = intent.data ?: return@registerForActivityResult
-        if (target == null) return@registerForActivityResult
+    /** What came of a save, once this window shows it. */
+    private fun showOutcome(o: EditSaving.Outcome, name: String) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
-        held.saving = true
-        lifecycleScope.launch {
-            val temp = java.io.File(cacheDir, "edit-${System.nanoTime()}.docx")
-            val ok = try {
-                withContext(Dispatchers.IO) { buildEdited(editor, uri, temp) && try { writeWhole(target, temp) } catch (e: Exception) { false } }
-            } finally { temp.delete(); held.saving = false }
-            if (!ok) {
-                try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
-                android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_not_saved), android.widget.Toast.LENGTH_LONG).show()
-                return@launch
+        fun say(id: Int) = android.widget.Toast.makeText(this, getString(id), android.widget.Toast.LENGTH_LONG).show()
+        when (o.result) {
+            EditSaving.Result.SAVED -> {
+                say(R.string.edit_saved)
+                held.editor = null
+                // Shown again from the saved file
+                o.newId?.let { reopen(it) } ?: recreate()
             }
-            android.widget.Toast.makeText(this@ViewerActivity, getString(R.string.edit_saved_copy), android.widget.Toast.LENGTH_LONG).show()
-            held.editor = null
-            // The copy is opened in place of the original
-            startActivity(android.content.Intent(this@ViewerActivity, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
-                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
-            finishAndRemoveTask()
+            EditSaving.Result.NOT_ALLOWED, EditSaving.Result.RESTORED, EditSaving.Result.BROKEN -> {
+                say(when (o.result) { EditSaving.Result.BROKEN -> R.string.edit_original_broken; EditSaving.Result.RESTORED -> R.string.edit_not_written; else -> R.string.edit_save_copy_hint })
+                held.copyPending = true
+                saveEditCopy.launch(name.substringBeforeLast('.', name) + ".docx")
+            }
+            EditSaving.Result.FAILED -> say(R.string.edit_not_saved)
+            EditSaving.Result.COPY_SAVED -> {
+                say(R.string.edit_saved_copy)
+                held.editor = null
+                // The copy is opened in place of the original
+                o.copy?.let { target ->
+                    startActivity(android.content.Intent(this, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
+                        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+                    finishAndRemoveTask()
+                }
+            }
+        }
+    }
+
+    // A copy of the edits saved where the person chooses (the file itself could not be changed)
+    private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        val editor = held.editor
+        val uri = intent.data
+        val waiting = held.copyPending
+        held.copyPending = false
+        if (target == null) return@registerForActivityResult
+        // Nothing waiting (the edits are gone): the empty file just made is removed
+        if (!waiting || editor == null || uri == null) {
+            try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}
+            return@registerForActivityResult
+        }
+        held.saving = true
+        val list = editor.paras
+        val app = applicationContext
+        held.scope.launch {
+            val outcome = try { withContext(Dispatchers.IO) { EditSaving.saveCopy(app, editor.edit, list, uri, target) } } catch (e: Exception) { EditSaving.Outcome(EditSaving.Result.FAILED) }
+            held.saving = false
+            held.outcome = outcome
         }
     }
 
@@ -475,7 +424,7 @@ class ViewerActivity : ComponentActivity() {
             if (shownSize <= 0 || temp.length() <= shownSize) return null
             if (contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, shownSize) } } != true) return null
             if (ua.hramota.data.Shelf.isOwn(this, uri) && copy != null) {
-                if (!replaceKeptCopy(copy, temp)) return null
+                if (!EditSaving.replaceKeptCopy(copy, temp)) return null
             } else {
                 // Checked above to begin with the original: only the addition is written. Some apps that
                 // hold files ignore "append" and keep only what was written: then the whole file is written
@@ -594,6 +543,11 @@ class ViewerActivity : ComponentActivity() {
     class EditHolder : androidx.lifecycle.ViewModel() {
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
         var saving by mutableStateOf(false)
+        var outcome by mutableStateOf<EditSaving.Outcome?>(null)
+        /** The edits wait for the place of their copy (the file picker is open). */
+        var copyPending = false
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+        override fun onCleared() { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
     }
 
     companion object {

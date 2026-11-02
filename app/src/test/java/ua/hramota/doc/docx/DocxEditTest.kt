@@ -95,6 +95,19 @@ class DocxEditTest {
         assertNotNull(part(saved, "word/numbering.xml"))
     }
 
+    @Test fun aNewNumberedListCountsFromOne() {
+        val name = "02-paragraphs.docx"
+        val edit = DocxEdit.open(ByteArrayInputStream(bytes(name)))
+        val list = edit.paragraphs.toMutableList()
+        val (x, y) = list.indices.filter { list[it].editable }.let { it[1] to it[4] }
+        list[x] = edit.withList(list[x], ListKind.NUMBER, list[x - 1])
+        list[x + 1] = edit.withList(list[x + 1], ListKind.NUMBER, list[x])
+        list[y] = edit.withList(list[y], ListKind.NUMBER, list[y - 1])
+        val shown = edit.shown(list)
+        assertEquals(listOf("1.", "2.", "1."), listOf(shown[x].marker, shown[x + 1].marker, shown[y].marker))
+        save(name, edit, list, "numbers")
+    }
+
     @Test fun tablesKeepTheirCellsAndCellsDoNotJoin() {
         val name = "04-tables.docx"
         val edit = DocxEdit.open(ByteArrayInputStream(bytes(name)))
