@@ -54,15 +54,21 @@ class XlsxEditTest {
         assertEquals(1234.5, Formula.parseNumber("1 234,5")!!, 0.0)
         assertEquals(0.15, Formula.parseNumber("15%")!!, 1e-12)
         assertNull(Formula.parseNumber("12 шт"))
+        assertEquals(1234.5, Formula.parseNumber("1.234,5")!!, 0.0)
+        // A cell referred to counts like a range: empty and text cells are left out
+        assertEquals(Value.Num(2.5), ev("AVERAGE(A1,A2,A4)"))
+        assertEquals(Value.Num(2.0), ev("SUM(A1,A3)"))
+        assertEquals("1E+20", Formula.show(1e20))
+        assertEquals(Value.Num(2.0), ev("ROUNDUP(1.0000000001,0)"))
     }
 
     @Test fun valueChangesFlowIntoFormulasAndTheFileOpens() {
         val path = "sheets/01-budget.xlsx"
         val edit = XlsxEdit.open(ByteArrayInputStream(bytes(path)))
         assertEquals("=SUM(B4:D4)", edit.content(CellKey(0, 3, 4)))
-        edit.set(CellKey(0, 3, 1), edit.parse("7000", false))
-        edit.set(CellKey(0, 20, 0), edit.parse("Нове", false))
-        edit.set(CellKey(0, 20, 1), edit.parse("=SUM(E4:E9)", false))
+        edit.set(CellKey(0, 3, 1), edit.parse("7000", false)!!)
+        edit.set(CellKey(0, 20, 0), edit.parse("Нове", false)!!)
+        edit.set(CellKey(0, 20, 1), edit.parse("=SUM(E4:E9)", false)!!)
         val v = edit.recalc()
         assertEquals(Value.Num(11500.5), v[CellKey(0, 3, 4)])
         val saved = save(path, edit, "edited-budget")
@@ -76,13 +82,23 @@ class XlsxEditTest {
         assertTrue(part(saved, "xl/workbook.xml")!!.contains("fullCalcOnLoad=\"1\""))
     }
 
+    @Test fun brokenFormulasAreRefusedAndCommaFormsAccepted() {
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes("sheets/01-budget.xlsx")))
+        assertNull(edit.parse("=SUM(A1", false))
+        assertNull(edit.parse("==A1", false))
+        assertEquals(ua.hramota.doc.sheet.edit.Input.Formula("ROUND(A1,2)*1.5"), edit.parse("=ROUND(A1;2)*1,5", false))
+        assertEquals(ua.hramota.doc.sheet.edit.Input.Formula("A1*1.5"), edit.parse("=A1*1,5", false))
+        // Shown as typed in Ukrainian Excel
+        assertEquals("=SUM(B4:D4)", edit.content(CellKey(0, 3, 4)))
+    }
+
     @Test fun sharedFormulasOtherSheetsDatesAndCalcChain() {
         val path = "docs-edit/shared.xlsx"
         val edit = XlsxEdit.open(ByteArrayInputStream(bytes(path)))
         assertEquals("=B3*Ціни!A2", edit.content(CellKey(0, 2, 2)))
-        edit.set(CellKey(1, 0, 0), edit.parse("150", false))
-        edit.set(CellKey(0, 2, 2), edit.parse("=B3*Ціни!\$A\$1", false))
-        edit.set(CellKey(0, 0, 3), edit.parse("05.11.2026", true))
+        edit.set(CellKey(1, 0, 0), edit.parse("150", false)!!)
+        edit.set(CellKey(0, 2, 2), edit.parse("=B3*Ціни!\$A\$1", false)!!)
+        edit.set(CellKey(0, 0, 3), edit.parse("05.11.2026", true)!!)
         val v = edit.recalc()
         assertEquals(Value.Num(1500.0), v[CellKey(0, 1, 2)])
         assertEquals(Value.Num(300.0), v[CellKey(0, 2, 2)])

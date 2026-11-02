@@ -32,6 +32,8 @@ object Formula {
         data class S(val v: String) : Node()
         data class B(val v: Boolean) : Node()
         data class E(val code: String) : Node()
+        /** An argument left out ("IF(A1,,1)"): an empty value, 0 in arithmetic. */
+        data object Blank : Node()
         data class Cell(val ref: Ref) : Node()
         data class Range(val from: Ref, val to: Ref) : Node()
         data class Unary(val op: Char, val a: Node) : Node()
@@ -164,7 +166,7 @@ object Formula {
                     while (true) {
                         skip()
                         // An empty argument ("IF(A1,,1)") is an empty value
-                        if (i < s.length && (s[i] == ',' || s[i] == ')')) args += Node.S("") else args += expr(0, depth + 1)
+                        if (i < s.length && (s[i] == ',' || s[i] == ')')) args += Node.Blank else args += expr(0, depth + 1)
                         skip()
                         if (i < s.length && s[i] == ',') { i++; continue }
                         expect(')'); break
@@ -197,7 +199,8 @@ object Formula {
      * Ukrainian Excel, become Excel's stored form.
      */
     fun normalize(typed: String): String {
-        if (';' !in typed) return typed.trim()
+        // Written as stored (commas between arguments) and readable so: kept; otherwise commas are decimal marks
+        if (';' !in typed && parse(typed.trim()).node != null) return typed.trim()
         val b = StringBuilder()
         var inString = false
         for (c in typed.trim()) {
@@ -231,7 +234,7 @@ object Formula {
             if (m != null && (end!! >= text.length || !(text[end].isLetterOrDigit() || text[end] == '(' || text[end] == '_'))) {
                 val col = if (m.groupValues[1] == "$") colIndex(m.groupValues[2].uppercase()) else colIndex(m.groupValues[2].uppercase()) + dc
                 val row = if (m.groupValues[3] == "$") m.groupValues[4].toInt() - 1 else m.groupValues[4].toInt() - 1 + dr
-                if (col < 0 || row < 0) b.append("#REF!") else b.append(m.groupValues[1]).append(ua.hramota.doc.sheet.columnName(col)).append(m.groupValues[3]).append(row + 1)
+                if (col < 0 || row < 0 || col >= 16_384 || row >= 1_048_576) b.append("#REF!") else b.append(m.groupValues[1]).append(ua.hramota.doc.sheet.columnName(col)).append(m.groupValues[3]).append(row + 1)
                 i = end
                 continue
             }
@@ -265,6 +268,7 @@ object Formula {
             is Node.S -> Value.Text(n.v)
             is Node.B -> Value.Bool(n.v)
             is Node.E -> Value.Err(n.code)
+            is Node.Blank -> Value.Empty
             is Node.Cell -> c.cells.value(n.ref.sheet, n.ref.row, n.ref.col)
             is Node.Range -> Value.VALUE
             is Node.Unary -> when (val v = num(scalar(n.a, c))) { is Value.Num -> if (n.op == '-') Value.Num(-v.v) else v; else -> v }
@@ -286,6 +290,8 @@ object Formula {
                 yield(c.cells.value(n.from.sheet, r, k) to true)
             }
         }
+        // A cell referred to counts as Excel counts a range: text and empty cells are left out
+        is Node.Cell -> sequenceOf(scalar(n, c) to true)
         else -> sequenceOf(scalar(n, c) to false)
     }
 
@@ -307,8 +313,11 @@ object Formula {
     /** A number as Excel's General format writes it into text. */
     fun show(d: Double): String {
         if (d == floor(d) && abs(d) < 1e15) return d.toLong().toString()
-        val s = "%.15g".format(java.util.Locale.ROOT, d).trimEnd('0').trimEnd('.')
-        return if ('e' in s) s.uppercase() else s
+        val s = "%.15g".format(java.util.Locale.ROOT, d)
+        // Trailing zeros are dropped from the digits only, never from an exponent
+        val e = s.indexOfFirst { it == 'e' || it == 'E' }
+        val mantissa = (if (e >= 0) s.substring(0, e) else s).let { if ('.' in it) it.trimEnd('0').trimEnd('.') else it }
+        return if (e >= 0) mantissa + "E" + s.substring(e + 1).let { x -> val sign = if (x.startsWith("-")) "-" else "+"; sign + x.trimStart('+', '-').trimStart('0').padStart(2, '0') } else mantissa
     }
 
     private fun truth(v: Value): Value = when (v) {
@@ -389,8 +398,9 @@ object Formula {
         val adj = java.math.BigDecimal(show(v)).toDouble()
         val r = when (mode) {
             0 -> java.math.BigDecimal(adj).setScale(0, java.math.RoundingMode.HALF_UP).toDouble()
-            1 -> if (adj >= 0) kotlin.math.ceil(adj - 1e-9) else -kotlin.math.ceil(-adj - 1e-9)
-            else -> if (adj >= 0) floor(adj + 1e-9) else -floor(-adj + 1e-9)
+            // Away from zero, and towards it, on the decimal value
+            1 -> java.math.BigDecimal(show(v)).setScale(0, java.math.RoundingMode.UP).toDouble()
+            else -> java.math.BigDecimal(show(v)).setScale(0, java.math.RoundingMode.DOWN).toDouble()
         }
         return r / f
     }
@@ -501,10 +511,41 @@ object Formula {
         var percent = false
         if (t.endsWith("%")) { percent = true; t = t.dropLast(1).trim() }
         t = t.replace(" ", "")
-        t = if ('.' in t) t.replace(",", "") else t.replace(',', '.')
+        // Both marks: the last one is the decimal mark ("1.234,5" and "1,234.5"); a comma alone is decimal
+        t = when {
+            '.' in t && ',' in t -> if (t.lastIndexOf(',') > t.lastIndexOf('.')) t.replace(".", "").replace(',', '.') else t.replace(",", "")
+            else -> t.replace(',', '.')
+        }
         if (!Regex("[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?").matches(t)) return null
         val v = t.toDoubleOrNull() ?: return null
         if (v.isNaN() || v.isInfinite()) return null
         return if (percent) v / 100 else v
     }
+}
+
+/** Functions newer than Excel 2007 are stored with this prefix (Excel shows #NAME? without it). */
+internal val NEW_FUNCTIONS = setOf("CONCAT")
+
+/** Formula text for the file: newer functions get Excel's prefix. */
+internal fun Formula.stored(text: String): String = NEW_FUNCTIONS.fold(text) { t, f -> t.replace(Regex("(?<![\\w.])$f\\(", RegexOption.IGNORE_CASE), "_xlfn.$f(") }
+
+/**
+ * Formula text as shown to type over: without Excel's prefixes, and, where the decimal mark is a comma,
+ * with ";" between arguments and "," in numbers (strings and sheet names as they are).
+ */
+internal fun Formula.typed(text: String, decimalComma: Boolean): String {
+    val t = text.replace("_xlfn.", "", ignoreCase = true)
+    if (!decimalComma) return t
+    val b = StringBuilder()
+    var quote = 0.toChar()
+    for ((i, c) in t.withIndex()) {
+        if (quote != 0.toChar()) { if (c == quote) quote = 0.toChar(); b.append(c); continue }
+        when {
+            c == '"' || c == '\'' -> { quote = c; b.append(c) }
+            c == ',' -> b.append(';')
+            c == '.' && i > 0 && t[i - 1].isDigit() && i + 1 < t.length && t[i + 1].isDigit() -> b.append(',')
+            else -> b.append(c)
+        }
+    }
+    return b.toString()
 }

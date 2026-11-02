@@ -79,7 +79,8 @@ class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
         val shown = original.sheets[sheet]
         val styleIndex = edit.style(key) ?: shown.row(row)?.let { r -> r.find(col).takeIf { it >= 0 }?.let { r.styles[it] } }
         val dateCell = styleIndex?.let { shown.styles.getOrNull(it) }?.format?.let { NumberFormat.isDate(it) } == true
-        val input = edit.parse(typed, dateCell, shown.date1904)
+        // A formula that cannot be read is not taken (the field shows it as wrong)
+        val input = edit.parse(typed, dateCell, shown.date1904) ?: return false
         val before = edit.changes[key]
         edit.set(key, input)
         undoStack += Step(key, before, input); if (undoStack.size > 500) undoStack.removeAt(0)
@@ -107,7 +108,7 @@ class SheetEditorState(val edit: XlsxEdit, private val original: Workbook) {
     /** Works the values out (off the main thread) and shows them. */
     suspend fun refresh() {
         // Formulas that cannot be worked out here (too deep a chain) keep their old values on screen
-        val values = try { withContext(Dispatchers.Default) { edit.recalc() } } catch (e: java.io.IOException) { return }
+        val values = try { withContext(Dispatchers.Default) { edit.recalc() } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { return }
         workbook = withContext(Dispatchers.Default) { shownWith(values) }
     }
 
