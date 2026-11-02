@@ -1,6 +1,11 @@
 package ua.hramota.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -62,6 +67,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.filled.Edit
 import kotlinx.coroutines.launch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -207,6 +213,15 @@ private fun ViewerContent(
     // A place in a book to show (from the contents or a bookmark)
     var bookTarget by remember { mutableStateOf<BookTarget?>(null) }
     var lookSheet by remember { mutableStateOf(false) }
+    // A note being written on a page, the words it marks, and a word being looked up
+    var pageNote by remember { mutableStateOf<ua.hramota.data.Note?>(null) }
+    var pageNoteText by remember { mutableStateOf("") }
+    var lookingUp by remember { mutableStateOf<String?>(null) }
+    pageNote?.let { n -> NoteDialog(pageNoteText, n, onSave = { onNote(it); pageNote = null }, onDelete = null, onDismiss = { pageNote = null }) }
+    lookingUp?.let { w -> DictionarySheet(w) { lookingUp = null } }
+    var notesOpen by remember { mutableStateOf(false) }
+    val pagedText = (state as? ViewerState.Paged)?.pages as? TextPages
+    if (notesOpen && pagedText != null) PageNotesSheet(name, pagedText, notes, onGo = { p -> notesOpen = false; scope.launch { list.scrollToItem(p) } }, onNote = onNote, onRemove = onRemoveNote) { notesOpen = false }
     if (lookSheet) ReadingSheet(readSettings, onReadSettings) { lookSheet = false }
     val flowing = state is ViewerState.Text || state is ViewerState.Reader
     LaunchedEffect(flowing, startPosition) {
@@ -292,11 +307,13 @@ private fun ViewerContent(
             onNext = { if (hits.isNotEmpty()) hitIndex = (hitIndex + 1) % hits.size },
             onClose = { searching = false },
         ) else TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
-            if (menu.isNotEmpty() && !overview) {
+            val pageNotes = state is ViewerState.Paged && (state.pages is TextPages) && notes.isNotEmpty()
+            if ((menu.isNotEmpty() || pageNotes) && !overview) {
                 var open by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { open = true }) { Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more)) }
                     androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        if (pageNotes) androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.notes_count, notes.size)) }, onClick = { open = false; notesOpen = true })
                         for ((label, action) in menu) androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
                     }
                 }
@@ -380,12 +397,32 @@ private fun ViewerContent(
                         currentHit = if (searching) currentHit else null,
                         selection = selection,
                         onSelection = { selection = it },
+                        notes = notes,
                     )
                 }
             }
         }
         val sel = selection
         if (sel != null && textPages != null) SelectionBar(
+            onMark = { color ->
+                onNote(ua.hramota.data.Note(sel.page, minOf(sel.start, sel.end), sel.page, maxOf(sel.start, sel.end), color, at = System.currentTimeMillis()))
+                selection = null
+            },
+            onNote = {
+                scope.launch {
+                    pageNoteText = selectedText(textPages, sel)
+                    pageNote = ua.hramota.data.Note(sel.page, minOf(sel.start, sel.end), sel.page, maxOf(sel.start, sel.end), 0, at = System.currentTimeMillis())
+                    selection = null
+                }
+            },
+            onDictionary = { scope.launch { lookingUp = selectedText(textPages, sel); selection = null } },
+            onApp = { component -> scope.launch {
+                val t = selectedText(textPages, sel)
+                try {
+                    context.startActivity(Intent(Intent.ACTION_PROCESS_TEXT).setType("text/plain").setComponent(component)
+                        .putExtra(Intent.EXTRA_PROCESS_TEXT, t.take(5000)).putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true))
+                } catch (_: Exception) {}
+            } },
             onCopy = {
                 scope.launch {
                     copyText(context, selectedText(textPages, sel))
@@ -484,12 +521,26 @@ private fun SearchBar(
 
 /** Actions for selected text, at the bottom within reach of the thumb. */
 @Composable
-private fun SelectionBar(onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit) {
+private fun SelectionBar(
+    onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
+    onMark: (Int) -> Unit = {}, onNote: () -> Unit = {}, onDictionary: () -> Unit = {}, onApp: (android.content.ComponentName) -> Unit = {},
+) {
+    val context = LocalContext.current
+    val apps = remember { textApps(context) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onCopy) { Text(stringResource(R.string.copy)) }
-            TextButton(onClick = onShare) { Text(stringResource(R.string.share)) }
-            Box(Modifier.weight(1f))
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                // Markers, a note, the dictionary, then copy, share and what other apps offer for text
+                for ((i, c) in NOTE_COLORS.withIndex()) Box(
+                    Modifier.padding(horizontal = 4.dp).size(28.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c)
+                        .border(1.dp, Color.Black.copy(alpha = 0.15f), androidx.compose.foundation.shape.CircleShape).clickable { onMark(i) },
+                )
+                TextButton(onClick = onNote) { Text(stringResource(R.string.note_add), maxLines = 1) }
+                TextButton(onClick = onDictionary) { Text(stringResource(R.string.dict_open), maxLines = 1) }
+                TextButton(onClick = onCopy) { Text(stringResource(R.string.copy), maxLines = 1) }
+                TextButton(onClick = onShare) { Text(stringResource(R.string.share), maxLines = 1) }
+                for ((label, component) in apps) TextButton(onClick = { onApp(component) }) { Text(label, maxLines = 1) }
+            }
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_selection)) }
         }
     }
@@ -546,5 +597,61 @@ private fun ParagraphText(p: Paragraph, hits: List<SearchHit>? = null, current: 
             fontWeight = if (p.heading > 0) FontWeight.SemiBold else null,
             modifier = Modifier.padding(top = if (p.heading > 0) 16.dp else 4.dp, bottom = 4.dp),
         )
+    }
+}
+
+/** A document's notes on its pages: what each marks, on which page; go there, change, remove, or send them all. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PageNotesSheet(
+    name: String, pages: TextPages, notes: List<ua.hramota.data.Note>,
+    onGo: (Int) -> Unit, onNote: (ua.hramota.data.Note) -> Unit, onRemove: (Long) -> Unit, onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sorted = remember(notes) { notes.sortedWith(compareBy({ it.block }, { it.start })) }
+    // The marked words, read from the pages off the main thread
+    val words by androidx.compose.runtime.produceState(emptyMap<Long, String>(), sorted) {
+        val out = HashMap<Long, String>()
+        for (n in sorted.take(500)) {
+            val t = try { pages.pageText(n.block) } catch (e: Exception) { "" }
+            out[n.at] = t.substring(n.start.coerceIn(0, t.length), n.end.coerceIn(0, t.length)).replace('\uFFFC', ' ').trim()
+        }
+        value = out
+    }
+    var editing by remember { mutableStateOf<ua.hramota.data.Note?>(null) }
+    editing?.let { n -> NoteDialog(words[n.at].orEmpty(), n, onSave = { onNote(it); editing = null }, onDelete = { onRemove(n.at); editing = null }, onDismiss = { editing = null }) }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.book_notes), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                scope.launch {
+                    val text = buildString {
+                        append("# ").append(name).append('\n')
+                        for (n in sorted) {
+                            append('\n').append(context.getString(R.string.page_n, n.block + 1)).append('\n')
+                            append("> ").append(words[n.at].orEmpty()).append('\n')
+                            if (n.text.isNotEmpty()) append('\n').append(n.text).append('\n')
+                        }
+                    }.take(200_000)
+                    try {
+                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, name).putExtra(Intent.EXTRA_TEXT, text), null))
+                    } catch (_: Exception) {}
+                }
+            }) { Text(stringResource(R.string.notes_export)) }
+        }
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            itemsIndexed(sorted, key = { k, _ -> k }) { _, n ->
+                Row(Modifier.fillMaxWidth().clickable { onGo(n.block) }.padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(width = 4.dp, height = 40.dp).background(NOTE_COLORS[n.color.coerceIn(0, NOTE_COLORS.size - 1)]))
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(stringResource(R.string.page_n, n.block + 1), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(words[n.at].orEmpty().ifEmpty { "…" }, maxLines = 3, style = MaterialTheme.typography.bodyMedium)
+                        if (n.text.isNotEmpty()) Text(n.text, maxLines = 3, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { editing = n }) { Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = stringResource(R.string.note_edit)) }
+                }
+            }
+        }
     }
 }
