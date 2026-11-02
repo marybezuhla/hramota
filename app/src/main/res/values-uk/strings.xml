@@ -240,4 +240,6 @@
     <string name="dict_open">Словник</string>
     <string name="dict_none">Словників ще немає. Додайте в Налаштуваннях → Словники.</string>
     <string name="dict_not_found">У ваших словниках не знайдено</string>
+    <string name="notes_count">Нотатки (%1$d)</string>
+    <string name="page_n">Сторінка %1$d</string>
 </resources>

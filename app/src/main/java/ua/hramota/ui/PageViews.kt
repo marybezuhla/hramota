@@ -89,8 +89,11 @@ fun ZoomablePages(
     currentHit: SearchHit? = null,
     selection: TextSelection? = null,
     onSelection: (TextSelection?) -> Unit = {},
+    /** Marked passages and notes: on pages, a note's block is its page. */
+    notes: List<ua.hramota.data.Note> = emptyList(),
 ) {
     val text = pages as? TextPages
+    val notesByPage = remember(notes) { notes.groupBy { it.block } }
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     // The sharpness pages are drawn at follows the zoom once the fingers stop
@@ -164,7 +167,7 @@ fun ZoomablePages(
                 ) {
                     image?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
                     if (failed && image == null) PageProblem(pages.problem)
-                    if (text != null) TextMarks(text, index, hits[index].orEmpty(), currentHit, selection)
+                    if (text != null) TextMarks(text, index, hits[index].orEmpty(), currentHit, selection, notesByPage[index].orEmpty())
                     if (index in bookmarks) Icon(
                         AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.align(Alignment.TopEnd).padding(end = 10.dp).size(28.dp),
@@ -283,20 +286,25 @@ private fun androidx.compose.foundation.layout.BoxScope.PageProblem(detail: Stri
 @Composable
 private fun androidx.compose.foundation.layout.BoxScope.TextMarks(
     text: TextPages, index: Int, hits: List<SearchHit>, current: SearchHit?, selection: TextSelection?,
+    notes: List<ua.hramota.data.Note> = emptyList(),
 ) {
+    var noteBoxes by remember(index) { mutableStateOf<List<Pair<Int, List<PageBox>>>>(emptyList()) }
+    LaunchedEffect(index, notes) { noteBoxes = notes.take(500).map { it.color to text.boxes(index, it.start, it.end) } }
     var hitBoxes by remember(index) { mutableStateOf<List<Pair<SearchHit, List<PageBox>>>>(emptyList()) }
     LaunchedEffect(index, hits) { hitBoxes = hits.take(500).map { it to text.boxes(index, it.start, it.end) } }
     var selBoxes by remember(index) { mutableStateOf<List<PageBox>>(emptyList()) }
     LaunchedEffect(index, selection) {
         selBoxes = if (selection != null && selection.page == index) text.boxes(index, selection.start, selection.end) else emptyList()
     }
-    if (hitBoxes.isEmpty() && selBoxes.isEmpty()) return
+    if (hitBoxes.isEmpty() && selBoxes.isEmpty() && noteBoxes.isEmpty()) return
     val hitColor = Color(0x66FFD54F)
     val currentColor = Color(0x99FF9800)
     val selColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
     Canvas(Modifier.matchParentSize()) {
         fun box(b: PageBox, c: Color) = drawRect(c, Offset(b.left * size.width, b.top * size.height),
             androidx.compose.ui.geometry.Size((b.right - b.left) * size.width, (b.bottom - b.top) * size.height))
+        // Pages are paper-white: the markers as on a light page
+        for ((color, boxes) in noteBoxes) boxes.forEach { box(it, noteColor(color, false)) }
         for ((hit, boxes) in hitBoxes) boxes.forEach { box(it, if (hit == current) currentColor else hitColor) }
         selBoxes.forEach { box(it, selColor) }
     }

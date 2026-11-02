@@ -232,4 +232,6 @@
     <string name="dict_open">Dictionary</string>
     <string name="dict_none">No dictionaries yet. Add one in Settings → Dictionaries.</string>
     <string name="dict_not_found">Not found in your dictionaries</string>
+    <string name="notes_count">Notes (%1$d)</string>
+    <string name="page_n">Page %1$d</string>
 </resources>

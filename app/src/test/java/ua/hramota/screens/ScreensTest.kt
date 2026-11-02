@@ -353,4 +353,8 @@ class ScreensTest {
     @Test fun lockScreen() = shot("14-lock") { ua.hramota.ui.LockScreen(onUnlock = {}) }
     @Config(qualifiers = "+night")
     @Test fun lockScreenKeyLost() = shot("14-lock-key-lost-dark") { ua.hramota.ui.LockScreen(keyLost = true, onUnlock = {}) }
+    @Test fun viewerPagesNotes() = shot("15-viewer-pages-notes", settle = 40) {
+        ViewerScreen("Договір поставки.docx", ViewerState.Paged(docxPages("05-flow.docx"), emptyList()), onBack = {},
+            notes = listOf(ua.hramota.data.Note(0, 30, 0, 120, 0, "Перевірити строки", at = 1), ua.hramota.data.Note(0, 200, 0, 260, 2, at = 2)))
+    }
 }
