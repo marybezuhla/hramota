@@ -17,7 +17,7 @@ data class RecentFile(val uri: String, val name: String, val openedAt: Long)
  * The recent files list: only on this phone (no cloud backup), at most [MAX] entries, and it can be
  * cleared. Hramota keeps read access only to files listed here and gives it back when removed.
  */
-class Recents(private val context: Context) {
+class Recents private constructor(private val context: Context) {
     private val state = MutableStateFlow(load())
     val files: StateFlow<List<RecentFile>> = state.asStateFlow()
 
@@ -67,6 +67,10 @@ class Recents(private val context: Context) {
     private fun load(): List<RecentFile> = read(context)
 
     companion object {
+        @Volatile private var instance: Recents? = null
+        /** One list for the whole app, so every window sees the same and none writes over another's. */
+        fun get(context: Context): Recents = instance ?: synchronized(this) { instance ?: Recents(context.applicationContext).also { instance = it } }
+
         const val MAX = 30
         private const val KEY = "files"
         private const val SEALED = "files.sealed"
@@ -76,7 +80,7 @@ class Recents(private val context: Context) {
             val sealed = prefs.getString(SEALED, null)
             val text = if (sealed != null) {
                 val key = Vault.key() ?: return emptyList()
-                String(Sealed.open(key, android.util.Base64.decode(sealed, android.util.Base64.NO_WRAP)))
+                String(Sealed.open(key, android.util.Base64.decode(sealed, android.util.Base64.NO_WRAP), "recents"))
             } else prefs.getString(KEY, "[]")
             val json = JSONArray(text)
             (0 until json.length()).map {
@@ -94,12 +98,15 @@ class Recents(private val context: Context) {
             list.forEach { json.put(JSONObject().put("uri", it.uri).put("name", it.name).put("at", it.openedAt)) }
             val key = Vault.key()
             if (Vault.sealing(context) && key != null)
-                prefs.edit().putString(SEALED, android.util.Base64.encodeToString(Sealed.seal(key, json.toString().toByteArray()), android.util.Base64.NO_WRAP)).remove(KEY).commit()
+                prefs.edit().putString(SEALED, android.util.Base64.encodeToString(Sealed.seal(key, json.toString().toByteArray(), "recents"), android.util.Base64.NO_WRAP)).remove(KEY).commit()
             else prefs.edit().putString(KEY, json.toString()).remove(SEALED).commit()
         }
 
         /** Rewrites the list in the new form (locked storage turned on or off). */
-        fun convert(context: Context, seal: Boolean) = write(context, read(context))
+        fun convert(context: Context, seal: Boolean) {
+            write(context, read(context))
+            get(context).reload()
+        }
 
         /** The file's display name, or the last part of its address. */
         fun displayName(context: Context, uri: Uri): String {

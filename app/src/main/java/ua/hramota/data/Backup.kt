@@ -46,7 +46,7 @@ object Backup {
         val data = DataOutputStream(out)
         data.write(MAGIC); data.writeByte(VERSION); data.writeInt(ITERATIONS); data.write(salt)
         val key = key(password, salt, ITERATIONS)
-        val zip = ZipOutputStream(Sealed.SealingStream(key, out.buffered()))
+        val zip = ZipOutputStream(Sealed.SealingStream(key, out.buffered(), "backup"))
         zip.use { z ->
             fun put(name: String, bytes: ByteArray) { z.putNextEntry(ZipEntry(name)); z.write(bytes); z.closeEntry() }
             put("hramota.json", JSONObject().put("version", VERSION).put("created", System.currentTimeMillis()).toString().toByteArray())
@@ -70,7 +70,7 @@ object Backup {
                 if (!f.exists()) return@forEachIndexed
                 z.putNextEntry(ZipEntry("documents/" + f.name.removeSuffix(Vault.SUFFIX)))
                 f.inputStream().buffered().use { input ->
-                    if (f.name.endsWith(Vault.SUFFIX)) Sealed.open(Vault.key() ?: throw IOException("Locked"), input, z) else input.copyTo(z)
+                    if (f.name.endsWith(Vault.SUFFIX)) Sealed.open(Vault.key() ?: throw IOException("Locked"), input, z, f.name.removeSuffix(Vault.SUFFIX)) else input.copyTo(z)
                 }
                 z.closeEntry()
             }
@@ -101,7 +101,7 @@ object Backup {
         try {
             var listJson: String? = null; var shelvesJson: String? = null; var settingsJson: String? = null
             var total = 0L
-            ZipInputStream(Sealed.OpeningStream(key, data)).use { z ->
+            ZipInputStream(Sealed.OpeningStream(key, data, "backup")).use { z ->
                 var count = 0
                 while (true) {
                     val e = z.nextEntry ?: break
@@ -174,7 +174,7 @@ object Backup {
         val target = File(Library.copiesDir(context), staged.name + if (sealing) Vault.SUFFIX else "")
         if (target.exists()) return target
         return try {
-            staged.inputStream().buffered().use { input -> target.outputStream().buffered().use { if (sealing) Sealed.seal(key!!, input, it) else input.copyTo(it) } }
+            staged.inputStream().buffered().use { input -> target.outputStream().buffered().use { if (sealing) Sealed.seal(key!!, input, it, staged.name) else input.copyTo(it) } }
             target
         } catch (e: Exception) { target.delete(); null }
     }

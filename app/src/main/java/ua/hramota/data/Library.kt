@@ -56,6 +56,10 @@ data class LibraryEntry(
  * hundred bytes per document. Exported only by the person, inside an encrypted backup.
  */
 class Library private constructor(private val context: Context) {
+    // Each reading of the memory starts a generation; a write from an older one is dropped
+    @Volatile private var generation = 0
+    // Under lock, written only if what is held was read with the key
+    @Volatile private var loadedSealed = Vault.key() != null
     private val state = MutableStateFlow(load())
     val entries: StateFlow<Map<String, LibraryEntry>> = state.asStateFlow()
     private val shelfState = MutableStateFlow(loadShelves())
@@ -141,10 +145,17 @@ class Library private constructor(private val context: Context) {
     }
 
     /** Reads the memory again: after the locked storage is opened or locked. */
-    @Synchronized fun reload() {
+    @Synchronized fun reload() = reloadWith {}
+
+    /** Runs [before] (setting the key) and reads the memory, with no write able to slip in between. */
+    @Synchronized fun reloadWith(before: () -> Unit) {
+        before()
+        generation++
+        loadedSealed = Vault.key() != null
         state.value = load()
         shelfState.value = loadShelves()
     }
+
 
     private fun keepAside(name: String) {
         // Unreadable: kept aside rather than overwritten, so nothing is lost for good
@@ -160,7 +171,14 @@ class Library private constructor(private val context: Context) {
         val out = HashMap<String, LibraryEntry>()
         for (i in 0 until json.length()) {
             // One damaged entry is skipped, not the whole memory
-            val e = try { entry(json.getJSONObject(i)) } catch (ex: Exception) { null } ?: continue
+            var e = try { entry(json.getJSONObject(i)) } catch (ex: Exception) { null } ?: continue
+            // A copy found in its other form (sealed or not), after an interrupted change
+            e.copy?.let { p ->
+                if (!File(p).exists()) {
+                    val other = if (p.endsWith(Vault.SUFFIX)) p.removeSuffix(Vault.SUFFIX) else p + Vault.SUFFIX
+                    if (File(other).exists()) e = e.copy(copy = other)
+                }
+            }
             out[e.id] = e
         }
         return out
@@ -206,13 +224,16 @@ class Library private constructor(private val context: Context) {
 
     // Written on its own thread, the latest state only: reading position is saved often
     private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val pending = java.util.concurrent.atomic.AtomicReference<Map<String, LibraryEntry>?>()
+    private val pending = java.util.concurrent.atomic.AtomicReference<Pair<Int, Map<String, LibraryEntry>>?>()
 
     private fun save(map: Map<String, LibraryEntry>) {
-        if (pending.getAndSet(map) == null) writer.execute { pending.getAndSet(null)?.let(::write) }
+        if (pending.getAndSet(generation to map) == null) writer.execute {
+            pending.getAndSet(null)?.let { (gen, m) -> if (gen == generation) write(m) }
+        }
     }
 
     private fun write(map: Map<String, LibraryEntry>) {
+        if (Vault.isOn(context) && !loadedSealed) return
 
         val json = JSONArray()
         for (e in map.values) json.put(toJson(e))
@@ -228,6 +249,8 @@ class Library private constructor(private val context: Context) {
 
     private fun convert(seal: Boolean) {
         val key = Vault.key() ?: throw java.io.IOException("Locked")
+        // What is held now is the whole memory (read plain, or with the key)
+        loadedSealed = true
         // Memory and shelves: written again in the new form (the old one is removed by the writer)
         writer.submit {}.get()
         write(state.value)

@@ -60,7 +60,7 @@ class ViewerActivity : ComponentActivity() {
         val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
         labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
-        if (savedInstanceState == null) Recents(applicationContext).add(uri, name)
+        if (savedInstanceState == null) Recents.get(applicationContext).add(uri, name)
         val format = formatOf(this, uri, name)
         val library = Library.get(applicationContext)
         val remember = ua.hramota.data.Settings.get(this).state.value.rememberRecent
@@ -79,6 +79,7 @@ class ViewerActivity : ComponentActivity() {
                         // Locked storage closed: ask once; if declined, the file still opens, only nothing is remembered
                         if (ua.hramota.data.Vault.locked(this@ViewerActivity))
                             ua.hramota.data.Vault.unlock(this@ViewerActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))
+                        // The temporary copy of a sealed document is removed when this window goes
                         withContext(Dispatchers.IO) { Library.fingerprint(this@ViewerActivity, uri) }?.let { id ->
                             val old = Bookmarks(applicationContext)
                             val oldMarks = old.pages(uri.toString())
@@ -280,8 +281,7 @@ class ViewerActivity : ComponentActivity() {
         super.onDestroy()
         // A sealed copy opened for reading is plain only while it is shown
         val uri = intent.data
-        if (isFinishing && uri != null && uri.authority == "$packageName.files" && uri.pathSegments.firstOrNull() == "open")
-            uri.lastPathSegment?.let { java.io.File(java.io.File(cacheDir, "open"), it).delete() }
+        if (isFinishing && uri != null) ua.hramota.data.Shelf.closeOpened(this, uri)
     }
 
     companion object {
