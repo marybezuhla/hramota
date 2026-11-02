@@ -136,7 +136,7 @@
     <string name="settings_version">Грамота %1$s</string>
     <string name="settings_privacy_statement">Грамота не має доступу до інтернету й не просить жодних дозволів. Вона бачить лише файли, які ви відкрили, і нічого не зберігає поза цим телефоном.</string>
     <string name="settings_licenses">Ліцензії</string>
-    <string name="licenses_text">Грамота — GNU GPL-3.0, без жодних гарантій. Сирцевий код: github.com/Marybezu/hramota\n\nPDFium — BSD 3-Clause (Google, автори PDFium).\npdfium-binaries — MIT (Benoît Blanchon).\n\nШрифти Literata, Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX і Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
+    <string name="licenses_text">Грамота — GNU GPL-3.0 або новіша, без жодних гарантій. Сирцевий код: github.com/Marybezu/hramota\n\nPDFium — BSD 3-Clause (Google, автори PDFium).\npdfium-binaries — MIT (Benoît Blanchon).\n\nШрифти Literata, Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX і Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.</string>
     <string name="pages_cut">не всі сторінки: забракло пам\'яті</string>
     <string name="slide_n">Слайд %1$d</string>
     <string name="settings_docx_open_hint">Сторінки, як на папері, з розташуванням оригіналу. Текст суцільний, під ширину екрана, зручніше читати на телефоні. Перемкнути можна будь-коли в самому документі.</string>
