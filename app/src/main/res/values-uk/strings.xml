@@ -277,7 +277,14 @@
     <string name="edit_saved">Збережено</string>
     <string name="edit_not_saved">Не вдалося зберегти. Зміни лишилися тут.</string>
     <string name="edit_saved_copy">Цей файл не можна змінити, тож збережено копію зі змінами.</string>
-    <string name="edit_original_broken">Не вдалося записати у файл, і повернути його попередній вміст теж не вдалося. Збережіть змінений документ як копію зараз.</string>
+    <string name="edit_original_broken">Не вдалося записати у файл, і повернути його попередній вміст теж не вдалося. Попередню версію збережено в Грамоті, її буде запропоновано на головному екрані. Збережіть змінений документ як копію зараз.</string>
     <string name="edit_not_written">Не вдалося записати в цей файл; він лишився як був. Збережіть зміни як копію.</string>
     <string name="edit_save_copy_hint">Цей файл тут не можна змінити. Виберіть, де зберегти копію зі змінами.</string>
+    <string name="rescue_title">Збережено попередню версію</string>
+    <string name="rescue_text">Збереження «%1$s» не завершилося. Його попередню версію збережено в Грамоті на випадок, якщо файл пошкодився. Зберегти її як файл?</string>
+    <string name="rescue_save">Зберегти як файл</string>
+    <string name="rescue_delete">Видалити</string>
+    <string name="rescue_suffix">попередня версія</string>
+    <string name="rescue_saved">Попередню версію збережено.</string>
+    <string name="rescue_not_saved">Не вдалося зберегти попередню версію. Вона й далі збережена тут.</string>
 </resources>

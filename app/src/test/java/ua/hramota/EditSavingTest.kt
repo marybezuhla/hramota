@@ -33,32 +33,34 @@ class EditSavingTest {
 
     private val dir = File("build/edit-saving").apply { mkdirs() }
     private fun file(name: String, b: ByteArray) = File(dir, name).apply { writeBytes(b) }
+    private fun rescue() = EditSaving.Rescue(File(dir, "r.docx"), File(dir, "r.txt"), null, dir)
     private val original = ByteArray(5000) { (it % 251).toByte() }
     private val edited = ByteArray(3000) { (it % 13).toByte() }
 
     @Test fun writesAndChecks() {
         val f = Fake(original)
-        assertEquals(EditSaving.Write.DONE, EditSaving.writeWhole(f, file("a", edited), File(dir, "b")))
+        assertEquals(EditSaving.Write.DONE, EditSaving.writeWhole(f, file("a", edited), rescue()))
         assertArrayEquals(edited, f.bytes)
     }
 
     @Test fun appIgnoringTruncateGetsTheOriginalBack() {
         // A shorter file written over a longer one leaves the old end: the original is put back
         val f = Fake(original, truncates = false)
-        assertEquals(EditSaving.Write.RESTORED, EditSaving.writeWhole(f, file("a", edited), File(dir, "b")))
+        assertEquals(EditSaving.Write.RESTORED, EditSaving.writeWhole(f, file("a", edited), rescue()))
         assertArrayEquals(original, f.bytes)
     }
 
     @Test fun writingStoppedHalfwayGetsTheOriginalBack() {
         val f = Fake(original, failAfter = 1000)
-        val r = EditSaving.writeWhole(f, file("a", edited), File(dir, "b"))
-        // Writing the original back stops at the same point: then it is said to be damaged
+        val r = EditSaving.writeWhole(f, file("a", edited), rescue())
+        // Writing the original back stops at the same point: then it is said to be damaged, and the original stays kept
         assertEquals(EditSaving.Write.BROKEN, r)
+        assertArrayEquals(original, File(dir, "r.docx").readBytes())
     }
 
     @Test fun readOnlyFileIsLeftAlone() {
         val f = Fake(original, writable = false)
-        assertEquals(EditSaving.Write.NOT_ALLOWED, EditSaving.writeWhole(f, file("a", edited), File(dir, "b")))
+        assertEquals(EditSaving.Write.NOT_ALLOWED, EditSaving.writeWhole(f, file("a", edited), rescue()))
         assertArrayEquals(original, f.bytes)
     }
 }

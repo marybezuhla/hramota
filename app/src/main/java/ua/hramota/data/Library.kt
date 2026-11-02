@@ -141,6 +141,8 @@ class Library private constructor(private val context: Context) {
 
     fun clearAll() {
         state.value.keys.toList().forEach(::forget)
+        // Earlier versions kept by saves that did not finish go too
+        File(context.filesDir, "rescue").deleteRecursively()
         synchronized(this) { shelfState.value = shelfState.value.filter { it.id == ShelfDef.ALL }; saveShelves(shelfState.value) }
     }
 

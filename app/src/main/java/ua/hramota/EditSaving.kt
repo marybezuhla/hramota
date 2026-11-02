@@ -3,6 +3,8 @@ package ua.hramota
 import android.content.Context
 import android.net.Uri
 import ua.hramota.data.Library
+import ua.hramota.data.Sealed
+import ua.hramota.data.Vault
 import ua.hramota.doc.docx.DocxReader
 import ua.hramota.doc.docx.edit.DocxEdit
 import ua.hramota.doc.docx.edit.EditPara
@@ -11,11 +13,13 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import javax.crypto.SecretKey
 
 /**
  * Saving an edited DOCX. The new file is first made and checked privately; only then does it replace
- * the kept copy or the file itself. The file's original content is kept aside while it is overwritten,
- * and written back if the result does not read back the same.
+ * the kept copy or the file itself. Before a file is overwritten its content is kept in Hramota's own
+ * storage (sealed while the storage is locked); it is written back if the result does not read back the
+ * same, and kept for the person to save if even that fails or Hramota stops halfway.
  */
 object EditSaving {
     enum class Result { SAVED, NOT_ALLOWED, RESTORED, BROKEN, FAILED, COPY_SAVED }
@@ -44,88 +48,116 @@ object EditSaving {
     } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false }
 
     /** Saves into the kept copy or into the file itself; the document's memory moves to its new fingerprint. Off the main thread. */
-    fun saveInto(context: Context, edit: DocxEdit, list: List<EditPara>, uri: Uri, id: String?): Outcome {
+    fun saveInto(context: Context, edit: DocxEdit, list: List<EditPara>, uri: Uri, id: String?, name: String): Outcome {
         val made = temp(context, "edit")
-        val backup = temp(context, "original")
         try {
             if (!build(context, edit, list, uri, made)) return Outcome(Result.FAILED)
             val library = Library.get(context)
             val entry = id?.let { library.get(it) }
             val copy = entry?.copy?.let { File(it) }
-            if (ua.hramota.data.Shelf.isOwn(context, uri)) {
-                if (copy == null || !replaceKeptCopy(copy, made)) return Outcome(Result.FAILED)
-            } else {
-                when (writeWhole(io(context, uri), made, backup)) {
-                    Write.DONE -> {}
-                    Write.NOT_ALLOWED -> return Outcome(Result.NOT_ALLOWED)
-                    Write.RESTORED -> return Outcome(Result.RESTORED)
+            val newId = Library.fingerprint(context, Uri.fromFile(made))
+            val own = ua.hramota.data.Shelf.isOwn(context, uri)
+            if (!own) {
+                val rescue = Rescue.create(context, name)
+                when (writeWhole(io(context, uri), made, rescue)) {
+                    Write.DONE -> rescue.delete()
+                    Write.NOT_ALLOWED -> { rescue.delete(); return Outcome(Result.NOT_ALLOWED) }
+                    Write.RESTORED -> { rescue.delete(); return Outcome(Result.RESTORED) }
+                    // The original stays in Hramota, offered on the home screen
                     Write.BROKEN -> return Outcome(Result.BROKEN)
                 }
-                // A copy of this document kept in Hramota gets the same changes, so the shelf shows them too
-                if (copy != null) replaceKeptCopy(copy, made)
             }
-            val newId = Library.fingerprint(context, Uri.fromFile(made)) ?: return Outcome(Result.SAVED)
+            // The kept copy (the document itself when opened from the shelf) gets the changes, under its new name
+            var newCopy: File? = null
+            if (copy != null && newId != null) {
+                newCopy = copyFor(copy, newId)
+                if (!replaceKeptCopy(newCopy, made)) {
+                    if (own) return Outcome(Result.FAILED)
+                    newCopy = null
+                }
+            }
+            if (newId == null) return Outcome(Result.SAVED)
             if (entry != null && id != null && newId != id) {
-                library.update(newId) { entry.copy(id = newId) }
-                library.update(id) { null }
+                if (copy != null && newCopy == null) {
+                    // The copy could not be updated: it stays with the old version, and the new one is remembered without it
+                    library.update(newId) { entry.copy(id = newId, copy = null, onShelf = false) }
+                } else {
+                    library.update(newId) { entry.copy(id = newId, copy = newCopy?.path ?: entry.copy) }
+                    library.update(id) { null }
+                    if (copy != null && newCopy != null && copy.path != newCopy.path) copy.delete()
+                }
                 // The first page may look different now: its picture is made again
                 File(Library.coversDir(context), "$id.png").delete()
-                File(Library.coversDir(context), "$id.png${ua.hramota.data.Vault.SUFFIX}").delete()
+                File(Library.coversDir(context), "$id.png${Vault.SUFFIX}").delete()
             }
             return Outcome(Result.SAVED, newId)
         } finally {
             made.delete()
-            backup.delete()
         }
+    }
+
+    /** The kept copy's file for the new content: named by the new fingerprint, as every kept copy is. */
+    private fun copyFor(copy: File, newId: String): File {
+        val sealed = copy.name.endsWith(Vault.SUFFIX)
+        val base = copy.name.removeSuffix(Vault.SUFFIX)
+        val ext = base.substringAfterLast('.', "docx")
+        return File(copy.parentFile, "$newId.$ext" + if (sealed) Vault.SUFFIX else "")
     }
 
     /** Writes the edited document as a new file the person chose. Off the main thread. */
     fun saveCopy(context: Context, edit: DocxEdit, list: List<EditPara>, source: Uri, target: Uri): Outcome {
         val made = temp(context, "edit")
+        // A file picker may hand back a file that already exists: only a new, empty one is ever removed
+        val wasEmpty = try { context.contentResolver.openInputStream(target)?.use { it.read() < 0 } == true } catch (e: Exception) { false }
         try {
-            val ok = build(context, edit, list, source, made) && try { writeChecked(io(context, target), made) } catch (e: Exception) { false }
+            val ok = build(context, edit, list, source, made) && try { writeChecked(io(context, target)) { made.inputStream() } } catch (e: Exception) { false }
             if (!ok) {
-                try { android.provider.DocumentsContract.deleteDocument(context.contentResolver, target) } catch (_: Exception) {}
+                if (wasEmpty) try { android.provider.DocumentsContract.deleteDocument(context.contentResolver, target) } catch (_: Exception) {}
                 return Outcome(Result.FAILED)
             }
             return Outcome(Result.COPY_SAVED, copy = target)
         } finally { made.delete() }
     }
 
+    /** Writes a kept original (from a save that did not finish) into a file the person chose. */
+    fun saveRescue(context: Context, rescue: Rescue, target: Uri): Boolean = try {
+        writeChecked(io(context, target)) { rescue.open() }.also { if (it) rescue.delete() }
+    } catch (e: Exception) { false }
+
     enum class Write { DONE, NOT_ALLOWED, RESTORED, BROKEN }
 
     /**
-     * Replaces the file's content with [made]. The original is read into [backup] first; if the new
+     * Replaces the file's content with [made]. The original is kept in [rescue] first; if the new
      * content does not read back the same (some apps ignore "truncate", or writing stops halfway), the
-     * original is written back.
+     * original is written back. BROKEN leaves [rescue] in place.
      */
-    fun writeWhole(io: Io, made: File, backup: File): Write {
+    fun writeWhole(io: Io, made: File, rescue: Rescue): Write {
         try {
-            io.read()?.use { input -> backup.outputStream().use { input.copyTo(it) } } ?: return Write.NOT_ALLOWED
+            io.read()?.use { input -> rescue.keep(input) } ?: return Write.NOT_ALLOWED
         } catch (e: Exception) { return Write.NOT_ALLOWED }
         try {
-            if (writeChecked(io, made)) return Write.DONE
+            if (writeChecked(io) { made.inputStream() }) return Write.DONE
         } catch (e: SecurityException) {
-            if (sameAs(io, backup)) return Write.NOT_ALLOWED
+            if (sameAs(io) { rescue.open() }) return Write.NOT_ALLOWED
         } catch (e: IOException) {
             // Not allowed to open for writing at all: nothing was changed
-            if (e is java.io.FileNotFoundException && sameAs(io, backup)) return Write.NOT_ALLOWED
+            if (e is java.io.FileNotFoundException && sameAs(io) { rescue.open() }) return Write.NOT_ALLOWED
         } catch (e: Exception) {}
-        return try { if (writeChecked(io, backup)) Write.RESTORED else Write.BROKEN } catch (e: Exception) { Write.BROKEN }
+        return try { if (writeChecked(io) { rescue.open() }) Write.RESTORED else Write.BROKEN } catch (e: Exception) { Write.BROKEN }
     }
 
-    /** Writes [file] whole and checks it reads back exactly; tries "rwt" where "wt" did not truncate. */
-    fun writeChecked(io: Io, file: File): Boolean {
+    /** Writes the content whole and checks it reads back exactly; tries "rwt" where "wt" did not truncate. */
+    fun writeChecked(io: Io, source: () -> InputStream): Boolean {
         for (mode in listOf("wt", "rwt")) {
             val out = io.write(mode) ?: throw java.io.FileNotFoundException("Cannot write")
-            out.use { o -> file.inputStream().use { it.copyTo(o) } }
-            if (sameAs(io, file)) return true
+            out.use { o -> source().use { it.copyTo(o) } }
+            if (sameAs(io, source)) return true
         }
         return false
     }
 
-    private fun sameAs(io: Io, file: File): Boolean = try {
-        io.read()?.use { a -> file.inputStream().buffered().use { b -> sameStream(a.buffered(), b) } } == true
+    private fun sameAs(io: Io, source: () -> InputStream): Boolean = try {
+        io.read()?.use { a -> source().buffered().use { b -> sameStream(a.buffered(), b) } } == true
     } catch (e: Exception) { false }
 
     private fun sameStream(a: InputStream, b: InputStream): Boolean {
@@ -144,15 +176,15 @@ object EditSaving {
         return k
     }
 
-    /** Replaces a copy kept in Hramota (sealed again if it was), through a file synced to disk and then put in place at once. */
+    /** Replaces (or makes) a copy kept in Hramota (sealed if its name says so), through a file synced to disk and then put in place at once. */
     fun replaceKeptCopy(copy: File, made: File): Boolean {
         val part = File(copy.path + ".part")
         try {
             FileOutputStream(part).use { fos ->
                 val out = fos.buffered()
-                if (copy.name.endsWith(ua.hramota.data.Vault.SUFFIX)) {
-                    val key = ua.hramota.data.Vault.key() ?: return false
-                    made.inputStream().buffered().use { input -> ua.hramota.data.Sealed.seal(key, input, out, copy.name.removeSuffix(ua.hramota.data.Vault.SUFFIX)) }
+                if (copy.name.endsWith(Vault.SUFFIX)) {
+                    val key = Vault.key() ?: return false
+                    made.inputStream().buffered().use { input -> Sealed.seal(key, input, out, copy.name.removeSuffix(Vault.SUFFIX)) }
                 } else made.inputStream().use { it.copyTo(out) }
                 out.flush()
                 fos.fd.sync()
@@ -160,5 +192,64 @@ object EditSaving {
             if (!part.renameTo(copy)) { part.delete(); return false }
             return true
         } catch (e: Exception) { part.delete(); return false }
+    }
+
+    /**
+     * A file's content kept while it is overwritten, in Hramota's own storage (not the cache, which is
+     * emptied at start), sealed while the storage is locked. What is left after a save that did not
+     * finish is offered on the home screen.
+     */
+    class Rescue(private val file: File, private val label: File, private val key: SecretKey?, private val cache: File) {
+        val name: String get() = try { label.readText().take(200) } catch (e: Exception) { "" }
+        val sealed: Boolean get() = file.name.endsWith(Vault.SUFFIX)
+
+        /** Keeps the content: written beside, synced, then put in place, so only a whole copy is ever left. */
+        fun keep(input: InputStream) {
+            val part = File(file.path + ".part")
+            FileOutputStream(part).use { fos ->
+                val out = fos.buffered()
+                if (key != null) Sealed.seal(key, input, out, file.name.removeSuffix(Vault.SUFFIX)) else input.copyTo(out)
+                out.flush()
+                fos.fd.sync()
+            }
+            if (!part.renameTo(file)) { part.delete(); throw IOException("Could not keep the original") }
+        }
+
+        /** The kept content; a sealed one is opened into a temporary file, removed when the stream is closed. */
+        fun open(): InputStream {
+            if (!sealed) return file.inputStream()
+            val k = key ?: Vault.key() ?: throw IOException("Locked")
+            val plain = File(cache.apply { mkdirs() }, "rescue-${System.nanoTime()}.docx")
+            try {
+                file.inputStream().buffered().use { input -> plain.outputStream().buffered().use { Sealed.open(k, input, it, file.name.removeSuffix(Vault.SUFFIX)) } }
+            } catch (e: Exception) { plain.delete(); throw e }
+            return object : java.io.FilterInputStream(plain.inputStream()) {
+                override fun close() { try { super.close() } finally { plain.delete() } }
+            }
+        }
+
+        fun delete() { file.delete(); label.delete() }
+
+        companion object {
+            private fun dir(context: Context) = File(context.filesDir, "rescue").apply { mkdirs() }
+
+            fun create(context: Context, name: String): Rescue {
+                val stem = "r" + System.currentTimeMillis().toString(36) + System.nanoTime().toString(36).takeLast(4)
+                val key = if (Vault.sealing(context)) Vault.key() else null
+                val label = File(dir(context), "$stem.txt").apply { writeText(name.take(200)) }
+                return Rescue(File(dir(context), "$stem.docx" + if (key != null) Vault.SUFFIX else ""), label, key, File(context.cacheDir, "open"))
+            }
+
+            /** Originals left by saves that did not finish. */
+            fun left(context: Context): List<Rescue> {
+                val files = dir(context).listFiles().orEmpty()
+                // A copy that was never finished holds nothing worth offering
+                files.filter { it.name.endsWith(".part") }.forEach { it.delete() }
+                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.docx(${Regex.escape(Vault.SUFFIX)})?")) }
+                // Labels whose copy never came to be
+                files.filter { it.name.endsWith(".txt") && kept.none { k -> k.name.removeSuffix(Vault.SUFFIX).removeSuffix(".docx") == it.name.removeSuffix(".txt") } }.forEach { it.delete() }
+                return kept.map { Rescue(it, File(it.parentFile, it.name.removeSuffix(Vault.SUFFIX).removeSuffix(".docx") + ".txt"), null, File(context.cacheDir, "open")) }
+            }
+        }
     }
 }
