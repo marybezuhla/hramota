@@ -42,6 +42,24 @@ class DocxRenderTest {
         File(out, "pages.txt").writeText(summary.toString())
     }
 
+    /** Headers and footers: the first page its own, page numbers filled in for each page. */
+    @Test fun headersAndFooters() {
+        val file = docs().first { it.name == "07-headers.docx" }
+        val doc = file.inputStream().use { DocxReader.read(it) }
+        val hf = doc.headersFooters
+        assertTrue(hf.firstPage)
+        assertTrue(hf.headers["default"]!!.isNotEmpty() && hf.headers["first"]!!.isNotEmpty())
+        val layout = DocxLayout(doc, fonts) { _, _, _ -> null }
+        val pages = layout.layout()
+        assertTrue(pages.size >= 2)
+        fun texts(i: Int) = layout.headerFooter(i, pages.size).filterIsInstance<PageItem.Text>().map { it.source.text }
+        assertTrue(texts(0).any { it.contains("Титульна") })
+        assertTrue("no footer on a title page without its own", texts(0).none { it.contains("Сторінка") })
+        val second = texts(1)
+        assertTrue(second.any { it.contains("Вигадана компанія") })
+        assertTrue(second.toString(), second.any { it.contains("Сторінка 2 з ${pages.size}") })
+    }
+
     /** The bundled fonts must really be used: Carlito is narrower than the system sans font. */
     @Test fun bundledFontsAreLoaded() {
         val sample = "Постачальник зобов'язується передати товар"

@@ -154,7 +154,37 @@ def long_table_doc():
     d.save(os.path.join(OUT, "06-long-table.docx"))
 
 
+def field(paragraph, code):
+    """A field (PAGE, NUMPAGES) as Word writes it: begin, instruction, separate, a saved result, end."""
+    def char(kind):
+        r = paragraph.add_run(); e = OxmlElement("w:fldChar"); e.set(qn("w:fldCharType"), kind); r._r.append(e)
+    char("begin")
+    r = paragraph.add_run(); t = OxmlElement("w:instrText"); t.set(qn("xml:space"), "preserve"); t.text = f" {code} "; r._r.append(t)
+    char("separate")
+    paragraph.add_run("1")
+    char("end")
+
+
+def headers_doc():
+    """Header and footer with page numbers; the first page has its own (title page)."""
+    d = Document(); base(d, font="Times New Roman", size=12)
+    s = d.sections[0]
+    s.different_first_page_header_footer = True
+    s.header.paragraphs[0].text = "ТОВ «Вигадана компанія» · Договір № 12"
+    s.header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    f = s.footer.paragraphs[0]; f.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    f.add_run("Сторінка "); field(f, "PAGE"); f.add_run(" з "); field(f, "NUMPAGES")
+    s.first_page_header.paragraphs[0].text = "Титульна сторінка"
+    s.first_page_header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    d.add_heading("Договір поставки № 12", level=1).alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for i in range(1, 7):
+        d.add_heading(f"{i}. Розділ договору", level=2)
+        for _ in range(2):
+            p = d.add_paragraph(UK + " " + UK); p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    d.save(os.path.join(OUT, "07-headers.docx"))
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    fonts_doc(); paragraphs_doc(); lists_doc(); tables_doc(); flow_doc(); long_table_doc()
+    fonts_doc(); paragraphs_doc(); lists_doc(); tables_doc(); flow_doc(); long_table_doc(); headers_doc()
     print("written to", os.path.abspath(OUT))
