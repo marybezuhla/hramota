@@ -311,4 +311,8 @@
     <string name="new_sheet_file_name">Нова таблиця</string>
     <string name="new_sheet_name">Аркуш1</string>
     <string name="create_failed">Не вдалося створити файл.</string>
+    <string name="save_as_docx">Зберегти як DOCX</string>
+    <string name="save_as_xlsx">Зберегти як XLSX</string>
+    <string name="convert_done">Збережено в новому форматі; він відкривається, і його можна редагувати.</string>
+    <string name="convert_failed">Не вдалося зберегти в новому форматі.</string>
 </resources>

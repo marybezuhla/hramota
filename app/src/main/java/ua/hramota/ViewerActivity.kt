@@ -261,6 +261,9 @@ class ViewerActivity : ComponentActivity() {
                                 if (format == Format.DOCX && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
                                 // Excel workbooks: cells and formulas
                                 (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
+                                // Old Word and Excel files: kept as new ones, which can then be edited
+                                if (format == Format.DOC && state is ViewerState.Paged) getString(R.string.save_as_docx) to { held.converting = true; saveAsDocx.launch(name.substringBeforeLast('.', name) + ".docx"); Unit } else null,
+                                if (format == Format.XLS && state is ViewerState.Sheets) getString(R.string.save_as_xlsx) to { held.converting = true; saveAsXlsx.launch(name.substringBeforeLast('.', name) + ".xlsx"); Unit } else null,
                                 // PowerPoint: the slides' text
                                 if (format == Format.PPTX && state is ViewerState.Paged) getString(R.string.edit_open) to { startSlideEditing(uri); Unit } else null,
                                 // Word comments: read, answered with new ones, removed (in the editing view)
@@ -452,6 +455,47 @@ class ViewerActivity : ComponentActivity() {
 
     // A copy of the edits saved where the person chooses (the file itself could not be changed)
     private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target -> onCopyTarget(target) }
+    private val saveAsDocx = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target -> convertInto(target, "docx") }
+    private val saveAsXlsx = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { target -> convertInto(target, "xlsx") }
+
+    /** Writes this old Word or Excel file as a new DOCX or XLSX into [target], checks it opens, and opens it. */
+    private fun convertInto(target: android.net.Uri?, kind: String) {
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        val waiting = held.converting
+        held.converting = false
+        val source = intent.data
+        if (target == null || source == null) return
+        if (!waiting) { try { android.provider.DocumentsContract.deleteDocument(contentResolver, target) } catch (_: Exception) {}; return }
+        val app = applicationContext
+        held.scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val temp = java.io.File(java.io.File(app.cacheDir, "open").apply { mkdirs() }, "convert-${System.nanoTime()}.$kind")
+                try {
+                    temp.outputStream().buffered().use { out ->
+                        app.contentResolver.openInputStream(source)?.use { input ->
+                            if (kind == "docx") ua.hramota.doc.docx.DocxWriter.write(WordBinaryReader.read(input), out, java.util.Locale.getDefault().toLanguageTag())
+                            else ua.hramota.doc.sheet.XlsxWriter.write(XlsReader.read(input), out)
+                        } ?: return@withContext false
+                    }
+                    // The new file must open as a document before it is put in place
+                    temp.inputStream().buffered().use { if (kind == "docx") DocxReader.read(it) else XlsxReader.read(it) }
+                    EditSaving.writeChecked(object : EditSaving.Io {
+                        override fun read() = app.contentResolver.openInputStream(target)
+                        override fun write(mode: String) = app.contentResolver.openOutputStream(target, mode)
+                    }) { temp.inputStream() }
+                } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false } finally { temp.delete() }
+            }
+            if (!ok) {
+                try { android.provider.DocumentsContract.deleteDocument(app.contentResolver, target) } catch (_: Exception) {}
+                android.widget.Toast.makeText(app, app.getString(R.string.convert_failed), android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            android.widget.Toast.makeText(app, app.getString(R.string.convert_done), android.widget.Toast.LENGTH_LONG).show()
+            startActivity(android.content.Intent(app, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
     private val saveSlidesCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.presentationml.presentation")) { target -> onCopyTarget(target) }
     private val saveSheetCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { target -> onCopyTarget(target) }
 
@@ -626,6 +670,8 @@ class ViewerActivity : ComponentActivity() {
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
         /** Why the edits went into a copy (what is said when it is saved). */
         var copyReason: EditSaving.Result? = null
+        /** A new DOCX or XLSX is waiting for its place (the file picker is open). */
+        var converting = false
         /** A new document was opened into editing already. */
         var autoEdited = false
         /** The editing view opens with the list of comments. */

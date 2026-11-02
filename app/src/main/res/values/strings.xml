@@ -303,4 +303,8 @@
     <string name="new_sheet_file_name">New workbook</string>
     <string name="new_sheet_name">Sheet1</string>
     <string name="create_failed">Couldn’t create the file.</string>
+    <string name="save_as_docx">Save as DOCX</string>
+    <string name="save_as_xlsx">Save as XLSX</string>
+    <string name="convert_done">Saved in the new format; it opens now and can be edited.</string>
+    <string name="convert_failed">Couldn’t save in the new format.</string>
 </resources>
