@@ -224,7 +224,10 @@ class DocxEdit private constructor(
         var secondPpr = p.pPr
         if (at == p.text.length && shownKindOf(p) in setOf(Kind.H1, Kind.H2, Kind.H3)) secondPpr = removeChild(secondPpr, "pStyle", PPR_ORDER)
         // At the split itself a comment's beginning goes with the second part, its end and mark stay with the first
-        val (keep, move) = p.anchors.partition { it.at < at || (it.at == at && it.kind != Anchor.Kind.START) }
+        // (unless that comment also ends right there: a comment on a point stays whole in the first part)
+        val (keep, move) = p.anchors.partition { a ->
+            a.at < at || (a.at == at && (a.kind != Anchor.Kind.START || p.anchors.any { it.comment == a.comment && it.kind != Anchor.Kind.START && it.at == at }))
+        }
         val first = p.changed(text = p.text.substring(0, at), marks = p.marks.subList(0, at).toList(), pPr = withoutSection, tail = "", anchors = keep)
         val style = p.marks.getOrNull(at - 1) ?: p.marks.getOrNull(at) ?: p.typing
         val second = EditPara(newKey(), p.slot, p.text.substring(at), p.marks.subList(at, p.text.length).toList(), secondPpr, "<$w:p>", "", p.tail, true, null, style,
@@ -358,10 +361,25 @@ class DocxEdit private constructor(
 
     // --- Comments ---
 
-    // The comments part's own prefix for the main namespace (a new part uses "w")
-    private val cw: String = commentsXml?.let { c ->
-        XmlScan.children(c, 0, c.length).firstOrNull { it.local == "comments" }?.attrs?.entries?.firstOrNull { it.value == MAIN && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
-    } ?: "w"
+    // The comments part's own prefix for the main namespace (a new part uses "w"); null if the part uses none
+    private val cwOrNull: String? = if (commentsXml == null) "w" else try {
+        XmlScan.children(commentsXml, 0, commentsXml.length).firstOrNull { it.local == "comments" }?.attrs?.entries?.firstOrNull { it.value == MAIN && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
+    } catch (e: Exception) { null }
+    private val cw: String = cwOrNull ?: "w"
+
+    /** False when the comments part is written in a way not handled here: comments are then shown but not changed. */
+    val canComment: Boolean get() = cwOrNull != null
+
+    // Comment ids: the next free one (worked out once, off the main thread, when the file is opened)
+    private var nextCommentId: Long = (Regex("$w:id=\"(\\d{1,9})\"").findAll(xml).mapNotNull { it.groupValues[1].toLongOrNull() }.maxOrNull() ?: -1L) + 1
+
+    // Comments whose beginning or end stands outside any paragraph (Word sometimes puts them between): not removed here
+    private val outside: Set<String> = run {
+        val inParas = paragraphs.flatMap { p -> p.anchors.filter { it.kind != Anchor.Kind.REF }.map { it.comment + ":" + it.kind } }.toSet()
+        Regex("<$w:commentRange(Start|End)\\b[^>]*?\\b$w:id=\"([^\"]+)\"").findAll(xml)
+            .filter { m -> (m.groupValues[2] + ":" + if (m.groupValues[1] == "Start") Anchor.Kind.START else Anchor.Kind.END) !in inParas }
+            .map { it.groupValues[2] }.toSet()
+    }
 
     private fun commentElems(): List<Elem> {
         val c = commentsXml ?: return emptyList()
@@ -397,8 +415,9 @@ class DocxEdit private constructor(
      * paragraph, its text into the comments part on saving.
      */
     fun comment(p: EditPara, from: Int, to: Int, author: String, text: String): EditPara {
-        val used = (comments().mapNotNull { it.id.toIntOrNull() } + Regex("$w:id=\"(\\d+)\"").findAll(xml).mapNotNull { it.groupValues[1].toIntOrNull() }.filter { it < 1_000_000 })
-        val id = ((used.maxOrNull() ?: -1) + 1).toString()
+        if (!canComment) return p
+        val id = maxOf(nextCommentId, (comments().mapNotNull { it.id.toLongOrNull() }.maxOrNull() ?: -1L) + 1).toString()
+        nextCommentId = id.toLong() + 1
         val date = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
         added += Comment(id, author.take(100), date, text.take(20_000))
         val a = from.coerceIn(0, p.text.length); val b = to.coerceIn(a, p.text.length)
@@ -413,7 +432,7 @@ class DocxEdit private constructor(
 
     /** The paragraphs without comment [id]; null if part of it is in a paragraph that cannot be changed here. */
     fun uncomment(list: List<EditPara>, id: String): List<EditPara>? {
-        if (list.any { !it.editable && it.anchors.any { a -> a.comment == id } }) return null
+        if (!canComment || id in outside || list.any { !it.editable && it.anchors.any { a -> a.comment == id } }) return null
         return list.map { p -> if (p.anchors.none { it.comment == id }) p else p.changed(anchors = p.anchors.filter { it.comment != id }) }
     }
 
@@ -475,11 +494,12 @@ class DocxEdit private constructor(
         out["word/comments.xml"] = c
         if (commentsXml == null) {
             // A new part, known to the package (with numbering's changes, if any, kept)
-            val rels = changedParts["word/_rels/document.xml.rels"] ?: relsXml ?: return null
-            val types = changedParts["[Content_Types].xml"] ?: typesXml ?: return null
-            if ("relationships/comments\"" in rels) return null
-            val relsEnd = rels.lastIndexOf("</Relationships>").takeIf { it > 0 } ?: return null
-            val typesEnd = types.lastIndexOf("</Types>").takeIf { it > 0 } ?: return null
+            // A new comment with nowhere to go would leave a mark Word cannot resolve: the save fails instead
+            val rels = changedParts["word/_rels/document.xml.rels"] ?: relsXml ?: throw IOException("No relationships")
+            val types = changedParts["[Content_Types].xml"] ?: typesXml ?: throw IOException("No content types")
+            if ("relationships/comments\"" in rels) throw IOException("Comments kept elsewhere")
+            val relsEnd = rels.lastIndexOf("</Relationships>").takeIf { it > 0 } ?: throw IOException("Bad relationships")
+            val typesEnd = types.lastIndexOf("</Types>").takeIf { it > 0 } ?: throw IOException("Bad content types")
             var rid = "rIdHramotaC1"; var k = 2
             while ("\"$rid\"" in rels) rid = "rIdHramotaC${k++}"
             out["word/_rels/document.xml.rels"] = rels.substring(0, relsEnd) + "<Relationship Id=\"$rid\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments\" Target=\"comments.xml\"/>" + rels.substring(relsEnd)
@@ -496,7 +516,8 @@ class DocxEdit private constructor(
             for (name in listOf("word/commentsExtended.xml", "word/commentsIds.xml", "word/commentsExtensible.xml")) {
                 val part = commentParts[name] ?: continue
                 val root = XmlScan.children(part, 0, part.length).firstOrNull() ?: continue
-                val drop = XmlScan.children(part, root).filter { k -> k.attrs.entries.any { (it.key.endsWith(":paraId") && it.value in goneParas) || (it.key.endsWith(":durableId") && it.value in durable) } }
+                // Entries of the removed comments, and replies pointing to them (the replies stay as comments of their own)
+                val drop = XmlScan.children(part, root).filter { k -> k.attrs.entries.any { (it.key.endsWith(":paraId") && it.value in goneParas) || (it.key.endsWith(":paraIdParent") && it.value in goneParas) || (it.key.endsWith(":durableId") && it.value in durable) } }
                 if (drop.isEmpty()) continue
                 val b = StringBuilder(); var pos = 0
                 for (d in drop) { b.append(part, pos, d.start); pos = d.end }
