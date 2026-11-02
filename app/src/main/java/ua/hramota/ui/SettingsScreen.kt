@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Surface
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.layout.Arrangement
@@ -210,7 +211,8 @@ private fun SchemeRow(title: String, schemes: List<Scheme>, chosen: String, onCh
             val selected = sc.id == chosen || (schemes.none { it.id == chosen } && sc == schemes.first())
             val c = sc.colors
             Column(
-                Modifier.width(104.dp).clip(RoundedCornerShape(14.dp)).selectable(selected, role = Role.RadioButton) { onChoose(sc.id) }.padding(2.dp),
+                // As wide as the name needs with a large font (a name is never broken mid-word)
+                Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max).widthIn(min = 104.dp).clip(RoundedCornerShape(14.dp)).selectable(selected, role = Role.RadioButton) { onChoose(sc.id) }.padding(2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 val frame = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -231,7 +233,7 @@ private fun SchemeRow(title: String, schemes: List<Scheme>, chosen: String, onCh
                 Text(
                     stringResource(sc.name), style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, softWrap = false,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }

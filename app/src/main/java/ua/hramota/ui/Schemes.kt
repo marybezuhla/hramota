@@ -45,8 +45,8 @@ object Schemes {
         val bg = Color(page); val text = Color(ink)
         val light = Color.White; val black = Color.Black
         // Accents are also text (buttons, links): kept readable on the page
-        val p = readable(Color(primary), bg, if (dark) light else black)
-        val s = readable(Color(secondary), bg, if (dark) light else black)
+        val p = readable(Color(primary), bg, if (dark) text else black)
+        val s = readable(Color(secondary), bg, if (dark) text else black)
         val onP = readable(better(p, Color(onPrimary), if (dark) Color(page) else light), p, if (p.luminance() > 0.4f) black else light)
         val onS = readable(better(s, Color(onPrimary), if (dark) Color(page) else light), s, if (s.luminance() > 0.4f) black else light)
         val pc = lerp(Color(primary), bg, if (dark) 0.62f else 0.84f)
