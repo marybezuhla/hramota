@@ -350,4 +350,7 @@ class ScreensTest {
     @Test fun readingControls() = shot("13-reading-controls") { androidx.compose.material3.Surface { ua.hramota.ui.ReadingControls(ua.hramota.data.AppSettings(), {}) } }
     @Config(qualifiers = "+night")
     @Test fun readingControlsDark() = shot("13-reading-controls-dark") { androidx.compose.material3.Surface { ua.hramota.ui.ReadingControls(ua.hramota.data.AppSettings(readTurn = "curl"), {}) } }
+    @Test fun lockScreen() = shot("14-lock") { ua.hramota.ui.LockScreen(onUnlock = {}) }
+    @Config(qualifiers = "+night")
+    @Test fun lockScreenKeyLost() = shot("14-lock-key-lost-dark") { ua.hramota.ui.LockScreen(keyLost = true, onUnlock = {}) }
 }
