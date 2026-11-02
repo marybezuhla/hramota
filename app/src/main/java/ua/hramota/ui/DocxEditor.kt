@@ -511,10 +511,10 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
                 Tool("I", stringResource(R.string.edit_italic), active, look.italic, TextStyle(fontStyle = FontStyle.Italic)) { state.toggle(EditorState.Mark.ITALIC) }
                 Tool("U", stringResource(R.string.edit_underline), active, look.underline, TextStyle(textDecoration = TextDecoration.Underline)) { state.toggle(EditorState.Mark.UNDERLINE) }
                 Tool("S", stringResource(R.string.edit_strike), active, look.strike, TextStyle(textDecoration = TextDecoration.LineThrough)) { state.toggle(EditorState.Mark.STRIKE) }
+                Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
                 KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind)
                 Tool("•", stringResource(R.string.edit_bullets), active, shown?.list == ListKind.BULLET) { state.toggleList(ListKind.BULLET) }
                 Tool("1.", stringResource(R.string.edit_numbers), active, shown?.list == ListKind.NUMBER) { state.toggleList(ListKind.NUMBER) }
-                Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
             }
         }
     }
