@@ -21,6 +21,7 @@ import ua.hramota.ui.HomeScreen
 import androidx.activity.compose.BackHandler
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import ua.hramota.data.Settings
 import ua.hramota.ui.AppTheme
 import ua.hramota.ui.SettingsScreen
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private var pendingBackup: Pair<CharArray, Set<String>>? = null
     private var restoreUri by mutableStateOf<Uri?>(null)
     private var restoreWrong by mutableStateOf(false)
+    private var restoreProblem by mutableStateOf(ua.hramota.data.Backup.Reason.WRONG_PASSWORD_OR_DAMAGED)
     private var busy by mutableStateOf<Triple<String, Int, Int>?>(null)
     private val saveBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> onBackupTarget(uri) }
     private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) { restoreWrong = false; restoreUri = uri } }
@@ -82,9 +84,11 @@ class MainActivity : ComponentActivity() {
                     if (backupDialog) ua.hramota.ui.BackupDialog(shelf, shelves, onCreate = { pw, ids ->
                         backupDialog = false
                         pendingBackup = pw to ids
+                        // Held from now: Hramota does not lock while the file is being chosen and written
+                        ua.hramota.data.Vault.hold()
                         saveBackup.launch(ua.hramota.data.Backup.suggestedName())
                     }, onDismiss = { backupDialog = false })
-                    restoreUri?.let { u -> ua.hramota.ui.RestoreDialog(restoreWrong, onRestore = { pw -> restore(u, pw) }, onDismiss = { restoreUri = null }) }
+                    restoreUri?.let { u -> ua.hramota.ui.RestoreDialog(if (restoreWrong) restoreProblem else null, onRestore = { pw -> restore(u, pw) }, onDismiss = { restoreUri = null }) }
                     busy?.let { (t, d, n) -> ua.hramota.ui.BusyDialog(t, d, n) }
                     if (showSettings) SettingsScreen(
                         settings = settings,
@@ -125,36 +129,55 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun onBackupTarget(uri: Uri?) {
-        val (pw, ids) = pendingBackup ?: return
+        val pending = pendingBackup
         pendingBackup = null
-        if (uri == null) { pw.fill(' '); return }
+        if (pending == null) {
+            // The window was made again while the file was chosen: the password is gone, so no half-made file stays
+            if (uri != null) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
+            ua.hramota.data.Vault.release()
+            return
+        }
+        val (pw, ids) = pending
+        if (uri == null) { pw.fill(' '); ua.hramota.data.Vault.release(); return }
         busy = Triple(getString(R.string.backup_writing), 0, 0)
         lifecycleScope.launch {
-            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                try {
-                    // The key is held to the end: Hramota does not lock in the middle of a backup
-                    ua.hramota.data.Vault.holding {
-                        contentResolver.openOutputStream(uri, "wt")?.use { out ->
-                            ua.hramota.data.Backup.write(this@MainActivity, out, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) }
-                        } != null
+            val reason = try {
+                ua.hramota.data.Vault.work.withLock {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            val out = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("No file")
+                            out.use { ua.hramota.data.Backup.write(this@MainActivity, it, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) } }
+                            null
+                        } catch (e: ua.hramota.data.Backup.Refused) { e.reason } catch (e: Exception) { ua.hramota.data.Backup.Reason.NO_SPACE } catch (e: OutOfMemoryError) { ua.hramota.data.Backup.Reason.NO_SPACE }
                     }
-                } catch (e: Exception) { false } finally { pw.fill(' ') }
-            }
-            if (!ok) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
+                }
+            } finally { pw.fill(' '); ua.hramota.data.Vault.release() }
+            if (reason != null) try { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) } catch (_: Exception) {}
             busy = null
-            android.widget.Toast.makeText(this@MainActivity, getString(if (ok) R.string.backup_written else R.string.backup_failed), android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(this@MainActivity, getString(when (reason) {
+                null -> R.string.backup_written
+                ua.hramota.data.Backup.Reason.LOCKED -> R.string.backup_locked
+                else -> R.string.backup_failed
+            }), android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
     private fun restore(uri: Uri, pw: CharArray) {
         busy = Triple(getString(R.string.backup_reading), 0, 0)
         lifecycleScope.launch {
-            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                try { ua.hramota.data.Vault.holding { contentResolver.openInputStream(uri)?.use { ua.hramota.data.Backup.restore(this@MainActivity, it, pw) } } }
-                catch (e: Exception) { null } finally { pw.fill(' ') }
-            }
+            var reason: ua.hramota.data.Backup.Reason? = null
+            val result = try {
+                ua.hramota.data.Vault.work.withLock {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        try { ua.hramota.data.Vault.holding { contentResolver.openInputStream(uri)?.use { ua.hramota.data.Backup.restore(this@MainActivity, it, pw) } } }
+                        catch (e: ua.hramota.data.Backup.Refused) { reason = e.reason; null }
+                        catch (e: Exception) { reason = ua.hramota.data.Backup.Reason.WRONG_PASSWORD_OR_DAMAGED; null }
+                        catch (e: OutOfMemoryError) { reason = ua.hramota.data.Backup.Reason.NO_SPACE; null }
+                    }
+                }
+            } finally { pw.fill(' ') }
             busy = null
-            if (result == null) { restoreWrong = true; return@launch }
+            if (result == null) { restoreProblem = reason ?: ua.hramota.data.Backup.Reason.WRONG_PASSWORD_OR_DAMAGED; restoreWrong = true; return@launch }
             restoreUri = null
             recents.reload()
             android.widget.Toast.makeText(this@MainActivity, getString(R.string.backup_restored, result.added, result.updated, result.documents), android.widget.Toast.LENGTH_LONG).show()
@@ -164,6 +187,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vaultOn = ua.hramota.data.Vault.isOn(this)
+        applySecureScreen()
         if (skipResume) { skipResume = false; return }
         // Coming to Hramota while locked: ask straight away
         if (vaultOn && ua.hramota.data.Vault.key() == null && !keyLost) unlock()
@@ -177,7 +201,8 @@ class MainActivity : ComponentActivity() {
             try {
                 when (ua.hramota.data.Vault.unlock(this@MainActivity, getString(R.string.unlock_title), getString(R.string.unlock_subtitle))) {
                     ua.hramota.data.Vault.Outcome.OPEN -> recents.reload()
-                    ua.hramota.data.Vault.Outcome.KEY_LOST -> keyLost = true
+                    // No confirmation screen was shown: the next return to Hramota asks as usual
+                    ua.hramota.data.Vault.Outcome.KEY_LOST -> { keyLost = true; skipResume = false }
                     ua.hramota.data.Vault.Outcome.NOT_CONFIRMED -> android.widget.Toast.makeText(this@MainActivity, getString(R.string.unlock_not_confirmed), android.widget.Toast.LENGTH_LONG).show()
                     ua.hramota.data.Vault.Outcome.CANCELLED -> Unit
                 }
@@ -187,12 +212,14 @@ class MainActivity : ComponentActivity() {
 
     /** Turns locked storage on or off; everything kept is sealed or opened again, then a word on how it went. */
     private fun setVault(on: Boolean) {
+        if (ua.hramota.data.Vault.work.isLocked) return
         lifecycleScope.launch {
-            val ok = try {
+            val ok = ua.hramota.data.Vault.work.withLock { try {
                 if (on) ua.hramota.data.Vault.enable(this@MainActivity, getString(R.string.vault_title), getString(R.string.unlock_subtitle))
                 else ua.hramota.data.Vault.disable(this@MainActivity)
-            } catch (e: Exception) { false }
+            } catch (e: Exception) { false } }
             vaultOn = ua.hramota.data.Vault.isOn(this@MainActivity)
+            applySecureScreen()
             recents.reload()
             android.widget.Toast.makeText(this@MainActivity, getString(if (!ok) R.string.vault_failed else if (on) R.string.vault_on_done else R.string.vault_off_done), android.widget.Toast.LENGTH_LONG).show()
         }

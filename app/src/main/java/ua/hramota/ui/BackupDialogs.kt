@@ -120,7 +120,7 @@ fun BackupDialog(kept: List<LibraryEntry>, shelves: List<ShelfDef>, onCreate: (C
 
 /** The password of a backup being restored. */
 @Composable
-fun RestoreDialog(wrong: Boolean, onRestore: (CharArray) -> Unit, onDismiss: () -> Unit) {
+fun RestoreDialog(problem: ua.hramota.data.Backup.Reason?, onRestore: (CharArray) -> Unit, onDismiss: () -> Unit) {
     var password by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -129,7 +129,12 @@ fun RestoreDialog(wrong: Boolean, onRestore: (CharArray) -> Unit, onDismiss: () 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.backup_restore_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 PasswordField(password, { password = it }, stringResource(R.string.backup_password))
-                if (wrong) Text(stringResource(R.string.backup_wrong), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                if (problem != null) Text(stringResource(when (problem) {
+                    ua.hramota.data.Backup.Reason.NOT_A_BACKUP -> R.string.backup_not_backup
+                    ua.hramota.data.Backup.Reason.NO_SPACE -> R.string.backup_no_space
+                    ua.hramota.data.Backup.Reason.LOCKED -> R.string.backup_locked
+                    else -> R.string.backup_wrong
+                }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = { TextButton(enabled = password.isNotEmpty(), onClick = { onRestore(password.toCharArray()) }) { Text(stringResource(R.string.backup_restore_go)) } },

@@ -213,7 +213,6 @@
     <string name="backup_failed">Не вдалося записати резервну копію</string>
     <string name="backup_reading">Читаю резервну копію…</string>
     <string name="backup_restore_hint">Вміст копії поєднується з тим, що є: нічого не видаляється.</string>
-    <string name="backup_wrong">Неправильний пароль або це не резервна копія Грамоти</string>
     <string name="backup_restore_go">Відновити</string>
     <string name="backup_restored">Відновлено: нових %1$d, поєднано %2$d, документів %3$d</string>
     <string name="vault_failed">Не вдалося. Нічого не втрачено, спробуйте ще раз.</string>
@@ -221,4 +220,8 @@
     <string name="vault_key_lost">Телефон більше не має ключа до сховища (блокування екрана зняли або змінили захист). Замкнене не відкрити нікому.</string>
     <string name="vault_start_over">Почати заново</string>
     <string name="vault_start_over_confirm">Замкнена пам\'ять, полиці й збережені копії буде видалено. Документів в інших місцях це не торкнеться. Якщо є резервна копія, її можна буде відновити.</string>
+    <string name="backup_wrong">Неправильний пароль або копію пошкоджено</string>
+    <string name="backup_not_backup">Це не резервна копія Грамоти</string>
+    <string name="backup_no_space">Бракує місця на телефоні</string>
+    <string name="backup_locked">Грамота тим часом замкнулася: відімкніть і спробуйте ще раз</string>
 </resources>

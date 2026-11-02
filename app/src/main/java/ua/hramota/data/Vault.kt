@@ -65,6 +65,11 @@ object Vault {
     private val busy = java.util.concurrent.atomic.AtomicInteger()
 
     fun <T> holding(block: () -> T): T { busy.incrementAndGet(); try { return block() } finally { busy.decrementAndGet() } }
+    fun hold() { busy.incrementAndGet() }
+    fun release() { busy.updateAndGet { maxOf(0, it - 1) } }
+
+    /** One change at a time: turning on or off, a backup, a restore. */
+    val work = kotlinx.coroutines.sync.Mutex()
 
     /** Locks now, unless work holding the key is under way; returns whether it locked. */
     fun lock(context: Context): Boolean {
@@ -106,7 +111,8 @@ object Vault {
         if (stored.size < 13 || buf.get() != VERSION) return Outcome.KEY_LOST
         val iv = ByteArray(12).also { buf.get(it) }
         val wrapped = ByteArray(buf.remaining()).also { buf.get(it) }
-        val kek = kek() ?: return Outcome.KEY_LOST
+        // Lost only when the phone truly no longer holds the key; a passing error is just "not now"
+        val kek = kek() ?: return if (hasKek() == false) Outcome.KEY_LOST else Outcome.NOT_CONFIRMED
         if (!confirm(activity, title, subtitle)) return Outcome.CANCELLED
         val raw = try {
             Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, kek, GCMParameterSpec(128, iv)) }.doFinal(wrapped)
@@ -164,6 +170,8 @@ object Vault {
     }
 
     private const val VERSION: Byte = 1
+
+    private fun hasKek(): Boolean? = try { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(ALIAS) } catch (e: Exception) { null }
 
     private fun kek(): SecretKey? = try {
         KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey(ALIAS, null) as? SecretKey

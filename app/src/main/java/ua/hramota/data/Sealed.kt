@@ -126,6 +126,14 @@ object Sealed {
             buf.fill(0)
             out.close()
         }
+
+        /** Stops without sealing the last segment: what was written will never open as complete. */
+        fun abort() {
+            if (closed) return
+            closed = true
+            buf.fill(0)
+            try { out.close() } catch (_: Exception) {}
+        }
     }
 
     /** Opening as data is read; a damaged file throws [IOException] before any of its damaged part is given out. */
