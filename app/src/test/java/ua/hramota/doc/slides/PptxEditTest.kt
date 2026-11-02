@@ -44,4 +44,40 @@ class PptxEditTest {
         // Other slides untouched
         assertEquals(part(bytes(), "ppt/slides/slide1.xml"), part(out, "ppt/slides/slide1.xml"))
     }
+
+    /** The test presentation with slide 2 changed by [change]. */
+    private fun withSlide2(change: (String) -> String): ByteArray {
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            ZipInputStream(ByteArrayInputStream(bytes())).use { zin ->
+                while (true) {
+                    val e = zin.nextEntry ?: break
+                    val data = zin.readBytes()
+                    z.putNextEntry(java.util.zip.ZipEntry(e.name))
+                    z.write(if (e.name == "ppt/slides/slide2.xml") change(String(data)).toByteArray() else data)
+                    z.closeEntry()
+                }
+            }
+        }
+        return out.toByteArray()
+    }
+
+    @Test fun animatedParagraphsAreNotSplitAndQuotedAttributesStayValid() {
+        val src = withSlide2 { x ->
+            x.replace("<a:r><a:t>Перегляд", "<a:r><a:rPr lang='uk-UA' b='0'/><a:t>Перегляд")
+                .replace("</p:sld>", "<p:timing><p:bldLst><p:bldP spid=\"3\" grpId=\"0\" build=\"p\"/></p:bldLst></p:timing></p:sld>")
+        }
+        val edit = PptxEdit.open(ByteArrayInputStream(src))
+        val i = edit.paragraphs.indexOfFirst { it.text.startsWith("Перегляд") }
+        val p = edit.paragraphs[i]
+        assertTrue(!edit.canSplit(p))
+        assertTrue(!edit.canJoin(edit.paragraphs[i], edit.paragraphs[i + 1]))
+        val list = edit.paragraphs.toMutableList()
+        list[i] = p.changed(marks = p.marks.map { edit.restyle(it, bold = true) })
+        val out = ByteArrayOutputStream().also { edit.save(list, ByteArrayInputStream(src), it) }.toByteArray()
+        val x = part(out, "ppt/slides/slide2.xml")!!
+        // One "b" attribute, the new one
+        assertTrue(x, x.contains("<a:rPr lang=\"uk-UA\" b=\"1\"/>"))
+        PptxReader.read(ByteArrayInputStream(out))
+    }
 }

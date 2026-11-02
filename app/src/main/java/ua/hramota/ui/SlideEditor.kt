@@ -122,7 +122,9 @@ class SlideEditorState(val edit: PptxEdit) {
         val style = pending ?: p.marks.getOrNull(pre - 1) ?: p.marks.getOrNull(pre) ?: p.typing
         val marks = ArrayList<RunStyle>(text.length)
         marks.addAll(p.marks.subList(0, pre)); repeat(text.length - pre - suf) { marks += style }; marks.addAll(p.marks.subList(old.length - suf, old.length))
-        var cur = p.changed(text = text, marks = marks)
+        // Where an animation counts paragraphs, Enter gives no new one: a line break instead
+        val t2 = if (edit.canSplit(p)) text else text.replace('\n', PptxEdit.LINE)
+        var cur = p.changed(text = t2, marks = marks)
         val parts = ArrayList<SlidePara>()
         while (true) {
             val nl = cur.text.indexOf('\n'); if (nl < 0) break
