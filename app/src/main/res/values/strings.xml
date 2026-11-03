@@ -326,9 +326,9 @@
     <string name="rows_insert_below">Insert row below</string>
     <string name="rows_delete">Delete row %1$d</string>
     <string name="rows_failed">Couldn’t change the rows.</string>
-    <string name="rows_refused_workbook">This workbook has charts or pivot tables: rows can’t be inserted or deleted here, as those wouldn’t move with them.</string>
-    <string name="rows_refused_sheet">This sheet has pictures, charts, notes or tables: rows can’t be inserted or deleted here, as those wouldn’t move with them.</string>
-    <string name="rows_refused_locked">This sheet has array formulas or data tables: rows aren’t inserted or deleted here.</string>
+    <string name="rows_refused_workbook">This workbook has charts, pivot tables, slicers or external data: rows can’t be inserted or deleted here, as those wouldn’t move with them.</string>
+    <string name="rows_refused_sheet">This sheet has pictures, charts, notes, tables, controls or extended formatting: rows can’t be inserted or deleted here, as those wouldn’t move with them.</string>
+    <string name="rows_refused_locked">The workbook has array formulas, data tables or shared formulas over whole rows or columns: rows can’t be inserted or deleted here.</string>
     <string name="rows_refused_formulas">Some formulas refer to several sheets at once: rows aren’t inserted or deleted here.</string>
     <string name="rows_refused_full">The sheet is full to its last row: there is no room for another.</string>
     <string name="create_exists">That file already exists: choose a new name.</string>

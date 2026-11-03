@@ -470,13 +470,21 @@ class SheetEditing(
     val enabled: Boolean = true,
     /** Inserts a row above or below ([below]), or deletes it ([delete]); null where rows are not changed. */
     val rows: ((sheet: Int, row: Int, delete: Boolean, below: Boolean) -> Unit)? = null,
+    /** What is being typed, so it is put in when the person goes elsewhere (another cell, saving, back). */
+    val draft: ((sheet: Int, row: Int, col: Int, text: String) -> Unit)? = null,
+    /** The person left the cell: what was typed goes in. */
+    val leave: (() -> Unit)? = null,
+    /** Changes with every change to the workbook: the field reads the cell again (after undo, say). */
+    val version: Int = 0,
 )
 
 /** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */
 @Composable
 private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
     val ref = "${columnName(col)}${row + 1}"
-    var value by androidx.compose.runtime.saveable.rememberSaveable(sheet, row, col, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
+    // Read again when the workbook changed or rows stopped moving (a field opened meanwhile was empty)
+    var value by androidx.compose.runtime.saveable.rememberSaveable(sheet, row, col, editing.version, editing.enabled, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
+    androidx.compose.runtime.DisposableEffect(sheet, row, col) { onDispose { editing.leave?.invoke() } }
     var refused by remember(sheet, row, col) { mutableStateOf(false) }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     fun put(): Boolean {
@@ -489,7 +497,7 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
             Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 10.dp))
             androidx.compose.material3.OutlinedTextField(
                 value = value,
-                onValueChange = { value = it; refused = false },
+                onValueChange = { value = it; refused = false; editing.draft?.invoke(sheet, row, col, it.text) },
                 singleLine = true,
                 enabled = editing.enabled,
                 isError = refused,

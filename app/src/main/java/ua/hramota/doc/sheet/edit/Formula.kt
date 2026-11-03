@@ -153,7 +153,15 @@ object Formula {
                 }
                 return Node.Cell(a)
             }
-            if (sheet != null) { supported = false; i = s.length; return Node.E("#REF!") }
+            // Whole columns or rows ("Дані!A:A", "B:C", "Дані!1:3") and a sheet's names: read past, not worked out here
+            // (the rest of the formula is still read, so a wrong one is not taken)
+            val whole = Regex("\\$?[A-Za-z]{1,3}:\\$?[A-Za-z]{1,3}(?![A-Za-z0-9_(])|\\$?[0-9]{1,7}:\\$?[0-9]{1,7}(?![0-9])").matchAt(s, i)
+            if (whole != null) { i += whole.value.length; supported = false; return Node.E("#REF!") }
+            if (sheet != null) {
+                val named = Regex("[\\p{L}_][\\w.\\p{L}]*|#REF!").matchAt(s, i) ?: throw IllegalStateException("Sheet reference")
+                if (i + named.value.length < s.length && s[i + named.value.length] == '(') throw IllegalStateException("Sheet reference")
+                i += named.value.length; supported = false; return Node.E("#REF!")
+            }
             val m = Regex("[A-Za-z_][A-Za-z0-9_.]*").matchAt(s, i) ?: throw IllegalStateException("Name at $start")
             val name = m.value.uppercase()
             i += m.value.length
@@ -202,10 +210,12 @@ object Formula {
         // Written as stored (commas between arguments) and readable so: kept; otherwise commas are decimal marks
         if (';' !in typed && parse(typed.trim()).node != null) return typed.trim()
         val b = StringBuilder()
-        var inString = false
+        // Strings and quoted sheet names ('Звіт, 2024'!A1) are copied as they are
+        var quote = 0.toChar()
         for (c in typed.trim()) {
-            if (c == '"') inString = !inString
-            b.append(if (inString) c else when (c) { ';' -> ','; ',' -> '.'; else -> c })
+            if (quote != 0.toChar()) { if (c == quote) quote = 0.toChar(); b.append(c); continue }
+            if (c == '"' || c == '\'') { quote = c; b.append(c); continue }
+            b.append(when (c) { ';' -> ','; ',' -> '.'; else -> c })
         }
         return b.toString()
     }
@@ -279,7 +289,7 @@ object Formula {
      * without a sheet) follow their rows; one wholly deleted becomes #REF!. Null when the formula has
      * references this cannot follow (several sheets at once).
      */
-    fun moveRows(text: String, own: Boolean, target: String, move: RowMove): String? {
+    fun moveRows(text: String, own: Boolean, target: String, move: RowMove, affected: BooleanArray? = null): String? {
         val b = StringBuilder(text.length + 8)
         var i = 0
         var sheet: String? = null   // the sheet named just before (for the reference that follows)
@@ -338,6 +348,8 @@ object Formula {
                         val g = rr.groupValues
                         val top = g[2].toInt() - 1; val bottom = g[4].toInt() - 1
                         val moved = move.range(minOf(top, bottom), maxOf(top, bottom))
+                        // What it refers to now holds less (rows deleted inside it): its value may differ
+                        if (moved == null || (move.n < 0 && moved.second - moved.first != maxOf(top, bottom) - minOf(top, bottom))) affected?.set(0, true)
                         if (moved == null) b.append("#REF!") else b.append(g[1]).append(moved.first + 1).append(':').append(g[3]).append(moved.second + 1)
                     }
                     i += rr.value.length
@@ -349,10 +361,12 @@ object Formula {
                     if (!applies) b.append(m.value)
                     else if (g[6].isEmpty()) {
                         val r = move.row(g[4].toInt() - 1)
+                        if (r == null) affected?.set(0, true)
                         if (r == null) b.append("#REF!") else b.append(g[1]).append(g[2]).append(g[3]).append(r + 1)
                     } else {
                         val r1 = g[4].toInt() - 1; val r2 = g[8].toInt() - 1
                         val moved = move.range(minOf(r1, r2), maxOf(r1, r2))
+                        if (moved == null || (move.n < 0 && moved.second - moved.first != maxOf(r1, r2) - minOf(r1, r2))) affected?.set(0, true)
                         if (moved == null) b.append("#REF!")
                         else {
                             val (t, bt) = if (r1 <= r2) moved else moved.second to moved.first
@@ -387,7 +401,10 @@ object Formula {
     private class Ctx(val cells: Cells, var budget: Int)
 
     /** Works out [node]. A range where one value is expected gives #VALUE!. */
-    fun eval(node: Node, cells: Cells): Value = try { scalar(node, Ctx(cells, 2_000_000)) } catch (e: Budget) { Value.NUM } catch (e: Exception) { Value.VALUE }
+    /** Too much to work out here (a whole column, say): the value is left to Excel. */
+    class TooBig : Exception()
+
+    fun eval(node: Node, cells: Cells): Value = try { scalar(node, Ctx(cells, 2_000_000)) } catch (e: Budget) { throw TooBig() } catch (e: TooBig) { throw e } catch (e: Exception) { Value.VALUE }
 
     private class Budget : RuntimeException()
 
@@ -617,7 +634,9 @@ object Formula {
                 val test = criterion(arg(1))
                 val checked = values(range, c).map { it.first }.toList()
                 if (name == "COUNTIF") return Value.Num(checked.count(test).toDouble())
-                val sumRange = (args.getOrNull(2) as? Node.Range)?.let { s ->
+                // A single cell as the sum range stands for its top left (as in Excel)
+                val sumArg = args.getOrNull(2).let { if (it is Node.Cell) Node.Range(it.ref, it.ref) else it }
+                val sumRange = (sumArg as? Node.Range)?.let { s ->
                     // The sum range takes the shape of the checked one, from its own top left
                     val h = maxOf(range.from.row, range.to.row) - minOf(range.from.row, range.to.row)
                     val w = maxOf(range.from.col, range.to.col) - minOf(range.from.col, range.to.col)
@@ -654,17 +673,65 @@ object Formula {
 }
 
 /** Functions newer than Excel 2007 are stored with this prefix (Excel shows #NAME? without it). */
-internal val NEW_FUNCTIONS = setOf("CONCAT")
+internal val NEW_FUNCTIONS = setOf(
+    "ACOT", "ACOTH", "AGGREGATE", "ARABIC", "BASE", "BETA.DIST", "BETA.INV", "BINOM.DIST", "BINOM.DIST.RANGE", "BINOM.INV", "BITAND", "BITLSHIFT",
+    "BITOR", "BITRSHIFT", "BITXOR", "CEILING.MATH", "CEILING.PRECISE", "CHISQ.DIST", "CHISQ.DIST.RT", "CHISQ.INV", "CHISQ.INV.RT", "CHISQ.TEST",
+    "COMBINA", "CONCAT", "CONFIDENCE.NORM", "CONFIDENCE.T", "COT", "COTH", "COVARIANCE.P", "COVARIANCE.S", "CSC", "CSCH", "DAYS", "DECIMAL",
+    "ERF.PRECISE", "ERFC.PRECISE", "EXPON.DIST", "F.DIST", "F.DIST.RT", "F.INV", "F.INV.RT", "F.TEST", "FILTERXML", "FLOOR.MATH", "FLOOR.PRECISE",
+    "FORECAST.ETS", "FORECAST.ETS.CONFINT", "FORECAST.ETS.SEASONALITY", "FORECAST.ETS.STAT", "FORECAST.LINEAR", "FORMULATEXT", "GAMMA",
+    "GAMMA.DIST", "GAMMA.INV", "GAMMALN.PRECISE", "GAUSS", "HYPGEOM.DIST", "IFNA", "IFS", "IMCOSH", "IMCOT", "IMCSC", "IMCSCH", "IMSEC", "IMSECH",
+    "IMSINH", "IMTAN", "ISFORMULA", "ISOWEEKNUM", "LOGNORM.DIST", "LOGNORM.INV", "MAXIFS", "MINIFS", "MODE.MULT", "MODE.SNGL", "MUNIT",
+    "NEGBINOM.DIST", "NORM.DIST", "NORM.INV", "NORM.S.DIST", "NORM.S.INV", "NUMBERVALUE", "PDURATION", "PERCENTILE.EXC", "PERCENTILE.INC",
+    "PERCENTRANK.EXC", "PERCENTRANK.INC", "PERMUTATIONA", "PHI", "POISSON.DIST", "QUARTILE.EXC", "QUARTILE.INC", "RANK.AVG", "RANK.EQ", "RRI",
+    "SEC", "SECH", "SHEET", "SHEETS", "SKEW.P", "STDEV.P", "STDEV.S", "SWITCH", "T.DIST", "T.DIST.2T", "T.DIST.RT", "T.INV", "T.INV.2T", "T.TEST",
+    "TEXTJOIN", "UNICHAR", "UNICODE", "VAR.P", "VAR.S", "WEIBULL.DIST", "XOR", "Z.TEST",
+    // Dynamic arrays and newer text functions
+    "XLOOKUP", "XMATCH", "SORTBY", "UNIQUE", "SEQUENCE", "RANDARRAY", "LET", "LAMBDA", "TEXTBEFORE", "TEXTAFTER", "TEXTSPLIT", "VSTACK", "HSTACK",
+    "TOCOL", "TOROW", "WRAPROWS", "WRAPCOLS", "TAKE", "DROP", "CHOOSEROWS", "CHOOSECOLS", "EXPAND", "ARRAYTOTEXT", "VALUETOTEXT", "ISOMITTED",
+    "BYROW", "BYCOL", "MAP", "REDUCE", "SCAN", "MAKEARRAY",
+)
 
-/** Formula text for the file: newer functions get Excel's prefix. */
-internal fun Formula.stored(text: String): String = NEW_FUNCTIONS.fold(text) { t, f -> t.replace(Regex("(?<![\\w.])$f\\(", RegexOption.IGNORE_CASE), "_xlfn.$f(") }
+/** Functions Excel stores with a second prefix ("_xlfn._xlws."). */
+private val WORKSHEET_FUNCTIONS = setOf("FILTER", "SORT")
+
+/**
+ * Formula text for the file: newer functions get Excel's prefix (without it Excel shows #NAME?).
+ * Text in quotes is left as it is.
+ */
+internal fun Formula.stored(text: String): String {
+    val b = StringBuilder(text.length + 16)
+    var i = 0
+    while (i < text.length) {
+        val c = text[i]
+        if (c == '"' || c == '\'') {
+            val j = text.indexOf(c, i + 1).let { if (it < 0) text.length - 1 else it }
+            b.append(text, i, j + 1); i = j + 1; continue
+        }
+        if ((c.isLetter() || c == '_') && (i == 0 || !(text[i - 1].isLetterOrDigit() || text[i - 1] == '_' || text[i - 1] == '.'))) {
+            var e = i
+            while (e < text.length && (text[e].isLetterOrDigit() || text[e] == '_' || text[e] == '.')) e++
+            val name = text.substring(i, e)
+            if (e < text.length && text[e] == '(') {
+                val u = name.uppercase()
+                when {
+                    u in WORKSHEET_FUNCTIONS -> b.append("_xlfn._xlws.").append(name)
+                    u in NEW_FUNCTIONS -> b.append("_xlfn.").append(name)
+                    else -> b.append(name)
+                }
+            } else b.append(name)
+            i = e; continue
+        }
+        b.append(c); i++
+    }
+    return b.toString()
+}
 
 /**
  * Formula text as shown to type over: without Excel's prefixes, and, where the decimal mark is a comma,
  * with ";" between arguments and "," in numbers (strings and sheet names as they are).
  */
 internal fun Formula.typed(text: String, decimalComma: Boolean): String {
-    val t = text.replace("_xlfn.", "", ignoreCase = true)
+    val t = text.replace("_xlfn.", "", ignoreCase = true).replace("_xlws.", "", ignoreCase = true)
     if (!decimalComma) return t
     val b = StringBuilder()
     var quote = 0.toChar()

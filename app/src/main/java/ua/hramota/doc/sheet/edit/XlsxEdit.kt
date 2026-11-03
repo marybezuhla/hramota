@@ -77,8 +77,13 @@ class XlsxEdit private constructor(
         internal val lockedAreas: MutableList<IntArray> = ArrayList(),
         /** Shared formula groups whose formula cannot be moved cell by cell here (whole rows or columns). */
         internal val lockedShared: Set<String> = emptySet(),
+        /** Looks a whole row or column gives its cells (a new cell takes them, as in Excel). */
+        internal val rowStyles: Map<Int, String> = emptyMap(),
+        internal val colStyles: List<Triple<Int, Int, String>> = emptyList(),
     ) {
         internal fun cell(row: Int, col: Int) = cells[key(row, col)]
+        /** The look a cell has: its own, else its row's, else its column's. */
+        internal fun styleOf(row: Int, col: Int): String? = cell(row, col)?.s ?: rowStyles[row] ?: colStyles.firstOrNull { col in it.first..it.second }?.third
     }
 
     private val inputs = HashMap<CellKey, Input>()
@@ -128,7 +133,7 @@ class XlsxEdit private constructor(
     }
 
     /** The cell's style number (cellXfs), as the file has it. */
-    fun style(cell: CellKey): Int? = sheets.getOrNull(cell.sheet)?.cell(cell.row, cell.col)?.s?.toIntOrNull()
+    fun style(cell: CellKey): Int? = sheets.getOrNull(cell.sheet)?.styleOf(cell.row, cell.col)?.toIntOrNull()
 
     private fun rawValue(raw: RawCell): Value = when (raw.t) {
         "s" -> raw.v?.trim()?.toIntOrNull()?.let { strings.getOrNull(it) }?.let { Value.Text(it) } ?: Value.Empty
@@ -211,6 +216,10 @@ class XlsxEdit private constructor(
     fun recalc(): Map<CellKey, Value> {
         // What was typed, taken at once: the screen can go on changing cells while this works
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
+        return recalcOf(snapshot)
+    }
+
+    private fun recalcOf(snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout>): Map<CellKey, Value> {
         // A long chain of formulas (each row adding to the one above) is followed by recursion:
         // done on a thread with room for it, so it never overflows the caller's stack
         var result: Map<CellKey, Value>? = null
@@ -259,7 +268,10 @@ class XlsxEdit private constructor(
                         // A cell that refers back to itself (through others) is a circle: 0, as Excel shows it, not a hang
                         if (!busy.add(k)) return Value.Num(0.0)
                         val saved = own; own = k.sheet
-                        try { Formula.eval(parsed.node, this) } finally { own = saved; busy.remove(k) }
+                        try { Formula.eval(parsed.node, this) }
+                        // Too much to work out here: the file's value stays (Excel works it out on opening)
+                        catch (e: Formula.TooBig) { sheets.getOrNull(k.sheet)?.cell(k.row, k.col)?.takeIf { k !in inputs }?.let { rawValue(it) } ?: Value.NAME }
+                        finally { own = saved; busy.remove(k) }
                     }
                     else -> when (val i = inputs[k]) {
                         // A formula whose rows moved and that is not worked out here: its old value no longer holds (Excel works it out on opening)
@@ -292,7 +304,11 @@ class XlsxEdit private constructor(
         if (t.isEmpty()) return Input.Clear
         if (t.startsWith("'")) return Input.Text(t.substring(1))
         // A formula that cannot be read is refused (Excel would call the file damaged)
-        if (t.startsWith("=") && t.length > 1) return Formula.normalize(t.substring(1)).takeIf { Formula.parse(it).node != null }?.let { Input.Formula(it) }
+        // (one naming a sheet the workbook does not have, too)
+        if (t.startsWith("=") && t.length > 1) return Formula.normalize(t.substring(1)).takeIf { f ->
+            val node = Formula.parse(f).node ?: return@takeIf false
+            refsOf(sheets, node, 0).none { it.first < 0 }
+        }?.let { Input.Formula(it) }
         Formula.parseNumber(t)?.let { return Input.Number(it) }
         when (t.trim().uppercase()) { "TRUE", "ІСТИНА" -> return Input.Bool(true); "FALSE", "ХИБНІСТЬ" -> return Input.Bool(false) }
         if (dateCell) Regex("\\s*(\\d{1,2})[./](\\d{1,2})[./](\\d{4})\\s*").matchEntire(t)?.let { m ->
@@ -403,8 +419,8 @@ class XlsxEdit private constructor(
     }
 
     private fun setAttr(tag: String, attr: String, value: String): String {
-        val re = Regex("(\\s$attr=\")[^\"]*(\")")
-        return if (re.containsMatchIn(tag)) tag.replace(re) { it.groupValues[1] + XmlScan.escape(value) + it.groupValues[2] }
+        val re = Regex("(\\s$attr=)(?:\"[^\"]*\"|'[^']*')")
+        return if (re.containsMatchIn(tag)) tag.replace(re) { it.groupValues[1] + "\"" + XmlScan.escape(value) + "\"" }
             else tag.replaceFirst(Regex("^(<[^\\s>/]+)"), "$1 $attr=\"${XmlScan.escape(value)}\"")
     }
 
@@ -438,9 +454,11 @@ class XlsxEdit private constructor(
                     val unshare = HashSet<String>()
                     for ((k, c) in sh.cells) {
                         val f = c.f ?: continue
-                        val t = moved(f, isTarget, target, move)
+                        val hit = BooleanArray(1)
+                        val t = Formula.moveRows(f, isTarget, target, move, hit) ?: throw Refused(RowRefusal.FORMULAS)
+                        // Worked out again only when what it refers to lost rows (moved references give the same value)
+                        if (hit[0]) textChanged += k
                         if (t != f) {
-                            textChanged += k
                             // A shared formula with whole rows is not moved cell by cell here
                             if (c.fKind == "shared" && c.si in sh.lockedShared) throw Refused(RowRefusal.LOCKED)
                         }
@@ -585,10 +603,12 @@ class XlsxEdit private constructor(
     // --- Saving ---
 
     /** Writes the edited workbook: the package is read again from [source] and copied entry by entry. Off the main thread. */
-    @Synchronized
     fun save(source: InputStream, out: OutputStream) {
-        val values = recalc()
-        val l = layout
+        // Taken at once, and worked on without holding the workbook: the screen does not wait for the save
+        val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
+        val inputs = snapshot.first
+        val values = recalcOf(snapshot)
+        val l = snapshot.third
         val sheets = l.sheets
         val parts = HashMap<String, String>(l.overrides)
         var formulasChanged = l.moved
@@ -645,7 +665,7 @@ class XlsxEdit private constructor(
                 val k = CellKey(si, r, c)
                 val raw = sh.cell(r, c)
                 if (raw == null && existingCols[c] == null) grew = true
-                val xml = cellXml(x, p, r, c, raw, inputs[k], values[k], raw?.si in unshare)
+                val xml = cellXml(x, p, r, c, raw, inputs[k], values[k], raw?.si in unshare, if (raw == null) sh.styleOf(r, c) else null)
                 if (xml == null) cells.remove(c) else cells[c] = xml
             }
             val start = if (rowElem != null) x.substring(rowElem.start, rowElem.openEnd).let { if (rowElem.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }
@@ -680,9 +700,9 @@ class XlsxEdit private constructor(
     }
 
     /** A cell written anew; null when it is to go (cleared, with no style to keep). */
-    private fun cellXml(x: String, p: String, row: Int, col: Int, raw: RawCell?, input: Input?, value: Value?, unshared: Boolean): String? {
+    private fun cellXml(x: String, p: String, row: Int, col: Int, raw: RawCell?, input: Input?, value: Value?, unshared: Boolean, inherited: String? = null): String? {
         val ref = columnName(col) + (row + 1)
-        val s = raw?.s?.let { " s=\"${XmlScan.escape(it)}\"" } ?: ""
+        val s = (raw?.s ?: inherited)?.takeIf { it != "0" || raw?.s != null }?.let { " s=\"${XmlScan.escape(it)}\"" } ?: ""
         fun v(text: String) = "<${p}v>${XmlScan.escape(text)}</${p}v>"
         fun stored(d: Double): String = if (d == Math.floor(d) && Math.abs(d) < 1e15) d.toLong().toString() else d.toString()
         fun withValue(f: String, value: Value?): String = when (value) {
@@ -693,7 +713,7 @@ class XlsxEdit private constructor(
             Value.Empty, null -> "<${p}c r=\"$ref\"$s>$f</${p}c>"
         }
         return when (input) {
-            Input.Clear -> if (s.isEmpty()) null else "<${p}c r=\"$ref\"$s/>"
+            Input.Clear -> if (s.isEmpty() || raw == null) null else "<${p}c r=\"$ref\"$s/>"
             is Input.Number -> "<${p}c r=\"$ref\"$s>${v(stored(input.v))}</${p}c>"
             is Input.Text -> "<${p}c r=\"$ref\"$s t=\"inlineStr\"><${p}is><${p}t xml:space=\"preserve\">${XmlScan.escape(input.v)}</${p}t></${p}is></${p}c>"
             is Input.Bool -> "<${p}c r=\"$ref\"$s t=\"b\">${v(if (input.v) "1" else "0")}</${p}c>"
@@ -752,9 +772,10 @@ class XlsxEdit private constructor(
             while (true) {
                 val e = zip.nextEntry ?: break
                 if (++count > MAX_ENTRIES) throw IOException("Too many entries")
-                val name = e.name
+                // Parts are known by their name without a leading "/" (as when the file was opened)
+                val name = e.name.removePrefix("/")
                 if (name in dropped || !written.add(name)) continue
-                z.putNextEntry(ZipEntry(name).apply { e.time.takeIf { it > 0 }?.let { time = it } })
+                z.putNextEntry(ZipEntry(e.name).apply { e.time.takeIf { it > 0 }?.let { time = it } })
                 val replaced = parts[name]
                 if (replaced != null) {
                     // A part changed here must still be the one opened
@@ -782,8 +803,8 @@ class XlsxEdit private constructor(
         const val SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
         /** Largest sheet part opened for editing (its text is held in memory). */
         const val MAX_PART = 48L * 1024 * 1024
-        /** Most cells across the workbook for editing. */
-        const val MAX_CELLS = 1_500_000
+        /** Most cells across the workbook for editing (each takes some hundreds of bytes while open). */
+        const val MAX_CELLS = 400_000
         private const val MAX_TOTAL = 1024L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
 
@@ -914,8 +935,20 @@ class XlsxEdit private constructor(
             val locked = ArrayList<IntArray>()
             for (c in cells.values) if (c.fKind == "array" || c.fKind == "dataTable") c.fElem?.attrs?.get("ref")?.let(::area)?.let { locked += it }
             val wholeRefs = Regex("(?<![A-Za-z0-9_])\\$?[A-Za-z]{1,3}:\\$?[A-Za-z]{1,3}(?![A-Za-z0-9_(])|(?<![A-Za-z0-9_.])\\$?[0-9]{1,7}:\\$?[0-9]{1,7}(?![0-9])")
-            val lockedShared = masters.filterValues { wholeRefs.containsMatchIn(it.first) }.keys
-            return SheetPart(name, path, visible, xml, p, sd, rows, cells, locked, lockedShared)
+            // (text in quotes, "8:30" say, is not a reference)
+            val lockedShared = masters.filterValues { wholeRefs.containsMatchIn(it.first.replace(Regex("\"[^\"]*\""), "\"\"")) }.keys
+            val rowStyles = HashMap<Int, String>()
+            for ((ri, r) in rows) if (r.attrs["customFormat"].let { it == "1" || it == "true" }) r.attrs["s"]?.let { rowStyles[ri] = it }
+            val colStyles = ArrayList<Triple<Int, Int, String>>()
+            XmlScan.children(xml, root).firstOrNull { it.local == "cols" }?.let { cols ->
+                for (c in XmlScan.children(xml, cols)) {
+                    if (c.local != "col") continue
+                    val st = c.attrs["style"] ?: continue
+                    val min = c.attrs["min"]?.toIntOrNull() ?: continue; val max = c.attrs["max"]?.toIntOrNull() ?: continue
+                    colStyles += Triple(min - 1, max - 1, st)
+                }
+            }
+            return SheetPart(name, path, visible, xml, p, sd, rows, cells, locked, lockedShared, rowStyles, colStyles)
         }
 
         /** "B2:D5" (or "B2") as [top, left, bottom, right]; null if unreadable. */
