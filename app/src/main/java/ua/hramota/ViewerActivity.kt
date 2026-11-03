@@ -171,6 +171,19 @@ open class ViewerActivity : ComponentActivity() {
                             throw e
                         }
                     }
+                    // A file named by a code (as messengers name attachments) is remembered by its first line instead
+                    LaunchedEffect(state, docId) {
+                        val id = docId ?: return@LaunchedEffect
+                        if (!CODE_NAME.matches(name.substringBeforeLast('.', name))) return@LaunchedEffect
+                        val first = when (val st = state) {
+                            is ViewerState.Paged -> st.reading?.firstOrNull { it.text.isNotBlank() }?.text
+                            is ViewerState.Reader -> st.book.title.takeIf { it.isNotBlank() }
+                            is ViewerState.Text -> st.paragraphs.firstOrNull { it.text.isNotBlank() }?.text
+                            else -> null
+                        }?.replace(Regex("\\s+"), " ")?.trim()?.take(60) ?: return@LaunchedEffect
+                        val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+                        library.update(id) { it?.copy(title = first + ext) }
+                    }
                     // A book goes on the shelf with a copy kept inside Hramota, and its cover picture as the cover
                     LaunchedEffect(state, docId) {
                         val book = (state as? ViewerState.Reader)?.book ?: return@LaunchedEffect
@@ -337,6 +350,14 @@ open class ViewerActivity : ComponentActivity() {
                                         Unit
                                     }
                                 },
+                                // The same as a file (Markdown) where the person chooses
+                                (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
+                                    getString(R.string.notes_save_file) to {
+                                        pendingNotes = ua.hramota.ui.notesText(book, name, e!!.notes)
+                                        saveNotesFile.launch(name.substringBeforeLast('.', name) + " — " + getString(R.string.notes_file_suffix) + ".md")
+                                        Unit
+                                    }
+                                },
                             )
                         }.orEmpty(),
                         readSettings = settings,
@@ -399,6 +420,25 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
     private var currentId: String? = null
+
+    // A book's notes waiting for the file the person chooses
+    private var pendingNotes: String? = null
+    private val saveNotesFile = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/markdown")) { target ->
+        val text = pendingNotes ?: return@registerForActivityResult
+        pendingNotes = null
+        if (target == null) return@registerForActivityResult
+        val app = applicationContext
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    // Only into a file just made (one chosen from those already there is not written over)
+                    if (!EditSaving.isEmpty(app, target)) false
+                    else app.contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) } != null
+                } catch (e: Exception) { false }
+            }
+            android.widget.Toast.makeText(app, app.getString(if (ok) R.string.notes_saved else R.string.notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
     private fun startEditing(uri: android.net.Uri, withComments: Boolean = false) {
@@ -756,6 +796,9 @@ open class ViewerActivity : ComponentActivity() {
         /** The viewer to start for a document: in its own window or inside Hramota's, as the person chose. */
         fun viewerClass(context: android.content.Context): Class<out ViewerActivity> =
             if (ua.hramota.data.Settings.get(context).state.value.separateWindows) ViewerActivity::class.java else ViewerInlineActivity::class.java
+
+        /** A name that is only a code (a UUID or a long run of digits and letters), not words. */
+        private val CODE_NAME = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F_-]{24,}")
 
         /** Known only inside this process: proves an own copy was opened by Hramota, not by another app. */
         val TOKEN: String = java.util.UUID.randomUUID().toString()
