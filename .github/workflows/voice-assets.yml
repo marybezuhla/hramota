@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           apt-get update -q >/dev/null && apt-get install -y -q ffmpeg git >/dev/null
           python3 -m pip install -q torch torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
-          python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git@v6.0.0"
+          python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git@v6.0.0" "scipy<1.13"
           python3 -m pip install -q --no-deps "onnx==1.14.1"
           mkdir -p out voice
           python3 -u tools/voices/export_espnet.py 2>&1 | tail -20 | tee out/export.txt

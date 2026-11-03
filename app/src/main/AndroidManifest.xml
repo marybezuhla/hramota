@@ -7,8 +7,17 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
 
+    <!-- Reading aloud goes on with the screen off: Android asks for these two to keep the app playing.
+         They give no access to the network, files or anything else (agreed with the owner, see DECISIONS.md). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
     <!-- Apps that offer something for selected text (a translator, a dictionary); no permission -->
     <queries>
+        <!-- The phone's own voices (text to speech), for reading aloud in other languages -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
@@ -140,5 +149,10 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+        <!-- Reading aloud with the screen off: the controls on the lock screen and in the notifications -->
+        <service
+            android:name=".speech.ReadAloudService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>
