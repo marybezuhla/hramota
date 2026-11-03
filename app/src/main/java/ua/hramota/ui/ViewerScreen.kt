@@ -1,5 +1,6 @@
 package ua.hramota.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
@@ -284,6 +285,41 @@ private fun ViewerContent(
     }
     val hitsByPage = remember(hits) { hits.groupBy { it.page } }
     val currentHit = hits.getOrNull(hitIndex)
+
+    // Reading aloud: the sentence being said is shown like a found match (search, when open, comes first)
+    val readState by ua.hramota.speech.ReadAloud.state.collectAsStateWithLifecycle()
+    val readingHere = readState.document == name
+    val spoken = if (readingHere && !searching && readState.end > readState.start) SearchHit(readState.unit, readState.start, readState.end) else null
+    val shownHit = if (searching) currentHit else spoken
+    val spokenHits = remember(spoken) { spoken?.let { mapOf(it.page to listOf(it)) } ?: emptyMap() }
+    val shownHits = if (searching) hitsByPage else spokenHits
+    // A sentence on another page or paragraph: brought into view (not again for each sentence on the same one)
+    LaunchedEffect(spoken?.page) {
+        val unit = spoken?.page ?: return@LaunchedEffect
+        val l = if (inPages) list else textList
+        val offset = if (state is ViewerState.Text && hasNote(state)) 1 else 0
+        if (state is ViewerState.Reader && readSettings.readPaged) return@LaunchedEffect
+        if (l.layoutInfo.visibleItemsInfo.none { it.index == unit + offset }) l.animateScrollToItem(unit + offset)
+    }
+    val readable = source != null && !overview && (state is ViewerState.Text || state is ViewerState.Reader || state is ViewerState.Paged)
+    var readSheet by remember { mutableStateOf(false) }
+    if (readSheet && readingHere) ReadAloudSheet(
+        readState, chapters = state is ViewerState.Reader,
+        onVoice = { v -> ua.hramota.speech.ReadAloud.setVoice(v); onReadSettings { it.copy(readVoice = v) } },
+        onSpeed = { v -> ua.hramota.speech.ReadAloud.setSpeed(v); onReadSettings { it.copy(readSpeed = v) } },
+    ) { readSheet = false }
+    val startReading: () -> Unit = {
+        val src = source
+        if (src != null) {
+            val book = (state as? ViewerState.Reader)?.book
+            val doc = ua.hramota.speech.ReadAloud.Document(
+                id = name, title = name.substringBeforeLast('.', name), count = { src.count }, text = src.text,
+                isHeading = { i -> (book?.blocks?.getOrNull(i) as? ua.hramota.doc.book.BookBlock.Text)?.kind?.let { it == ua.hramota.doc.book.BookBlock.Kind.HEADING1 || it == ua.hramota.doc.book.BookBlock.Kind.HEADING2 } == true },
+            )
+            val from = if (inPages) list.firstVisibleItemIndex else textList.firstVisibleItemIndex
+            ua.hramota.speech.ReadAloud.start(context, doc, from, 0, readSettings.readSpeed, readSettings.readVoice)
+        }
+    }
     LaunchedEffect(currentHit) {
         val hit = currentHit ?: return@LaunchedEffect
         when {
@@ -320,11 +356,12 @@ private fun ViewerContent(
             onList = { hitList = !hitList },
         ) else TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
             val pageNotes = state is ViewerState.Paged && (state.pages is TextPages) && notes.isNotEmpty()
-            if ((menu.isNotEmpty() || pageNotes) && !overview) {
+            if ((menu.isNotEmpty() || pageNotes || readable) && !overview) {
                 var open by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { open = true }) { Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more)) }
                     androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        if (readable) androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.read_aloud_start)) }, onClick = { open = false; startReading() })
                         if (pageNotes) androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.notes_count, notes.size)) }, onClick = { open = false; notesOpen = true })
                         for ((label, action) in menu) androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
                     }
@@ -386,14 +423,14 @@ private fun ViewerContent(
                     stringResource(R.string.unsupported_title),
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
-                is ViewerState.Text -> TextDocument(state, textList, readSettings.textScale, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                is ViewerState.Text -> TextDocument(state, textList, readSettings.textScale, shownHits, shownHit)
                 is ViewerState.Reader -> Box(Modifier.fillMaxSize()) {
                     // The book stays laid out under the contents, so coming back is instant
                     val paper = paperFor(readSettings.readPaper)
                     val language = remember(state.book) { BookLook.languageOf(state.book) }
                     val look = remember(readSettings, paper, language) { BookLook(readSettings, paper, language) }
                     BookDocument(
-                        state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks,
+                        state.book, textList, look, shownHits, shownHit, bookTarget, bookmarks,
                         notes, onNote, onRemoveNote, onTargetUsed = { bookTarget = null },
                         onFind = { t -> query = t.trim().take(Search.MAX_QUERY); searching = true },
                     )
@@ -406,15 +443,15 @@ private fun ViewerContent(
                         }, notes, onNote, onRemoveNote)
                     }
                 }
-                is ViewerState.Table -> TableDocument(state.table, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                is ViewerState.Table -> TableDocument(state.table, textList, shownHits, shownHit)
                 is ViewerState.Sheets -> WorkbookDocument(
                     state.workbook, sheetIndex, { sheetIndex = it }, sheetState,
-                    if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null,
+                    shownHits, shownHit,
                 )
                 is ViewerState.Paged -> when {
                     reading && state.reading != null -> TextDocument(
                         ViewerState.Text(state.reading, Format.DOCX), textList, readSettings.textScale,
-                        if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, note = false,
+                        shownHits, shownHit, note = false,
                     )
                     overview -> PageOverview(state.pages, bookmarks, current) { page ->
                         overview = false
@@ -422,8 +459,8 @@ private fun ViewerContent(
                     }
                     else -> ZoomablePages(
                         state.pages, list, bookmarks,
-                        hits = if (searching) hitsByPage else emptyMap(),
-                        currentHit = if (searching) currentHit else null,
+                        hits = shownHits,
+                        currentHit = shownHit,
                         selection = selection,
                         onSelection = { selection = it },
                         notes = notes,
@@ -479,6 +516,8 @@ private fun ViewerContent(
             },
             onClose = { selection = null },
         )
+        // The player, under the thumb, while this document is read aloud
+        if (readingHere && selection == null) ReadAloudBar(readState, onBookmark = { onToggleBookmark(readState.unit) }, onSettings = { readSheet = true })
     }
 }
 

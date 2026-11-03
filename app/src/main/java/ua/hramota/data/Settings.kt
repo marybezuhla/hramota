@@ -42,6 +42,9 @@ data class AppSettings(
     val readVolumeKeys: Boolean = true,
     /** Size of text in the reading view and plain text (times the usual). */
     val textScale: Float = 1f,
+    /** Reading aloud: Hramota's own voice ("hramota") or the phone's ("phone"), and the speed (times the usual). */
+    val readVoice: String = "hramota",
+    val readSpeed: Float = 1f,
     /** Each document in its own window (a card in Recents); otherwise inside Hramota's window. */
     val separateWindows: Boolean = false,
     /** The name put on Word comments written here (empty: none). */
@@ -75,6 +78,7 @@ class Settings private constructor(context: Context) {
             .putString("commentAuthor", s.commentAuthor)
             .putBoolean("separateWindows", s.separateWindows)
             .putFloat("textScale", s.textScale)
+            .putString("readVoice", s.readVoice).putFloat("readSpeed", s.readSpeed)
             .apply()
         flow.value = s
     }
@@ -91,6 +95,7 @@ class Settings private constructor(context: Context) {
             put("commentAuthor", s.commentAuthor)
             put("separateWindows", s.separateWindows)
             put("textScale", s.textScale.toDouble())
+            put("readVoice", s.readVoice); put("readSpeed", s.readSpeed.toDouble())
         }
     }
 
@@ -113,6 +118,8 @@ class Settings private constructor(context: Context) {
             commentAuthor = o.optString("commentAuthor", s.commentAuthor).take(100),
             separateWindows = o.optBoolean("separateWindows", s.separateWindows),
             textScale = f("textScale", s.textScale, 0.8f..2.2f),
+            readVoice = o.optString("readVoice", s.readVoice).takeIf { it == "hramota" || it == "phone" } ?: s.readVoice,
+            readSpeed = f("readSpeed", s.readSpeed, 0.5f..2f),
         )
     }
 
@@ -138,6 +145,8 @@ class Settings private constructor(context: Context) {
         commentAuthor = prefs.getString("commentAuthor", "").orEmpty().take(100),
         separateWindows = prefs.getBoolean("separateWindows", false),
         textScale = prefs.getFloat("textScale", 1f).takeIf { it.isFinite() }?.coerceIn(0.8f, 2.2f) ?: 1f,
+        readVoice = prefs.getString("readVoice", "hramota").takeIf { it == "hramota" || it == "phone" } ?: "hramota",
+        readSpeed = prefs.getFloat("readSpeed", 1f).takeIf { it.isFinite() }?.coerceIn(0.5f, 2f) ?: 1f,
     )
 
     companion object {

@@ -85,6 +85,7 @@ open class ViewerActivity : ComponentActivity() {
         // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
         // (direction marks and controls out: a name another app gives must not disguise its file type)
         val name = cleanName((if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri))
+        docName = name
         if (!inline) labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
         // (off the main thread: it asks the file's app for lasting access and writes the list, sealed under lock)
@@ -767,8 +768,12 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
 
+    /** The document's name, as reading aloud knows it (it stops when this window closes for good). */
+    private var docName: String? = null
+
     override fun onDestroy() {
         super.onDestroy()
+        if (isFinishing) docName?.let { ua.hramota.speech.ReadAloud.stop(it) }
         // A sealed copy opened for reading is plain only while it is shown
         val uri = intent.data
         if (isFinishing && uri != null) ua.hramota.data.Shelf.closeOpened(this, uri)

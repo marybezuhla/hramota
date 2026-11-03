@@ -1,0 +1,79 @@
+package ua.hramota.speech
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.channels.FileChannel
+
+class SpeechTest {
+    private val dictionary by lazy {
+        val f = File("src/main/assets/voice/stress.bin")
+        StressDictionary(RandomAccessFile(f, "r").channel.map(FileChannel.MapMode.READ_ONLY, 0, f.length()))
+    }
+    private val text by lazy { UkrainianText(dictionary) }
+
+    @Test fun stressesComeFromTheDictionary() {
+        // The words heard wrong before, and their right stresses
+        val right = mapOf(
+            "шумить" to "шум+ить", "туман" to "тум+ан", "кілометрів" to "кілом+етрів", "пошкодували" to "пошкодув+али",
+            "виставка" to "в+иставка", "листопада" to "листоп+ада", "бібліотеки" to "бібліот+еки", "увечері" to "ув+ечері",
+            "засвітила" to "засвіт+ила", "понеділок" to "понед+ілок", "сказав" to "сказ+ав", "мама" to "м+ама",
+        )
+        for ((w, s) in right) assertEquals(w, s, text.stressed(w))
+        // Capitals and the apostrophe keep their place
+        assertEquals("Бібліот+ека", text.stressed("Бібліотека"))
+        assertEquals("п'+ять", text.stressed("п’ять").replace('’', '\''))
+        // Unknown words are left for the voice
+        assertEquals("хрямзик", text.stressed("хрямзик"))
+    }
+
+    @Test fun neighboursChooseBetweenReadings() {
+        // «за́мок / замо́к»: the dictionary has both; something is always chosen and marked once
+        val z = text.stressed("замок")
+        assertEquals(1, z.count { it == '+' })
+    }
+
+    @Test fun numbersAreWrittenOut() {
+        val n = UkrainianNumbers
+        assertEquals("чотирнадцять", n.cardinal(14))
+        assertEquals("дві тисячі двадцять шість", n.cardinal(2026))
+        assertEquals("одна тисяча", n.cardinal(1000))
+        assertEquals("двадцять третього", n.ordinal(23, UkrainianNumbers.Form.GEN_M))
+        assertEquals("дві тисячі двадцять шостому", n.ordinal(2026, UkrainianNumbers.Form.LOC_M))
+        assertEquals("двохтисячного", n.ordinal(2000, UkrainianNumbers.Form.GEN_M))
+        assertEquals("дев'ятій", n.ordinal(9, UkrainianNumbers.Form.LOC_F))
+        assertEquals("двадцять третього листопада", n.expand("23 листопада"))
+        assertEquals("у дві тисячі двадцять шостому році", n.expand("у 2026 році"))
+        assertEquals("о дев'ятій тридцять", n.expand("о 9:30"))
+        assertEquals("п'ятнадцять відсотків", n.expand("15%"))
+        assertEquals("чотирнадцять кілометрів", n.expand("14 км"))
+        assertEquals("двадцять одна гривня", n.expand("21 грн"))
+        assertEquals("три кілограми", n.expand("3 кг"))
+        assertEquals("двадцять третього листопада дві тисячі двадцять шостого року", n.expand("23.11.2026"))
+        assertEquals("номер дванадцять", n.expand("№ 12"))
+        assertEquals("одна кома п'ять", n.expand("1,5"))
+    }
+
+    @Test fun sentencesAreCutWhereTheyEnd() {
+        fun cut(t: String) = Sentences.split(t).map { t.substring(it.start, it.end) }
+        assertEquals(listOf("Ми пішли.", "Вони лишились!", "Чому?"), cut("Ми пішли. Вони лишились! Чому?"))
+        // Abbreviations, initials and numbers do not end a sentence
+        assertEquals(1, cut("Т. Г. Шевченко народився 1814 р. у селі.").size)
+        assertEquals(1, cut("Книги, зошити, ручки т. д. лежали на столі.").size)
+        assertEquals(1, cut("Ціна 1.5 тис. гривень за все.").size)
+        // A long sentence is cut further, never mid-word
+        val long = (1..60).joinToString(", ") { "слово$it" } + "."
+        val parts = cut(long)
+        assertTrue(parts.size > 1 && parts.all { it.length <= Sentences.LONG + 1 })
+        assertEquals("uk", Sentences.language("Привіт, світе"))
+        assertEquals("en", Sentences.language("Hello, world"))
+    }
+
+    @Test fun preparedTextHasStressesAndNumbers() {
+        val p = text.prepare("Двадцять третього листопада ми пройшли 14 км.")
+        assertTrue(p, p.contains("листоп+ада"))
+        assertTrue(p, p.contains("чотирн+адцять кілом+етрів"))
+    }
+}
