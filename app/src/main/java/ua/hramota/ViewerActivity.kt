@@ -55,22 +55,27 @@ open class ViewerActivity : ComponentActivity() {
     /** In Hramota's own window (not a separate one). */
     private val inline: Boolean get() = this is ViewerInlineActivity
 
-    /** Leaves the document: its own window goes, inside Hramota the home screen shows again. */
-    protected fun leave() { if (inline) finish() else finishAndRemoveTask() }
+    /**
+     * Leaves the document: its own window goes; otherwise Hramota's home screen shows again, also when the
+     * file came from another app (then this window sits in that app's task, which keeps the access it gave).
+     */
+    protected fun leave() {
+        if (!inline) { finishAndRemoveTask(); return }
+        try {
+            val tasks = getSystemService(android.app.ActivityManager::class.java).appTasks
+            if (tasks.none { it.taskInfo.taskId == taskId }) {
+                // Brought to the front as it is: nothing open in Hramota's own window is closed
+                val home = tasks.firstOrNull { it.taskInfo.baseActivity?.className == MainActivity::class.java.name }
+                if (home != null) home.moveToFront()
+                else startActivity(android.content.Intent(this, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        } catch (e: Exception) {}
+        finish()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // A file opened from another app goes into Hramota's window, unless documents have windows of their own
-        if (!inline && !ua.hramota.data.Settings.get(this).state.value.separateWindows && savedInstanceState == null) {
-            val forward = android.content.Intent(this, MainActivity::class.java).setAction(MainActivity.ACTION_OPEN).setData(intent.data)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or (intent.flags and (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)))
-            intent.extras?.let { forward.putExtras(it) }
-            try { startActivity(forward) } catch (e: Exception) {}
-            finishAndRemoveTask()
-            return
-        }
         val uri = intent.data
         // Only documents handed over by address (content://); Hramota's own copies only when Hramota itself asks
         // An address with a "user@" part is refused: Android would ignore it and reach the same files
@@ -180,7 +185,8 @@ open class ViewerActivity : ComponentActivity() {
                             is ViewerState.Reader -> st.book.title.takeIf { it.isNotBlank() }
                             is ViewerState.Text -> st.paragraphs.firstOrNull { it.text.isNotBlank() }?.text
                             else -> null
-                        }?.replace(Regex("\\s+"), " ")?.trim()?.take(60) ?: return@LaunchedEffect
+                        }?.replace(Regex("\\s+"), " ")
+                            ?.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it.isISOControl() }?.trim()?.take(60)?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
                         val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
                         library.update(id) { it?.copy(title = first + ext) }
                     }
@@ -421,21 +427,27 @@ open class ViewerActivity : ComponentActivity() {
     }
     private var currentId: String? = null
 
-    // A book's notes waiting for the file the person chooses
-    private var pendingNotes: String? = null
+    // A book's notes waiting for the file the person chooses (kept when the screen turns meanwhile)
+    private var pendingNotes: String?
+        get() = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java].pendingNotes
+        set(v) { androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java].pendingNotes = v }
     private val saveNotesFile = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/markdown")) { target ->
-        val text = pendingNotes ?: return@registerForActivityResult
+        val text = pendingNotes
         pendingNotes = null
         if (target == null) return@registerForActivityResult
         val app = applicationContext
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) {
+            val ok = text != null && withContext(Dispatchers.IO) {
                 try {
                     // Only into a file just made (one chosen from those already there is not written over)
                     if (!EditSaving.isEmpty(app, target)) false
-                    else app.contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) } != null
+                    else listOf("wt", "w").any { mode ->
+                        try { app.contentResolver.openOutputStream(target, mode)?.use { it.write(text.toByteArray(Charsets.UTF_8)) } != null } catch (e: Exception) { false }
+                    }
                 } catch (e: Exception) { false }
             }
+            // Nothing written (or Hramota was stopped meanwhile and the notes are gone): no empty file is left behind
+            if (!ok) withContext(Dispatchers.IO) { try { EditSaving.removeIfEmpty(app, target) } catch (e: Exception) {} }
             android.widget.Toast.makeText(app, app.getString(if (ok) R.string.notes_saved else R.string.notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
         }
     }
@@ -763,6 +775,7 @@ open class ViewerActivity : ComponentActivity() {
 
     /** What is being edited, kept while the window is made again (the phone turned). */
     class EditHolder : androidx.lifecycle.ViewModel() {
+        var pendingNotes: String? = null
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
         var sheet by mutableStateOf<ua.hramota.ui.SheetEditorState?>(null)
         var slides by mutableStateOf<ua.hramota.ui.SlideEditorState?>(null)
@@ -794,6 +807,18 @@ open class ViewerActivity : ComponentActivity() {
         /** Open straight into editing (a document just made). */
         const val EXTRA_EDIT = "ua.hramota.EDIT"
         /** The viewer to start for a document: in its own window or inside Hramota's, as the person chose. */
+        /** Turns on the entry for files from other apps that matches the setting (see the manifest's aliases). */
+        fun syncEntry(context: android.content.Context, separate: Boolean) {
+            val pm = context.packageManager
+            fun set(name: String, on: Boolean) {
+                val c = android.content.ComponentName(context, "ua.hramota.$name")
+                val want = if (on) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                try { if (pm.getComponentEnabledSetting(c) != want) pm.setComponentEnabledSetting(c, want, android.content.pm.PackageManager.DONT_KILL_APP) } catch (e: Exception) {}
+            }
+            // On first, so there is never a moment with neither
+            if (separate) { set("OpenApart", true); set("OpenHere", false) } else { set("OpenHere", true); set("OpenApart", false) }
+        }
+
         fun viewerClass(context: android.content.Context): Class<out ViewerActivity> =
             if (ua.hramota.data.Settings.get(context).state.value.separateWindows) ViewerActivity::class.java else ViewerInlineActivity::class.java
 

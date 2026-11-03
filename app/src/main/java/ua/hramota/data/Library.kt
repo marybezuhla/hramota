@@ -131,8 +131,37 @@ class Library private constructor(private val context: Context) {
         update(id) { it?.copy(copy = null, shelves = emptySet()) }
     }
 
-    /** Deletes every copy kept inside Hramota (the shelf empties); what is remembered about the documents stays. */
-    fun dropAllCopies() { state.value.values.filter { it.copy != null }.forEach { dropCopy(it.id) } }
+    /** The copies of the last «delete all»: put aside, back with [undoDropAll] until Hramota starts again. */
+    private var dropped: List<Pair<LibraryEntry, File>> = emptyList()
+
+    /**
+     * Takes every copy kept inside Hramota off the shelf; what is remembered about the documents stays.
+     * The files are put aside (deleted when Hramota next starts), so this can be undone meanwhile.
+     */
+    @Synchronized fun dropAllCopies() {
+        val own = copiesDir(context).canonicalPath + File.separator
+        val bin = trashDir(context).apply { mkdirs() }
+        val aside = mutableListOf<Pair<LibraryEntry, File>>()
+        for (e in state.value.values.filter { it.copy != null }) {
+            val f = File(e.copy!!)
+            // Only Hramota's own copies are touched
+            if (f.canonicalPath.startsWith(own) && f.exists()) {
+                val to = File(bin, f.name)
+                if (f.renameTo(to)) aside += e to to else f.delete()
+            }
+            update(e.id) { it?.copy(copy = null, shelves = emptySet()) }
+        }
+        dropped = aside
+    }
+
+    /** Puts back what [dropAllCopies] put aside. */
+    @Synchronized fun undoDropAll() {
+        for ((e, f) in dropped) {
+            val back = File(e.copy!!)
+            if (!back.exists() && f.renameTo(back)) update(e.id) { it?.copy(copy = e.copy, shelves = e.shelves) }
+        }
+        dropped = emptyList()
+    }
 
     /** Forgets everything about a document, and deletes the copy kept inside Hramota. */
     fun forget(id: String) {
@@ -302,6 +331,8 @@ class Library private constructor(private val context: Context) {
         fun get(context: Context): Library = instance ?: synchronized(this) { instance ?: Library(context.applicationContext).also { instance = it } }
 
         fun coversDir(context: Context) = File(context.filesDir, "covers").apply { mkdirs() }
+        /** Copies put aside by «delete all», emptied when Hramota starts. */
+        fun trashDir(context: Context) = File(context.filesDir, "documents-deleted")
         fun copiesDir(context: Context) = File(context.filesDir, "documents").apply { mkdirs() }
 
         /**

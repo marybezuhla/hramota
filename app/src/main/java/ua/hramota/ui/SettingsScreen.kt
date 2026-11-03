@@ -60,7 +60,8 @@ fun SettingsScreen(
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onClearRecent: () -> Unit,
     /** Deletes every document kept in Hramota (the shelf); bookmarks and notes stay. */
-    onDeleteKept: () -> Unit = {},
+    onDeleteKept: () -> Boolean = { false },
+    onUndoKept: () -> Unit = {},
     onBack: () -> Unit,
     /** Locked storage: on, possible on this phone (a screen lock is set), and turning it on or off. */
     vault: Boolean = false,
@@ -80,7 +81,7 @@ fun SettingsScreen(
     if (confirmKept) AlertDialog(
         onDismissRequest = { confirmKept = false },
         text = { Text(stringResource(R.string.delete_kept_confirm)) },
-        confirmButton = { TextButton(onClick = { confirmKept = false; onDeleteKept(); keptDeleted = true }) { Text(stringResource(R.string.delete_kept_go), color = MaterialTheme.colorScheme.error) } },
+        confirmButton = { TextButton(onClick = { confirmKept = false; keptDeleted = onDeleteKept() }) { Text(stringResource(R.string.delete_kept_go), color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmKept = false }) { Text(stringResource(R.string.cancel)) } },
     )
     // Forgetting everything deletes kept documents too: said plainly, and asked first
@@ -143,11 +144,12 @@ fun SettingsScreen(
                 stringResource(if (vaultPossible || vault) R.string.vault_hint else R.string.vault_no_lock),
                 vault, enabled = vaultPossible || vault,
             ) { v -> onVault(v) }
-            Row(Modifier.fillMaxWidth().clickable { confirmKept = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
-                Text(
-                    stringResource(if (keptDeleted) R.string.delete_kept_done else R.string.delete_kept),
-                    style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary,
-                )
+            if (keptDeleted) Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.delete_kept_done), Modifier.weight(1f).padding(vertical = 14.dp), style = MaterialTheme.typography.bodyLarge)
+                TextButton(onClick = { onUndoKept(); keptDeleted = false }) { Text(stringResource(R.string.edit_undo)) }
+            }
+            else Row(Modifier.fillMaxWidth().clickable(role = androidx.compose.ui.semantics.Role.Button) { confirmKept = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
+                Text(stringResource(R.string.delete_kept), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
             }
             Row(Modifier.fillMaxWidth().clickable { confirmClear = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
                 Text(

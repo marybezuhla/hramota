@@ -345,7 +345,8 @@
     <string name="kind_pdf">PDF</string>
     <string name="delete_kept">Видалити всі документи, збережені в Грамоті</string>
     <string name="delete_kept_done">Документи видалено з Грамоти</string>
-    <string name="delete_kept_confirm">Копії, збережені в Грамоті, буде видалено, і полиця спорожніє. Самі файли в інших місцях лишаться, як і закладки, нотатки та місця читання.</string>
+    <string name="delete_kept_confirm">Копії, збережені в Грамоті, буде видалено, і полиця спорожніє. Файли, які інший застосунок дав відкрити лише раз, після цього з «Нещодавніх» не відкриються. Самі файли в інших місцях лишаться, як і закладки, нотатки та місця читання. Скасувати можна, доки Грамота відкрита.</string>
+    <string name="delete_kept_locked">Сховище під замком закрите. Відімкніть Грамоту й спробуйте знову.</string>
     <string name="delete_kept_go">Видалити</string>
     <string name="search_find">Знайти</string>
     <string name="search_list">Список знайденого</string>
@@ -367,4 +368,7 @@
     <string name="rows_refused_formulas">Деякі формули посилаються на кілька аркушів одразу: тут рядки не вставляються й не видаляються.</string>
     <string name="rows_refused_full">Аркуш заповнено до останнього рядка: нового не вмістити.</string>
     <string name="create_exists">Такий файл уже є: виберіть нову назву.</string>
+    <string name="text_size">Розмір тексту</string>
+    <string name="text_smaller">Менший текст</string>
+    <string name="text_larger">Більший текст</string>
 </resources>

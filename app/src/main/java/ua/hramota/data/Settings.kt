@@ -50,12 +50,15 @@ data class AppSettings(
 
 /** One instance per process; screens observe [state] and change it with [update]. */
 class Settings private constructor(context: Context) {
+    private val appContext = context.applicationContext
     private val prefs = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val flow = MutableStateFlow(load())
     val state: StateFlow<AppSettings> = flow.asStateFlow()
 
     fun update(change: (AppSettings) -> AppSettings) {
-        val s = change(flow.value)
+        val before = flow.value
+        val s = change(before)
+        if (s.separateWindows != before.separateWindows) ua.hramota.ViewerActivity.syncEntry(appContext, s.separateWindows)
         prefs.edit()
             .putString("theme", s.theme)
             .putBoolean("docxReading", s.docxReading)
@@ -134,7 +137,7 @@ class Settings private constructor(context: Context) {
         readVolumeKeys = prefs.getBoolean("readVolumeKeys", true),
         commentAuthor = prefs.getString("commentAuthor", "").orEmpty().take(100),
         separateWindows = prefs.getBoolean("separateWindows", false),
-        textScale = prefs.getFloat("textScale", 1f).coerceIn(0.8f, 2.2f),
+        textScale = prefs.getFloat("textScale", 1f).takeIf { it.isFinite() }?.coerceIn(0.8f, 2.2f) ?: 1f,
     )
 
     companion object {

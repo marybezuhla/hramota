@@ -337,7 +337,8 @@
     <string name="kind_pdf">PDF</string>
     <string name="delete_kept">Delete all documents kept in Hramota</string>
     <string name="delete_kept_done">Documents deleted from Hramota</string>
-    <string name="delete_kept_confirm">The copies kept in Hramota are deleted and the shelf empties. The original files elsewhere stay, and so do bookmarks, notes and reading places.</string>
+    <string name="delete_kept_confirm">The copies kept in Hramota are deleted and the shelf empties. Files another app let you open only once will no longer open from Recent. The original files elsewhere stay, and so do bookmarks, notes and reading places. This can be undone while Hramota is open.</string>
+    <string name="delete_kept_locked">Locked storage is closed. Unlock Hramota and try again.</string>
     <string name="delete_kept_go">Delete</string>
     <string name="search_find">Find</string>
     <string name="search_list">List of matches</string>
@@ -359,4 +360,7 @@
     <string name="rows_refused_formulas">Some formulas refer to several sheets at once: rows aren’t inserted or deleted here.</string>
     <string name="rows_refused_full">The sheet is full to its last row: there is no room for another.</string>
     <string name="create_exists">That file already exists: choose a new name.</string>
+    <string name="text_size">Text size</string>
+    <string name="text_smaller">Smaller text</string>
+    <string name="text_larger">Larger text</string>
 </resources>

@@ -1,5 +1,7 @@
 package ua.hramota.pdf
 
+import androidx.compose.ui.graphics.asAndroidBitmap
+import kotlinx.coroutines.launch
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -70,21 +72,42 @@ class PdfiumPages private constructor(
         private set
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
-        lock.withLock {
-            // (why, said on the page: a blank page with no reason helps nobody)
-            if (closed || index !in 0 until pageCount || widthPx <= 0) { problem = if (closed) "closed" else if (widthPx <= 0) "width $widthPx" else "page $index"; return@withLock null }
-            if (engineDied || !binder.isBinderAlive) { engineDied = true; problem = "engine stopped"; return@withLock null }
-            val w = widthPx.coerceAtMost(MAX_WIDTH)
-            val key = index.toLong() shl 32 or w.toLong()
-            cache[key]?.let { return@withLock it }
-            val h = (w * aspect(index)).toInt().coerceIn(1, MAX_WIDTH * 2)
-            val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: viaParts(index, w, h)
-            if (bitmap == null && !binder.isBinderAlive) engineDied = true
-            // The phone's own engine only for a page the living isolated engine could not draw on this
-            // phone; a file that crashed the isolated engine is never handed to an engine in this process
-            bitmap?.asImageBitmap()?.also { remember(key, it, w, h) }
-                ?: (if (engineDied) null else viaSystem(index, w)?.also { remember(key, it, w, h) })
+        lock.withLock { try { draw(index, widthPx) } catch (e: OutOfMemoryError) { problem = "memory"; null } }
+    }
+
+    /**
+     * True when nothing at all was drawn: every sampled pixel white or see-through. A scanned page whose picture
+     * did not draw looks like this; so does a page left blank on purpose, which costs only a second try.
+     */
+    private fun looksEmpty(b: Bitmap): Boolean {
+        val n = 40
+        for (j in 0 until n) for (i in 0 until n) {
+            val c = b.getPixel(((i + 0.5f) * b.width / n).toInt(), ((j + 0.5f) * b.height / n).toInt())
+            val alpha = c ushr 24
+            if (alpha != 0 && ((c shr 16 and 0xFF) < 0xF2 || (c shr 8 and 0xFF) < 0xF2 || (c and 0xFF) < 0xF2)) return false
         }
+        return true
+    }
+
+    private suspend fun draw(index: Int, widthPx: Int): ImageBitmap? = run {
+        // (why, said on the page: a blank page with no reason helps nobody)
+        if (closed || index !in 0 until pageCount || widthPx <= 0) { problem = if (closed) "closed" else if (widthPx <= 0) "width $widthPx" else "page $index"; return@run null }
+        if (engineDied || !binder.isBinderAlive) { engineDied = true; problem = "engine stopped"; return@run null }
+        val w = widthPx.coerceAtMost(MAX_WIDTH)
+        val key = index.toLong() shl 32 or w.toLong()
+        cache[key]?.let { return@run it }
+        val h = (w * aspect(index)).toInt().coerceIn(1, MAX_WIDTH * 2)
+        val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: viaParts(index, w, h)
+        if (bitmap == null && !binder.isBinderAlive) engineDied = true
+        // An empty page from the isolated engine: the phone's own engine is asked too, and its page kept if it shows something
+        if (bitmap != null && !engineDied && looksEmpty(bitmap)) {
+            val other = viaSystem(index, w)
+            if (other != null && !looksEmpty(other.asAndroidBitmap())) { problem = "white"; return@run other.also { remember(key, it, w, h) } }
+        }
+        // The phone's own engine only for a page the living isolated engine could not draw on this
+        // phone; a file that crashed the isolated engine is never handed to an engine in this process
+        bitmap?.asImageBitmap()?.also { remember(key, it, w, h) }
+            ?: (if (engineDied) null else viaSystem(index, w)?.also { remember(key, it, w, h) })
     }
 
     /**
@@ -98,7 +121,9 @@ class PdfiumPages private constructor(
         val s = system ?: try {
             reopen?.invoke()?.let { ua.hramota.doc.PdfSource.open(it) }?.also { system = it }
         } catch (e: Exception) { problem = base() + " · system open ${e.javaClass.simpleName}"; null } ?: run { systemFailed = true; return null }
-        return try { s.render(index, w) ?: run { problem = base() + " · system none"; null } } catch (e: Exception) { problem = base() + " · system ${e.javaClass.simpleName}"; null }
+        // Closed meanwhile: what was just opened is not kept
+        if (closed) { system = null; try { s.close() } catch (_: Exception) {}; return null }
+        return try { s.render(index, w) ?: run { problem = base() + " · system " + (s.problem ?: "none"); null } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { problem = base() + " · system ${e.javaClass.simpleName}"; null }
     }
 
     private fun viaSharedMemory(index: Int, w: Int, h: Int): Bitmap? {
@@ -111,8 +136,8 @@ class PdfiumPages private constructor(
             if (result == null) { engineDied = !binder.isBinderAlive; problem = "engine stopped"; return null }
             when (result.first) {
                 PdfEngineService.R_OK -> Unit
-                PdfEngineService.R_TRANSPORT -> { inParts = true; problem = result.second; return null }
-                else -> { problem = result.second ?: "render ${result.first}"; return null }
+                PdfEngineService.R_TRANSPORT -> { inParts = true; problem = code(result.second) ?: "transport"; return null }
+                else -> { problem = code(result.second) ?: "render ${result.first}"; return null }
             }
             // The engine process is not trusted: the memory must still hold the whole page
             if (memory.size < w * h * 4) { inParts = true; problem = "memory ${memory.size}"; return null }
@@ -224,13 +249,22 @@ class PdfiumPages private constructor(
 
     private fun <T> call(code: Int, write: (Parcel) -> Unit = {}, read: (Parcel) -> T): T? = Companion.call(binder, code, write, read)
 
+    /** What the engine process said, cut to a short code: that process is not trusted with words on the screen. */
+    private fun code(s: String?): String? = s?.filter { it.isLetterOrDigit() && it.code < 128 || it == ' ' || it == '_' }?.take(40)?.takeIf { it.isNotBlank() }
+
     /** Ends the document's engine process. Never waits for it: the process may be busy or stuck. */
     override fun close() {
-        try { system?.close() } catch (_: Exception) {}
         if (closed) return
         closed = true
         try { context.unbindService(connection) } catch (_: Exception) {}
-        cache.clear()
+        // The rest under the lock, off the main thread: a page may be being drawn right now
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            lock.withLock {
+                cache.clear(); cacheBytes = 0
+                try { system?.close() } catch (_: Exception) {}
+                system = null
+            }
+        }
     }
 
     companion object {

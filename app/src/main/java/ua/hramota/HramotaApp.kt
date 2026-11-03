@@ -26,6 +26,10 @@ class HramotaApp : Application() {
         cacheDir.listFiles { f -> f.name.startsWith("notes-") && f.name.endsWith(".pdf") }?.forEach { it.delete() }
         // Half-written kept copies (Hramota stopped while one was put in place)
         java.io.File(filesDir, "documents").listFiles { f -> f.name.endsWith(".part") }?.forEach { it.delete() }
+        // Copies set aside by «delete all» earlier: now deleted for good
+        ua.hramota.data.Library.trashDir(this).deleteRecursively()
+        // The entry for files from other apps follows the setting (also after a backup was restored)
+        ViewerActivity.syncEntry(this, ua.hramota.data.Settings.get(this).state.value.separateWindows)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { started++; main.removeCallbacks(lock) }
             override fun onActivityStopped(activity: Activity) {

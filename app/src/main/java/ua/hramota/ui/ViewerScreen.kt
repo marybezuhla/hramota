@@ -1,5 +1,9 @@
 package ua.hramota.ui
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -330,12 +334,14 @@ private fun ViewerContent(
             if ((readingParagraphs != null || state is ViewerState.Text) && !overview) {
                 var sizing by remember { mutableStateOf(false) }
                 Box {
-                    TextButton(onClick = { sizing = true }) { Text("Aa", style = MaterialTheme.typography.titleMedium) }
+                    val sizeLabel = stringResource(R.string.text_size)
+                    TextButton(onClick = { sizing = true }, modifier = Modifier.semantics { contentDescription = sizeLabel }) { Text("Aa", style = MaterialTheme.typography.titleMedium) }
                     androidx.compose.material3.DropdownMenu(expanded = sizing, onDismissRequest = { sizing = false }) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
-                            TextButton(onClick = { onReadSettings { it.copy(textScale = (it.textScale - 0.1f).coerceAtLeast(0.8f)) } }) { Text("A−", style = MaterialTheme.typography.titleSmall) }
-                            Text("${(readSettings.textScale * 100).roundToInt()}%", modifier = Modifier.padding(horizontal = 8.dp))
-                            TextButton(onClick = { onReadSettings { it.copy(textScale = (it.textScale + 0.1f).coerceAtMost(2.2f)) } }) { Text("A+", style = MaterialTheme.typography.titleLarge) }
+                            val smaller = stringResource(R.string.text_smaller); val larger = stringResource(R.string.text_larger)
+                            TextButton(onClick = { onReadSettings { it.copy(textScale = (it.textScale - 0.1f).coerceAtLeast(0.8f)) } }, modifier = Modifier.semantics { contentDescription = smaller }) { Text("A−", style = MaterialTheme.typography.titleSmall) }
+                            Text("${(readSettings.textScale * 100).roundToInt()}%", modifier = Modifier.padding(horizontal = 8.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite })
+                            TextButton(onClick = { onReadSettings { it.copy(textScale = (it.textScale + 0.1f).coerceAtMost(2.2f)) } }, modifier = Modifier.semantics { contentDescription = larger }) { Text("A+", style = MaterialTheme.typography.titleLarge) }
                         }
                     }
                 }
@@ -573,7 +579,7 @@ private fun HitList(hits: List<SearchHit>, current: Int, source: Searchable, lab
     // The one shown stays in sight in the list
     LaunchedEffect(current) { if (list.layoutInfo.visibleItemsInfo.none { it.index == current }) list.animateScrollToItem(current.coerceAtLeast(0)) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp), state = list) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.35f).dp.coerceIn(120.dp, 300.dp)), state = list) {
             itemsIndexed(hits, key = { i, h -> "${h.page}:${h.start}:$i" }) { i, h ->
                 val snippet by produceState<AnnotatedString?>(null, h) {
                     value = withContext(Dispatchers.Default) {
@@ -597,7 +603,7 @@ private fun HitList(hits: List<SearchHit>, current: Int, source: Searchable, lab
                         .clickable { keyboard?.hide(); onPick(i) }.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    label(h)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(64.dp)) }
+                    label(h)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 64.dp).padding(end = 8.dp)) }
                     Text(snippet ?: AnnotatedString("…"), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
                 }

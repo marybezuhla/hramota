@@ -37,7 +37,7 @@ class PdfSource private constructor(
         private set
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
-        try { draw(index, widthPx) } catch (e: Exception) { problem = "phone engine: ${e.javaClass.simpleName}"; null } catch (e: OutOfMemoryError) { problem = "memory"; null }
+        try { draw(index, widthPx) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { problem = "phone engine: ${e.javaClass.simpleName}"; null } catch (e: OutOfMemoryError) { problem = "memory"; null }
     }
 
     private suspend fun draw(index: Int, widthPx: Int): ImageBitmap? = run {

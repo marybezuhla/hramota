@@ -223,7 +223,7 @@ private class Page(val slices: List<Slice>, val firstBlock: Int, val firstChar: 
  */
 private suspend fun paginate(
     book: Book, look: BookLook, resolver: FontFamily.Resolver, density: Density, width: Int, height: Int,
-    startBlock: Int, publish: (List<Page>, Boolean, Boolean) -> Unit,
+    startBlock: Int, publish: (List<Page>, Boolean, Boolean, IntRange) -> Unit,
 ) = coroutineScope {
     val starts = ArrayList<Int>().apply {
         add(0)
@@ -263,13 +263,13 @@ private suspend fun paginate(
         val have = prefix()
         if (have > target && have > published) {
             published = have
-            publish(done.take(have).flatMap { it!! }, have == done.size, false)
+            publish(done.take(have).flatMap { it!! }, have == done.size, false, 0 until chapters[have - 1].last + 1)
         } else if (published < 0 && !alone && done[target] != null) {
             alone = true
-            publish(done[target]!!, false, true)
+            publish(done[target]!!, false, true, chapters[target])
         }
     }
-    if (published < done.size) publish(done.flatMap { it.orEmpty() }, true, false)
+    if (published < done.size) publish(done.flatMap { it.orEmpty() }, true, false, 0 until book.blocks.size)
 }
 
 private suspend fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int): List<Page> {
@@ -371,6 +371,8 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
         var complete by remember { mutableStateOf(false) }
         // Only the chapter being read is laid out yet: its page numbers are not the book's
         var partialShown by remember { mutableStateOf(false) }
+        // The blocks the pages laid out so far hold (all of them once the book is complete)
+        var laidBlocks by remember { mutableStateOf(0 until 0) }
         // What the pages were laid out for: pages of another size or type are not shown
         val layoutKey = listOf(book, textWidth, textHeight, look.settings.readSize, look.settings.readSpacing, look.settings.readMargin, look.settings.readFont, look.settings.readJustify)
         var laidFor by remember { mutableStateOf<List<Any>?>(null) }
@@ -388,18 +390,21 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
             // While a slider moves, wait until it rests
             if (again) kotlinx.coroutines.delay(250)
             var partial = false
-            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all, alone ->
+            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all, alone, covers ->
                 // From the chapter alone to the whole book: the place being read is found again in it
                 if (partial && !alone) shown = false
                 partial = alone
                 partialShown = alone
-                pages = laid; complete = all; laidFor = layoutKey
+                pages = laid; complete = all; laidBlocks = covers
             }
         }
-        // Once the page being read is laid out, go there
+        // Once the page being read is laid out, go there; only then are the pages shown (no other page flashes first)
         LaunchedEffect(pages) {
             if (pages.isEmpty() || shown) return@LaunchedEffect
-            pager.scrollToPage(pageOf(pages, anchor.value.block, anchor.value.char))
+            // A place not laid out yet (a jump while only part of the book is): wait for it
+            if (!complete && anchor.value.block !in laidBlocks) { if (laidFor != layoutKey) laidFor = layoutKey; return@LaunchedEffect }
+            pager.requestScrollToPage(pageOf(pages, anchor.value.block, anchor.value.char))
+            laidFor = layoutKey
             shown = true
         }
         LaunchedEffect(pager, pages) {
@@ -413,13 +418,17 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
             val t = target ?: return@LaunchedEffect
             if (pages.isEmpty()) return@LaunchedEffect
             anchor.value = t
-            pager.requestScrollToPage(pageOf(pages, t.block, t.char))
+            // Kept as the place to go once the part of the book it is in is laid out
+            if (!complete && t.block !in laidBlocks) shown = false
+            else pager.requestScrollToPage(pageOf(pages, t.block, t.char))
             // Used once: coming back from the contents later must not jump here again
             onTargetUsed()
         }
         LaunchedEffect(current, pages.isNotEmpty()) {
             val h = current ?: return@LaunchedEffect
-            if (pages.isNotEmpty()) pager.requestScrollToPage(pageOf(pages, h.page, h.start))
+            if (pages.isEmpty()) return@LaunchedEffect
+            if (!complete && h.page !in laidBlocks) { anchor.value = BookTarget(h.page, h.start); shown = false }
+            else pager.requestScrollToPage(pageOf(pages, h.page, h.start))
         }
         if (pages.isEmpty() || laidFor != layoutKey) { CircularProgressIndicator(Modifier.align(Alignment.Center)); return@BoxWithConstraints }
 
@@ -733,6 +742,16 @@ internal fun BookContents(
         (marks + notes.map { Item(it.block, null, it) }).sortedBy { it.block }
     }
     val chapterNow = heads.lastOrNull { it.first <= current }?.first
+    // Each item's chapter, found once by halving (the headings are in book order), not on every redraw
+    val chapters = remember(items, heads) {
+        val main = heads.filter { !it.third }
+        fun lastAt(list: List<Triple<Int, String, Boolean>>, block: Int): Triple<Int, String, Boolean>? {
+            var lo = 0; var hi = list.size - 1; var ans = -1
+            while (lo <= hi) { val mid = (lo + hi) / 2; if (list[mid].first <= block) { ans = mid; lo = mid + 1 } else hi = mid - 1 }
+            return list.getOrNull(ans)
+        }
+        items.map { lastAt(main, it.block) ?: lastAt(heads, it.block) }
+    }
     var tab by rememberSaveable { mutableIntStateOf(if (items.isEmpty()) 1 else 0) }
     val cover by produceState<ImageBitmap?>(null, book) { value = withContext(Dispatchers.Default) { book.cover?.let { decodeFitting(book.images[it], 200) } } }
     val colors = MaterialTheme.colorScheme
@@ -741,7 +760,7 @@ internal fun BookContents(
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 cover?.let { Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.size(width = 58.dp, height = 86.dp).clip(RoundedCornerShape(4.dp))) }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(book.title.ifEmpty { "…" }, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Literata), fontWeight = FontWeight.SemiBold, maxLines = 3)
+                    Text(book.title.ifEmpty { "…" }, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Literata), fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     if (book.author.isNotEmpty()) Text(book.author, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { (current.toFloat() / size).coerceIn(0f, 1f) }, color = colors.primary, trackColor = colors.surfaceVariant,
@@ -761,6 +780,7 @@ internal fun BookContents(
                         modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) colors.primary else Color.Transparent)
                             .border(1.dp, if (on) colors.primary else colors.outlineVariant, RoundedCornerShape(20.dp))
                             .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = k }
+                            .heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically)
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
@@ -772,7 +792,7 @@ internal fun BookContents(
             }
             var lastChapter = -2
             for ((k, it) in items.withIndex()) {
-                val ch = heads.lastOrNull { h -> h.first <= it.block && !h.third } ?: heads.lastOrNull { h -> h.first <= it.block }
+                val ch = chapters[k]
                 val chId = ch?.first ?: -1
                 if (chId != lastChapter) {
                     lastChapter = chId
@@ -795,7 +815,7 @@ internal fun BookContents(
                                 stringResource(if (it.note == null) R.string.book_mark_label else R.string.book_note_label, percent(it.block)),
                                 style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f),
                             )
-                            if (it.note != null) androidx.compose.material3.IconButton(onClick = { editing = it.note }, modifier = Modifier.size(40.dp)) {
+                            if (it.note != null) androidx.compose.material3.IconButton(onClick = { editing = it.note }) {
                                 Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = stringResource(R.string.note_edit), modifier = Modifier.size(20.dp))
                             }
                         }

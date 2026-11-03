@@ -1,5 +1,9 @@
 package ua.hramota.ui
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
@@ -125,7 +129,8 @@ fun Shelf(
     val current = shelves.firstOrNull { it.id == selected } ?: shelves.firstOrNull() ?: ShelfDef(ShelfDef.ALL, "")
     // Shelves that fill themselves: by kind of document (shown when there is more than one kind)
     val kinds = remember(entries) { KINDS.map { k -> k to entries.count { kindOf(it.format) == k.first } }.filter { it.second > 0 } }
-    val kind = KINDS.firstOrNull { "kind:" + it.first == selected }
+    // A kind chosen before its last document went (or with one kind left, so no chips): all are shown again
+    val kind = KINDS.firstOrNull { "kind:" + it.first == selected }?.takeIf { k -> kinds.size > 1 && kinds.any { it.first == k } }
     var editing by remember { mutableStateOf<ShelfDef?>(null) }
     var choosing by remember { mutableStateOf<LibraryEntry?>(null) }
     // Both delete the copy kept in Hramota: asked first
@@ -146,10 +151,11 @@ fun Shelf(
                 val count = if (d.id == ShelfDef.ALL) entries.size else entries.count { d.id in it.shelves }
                 val on = kind == null && d.id == current.id
                 Row(
-                    Modifier.clip(RoundedCornerShape(18.dp))
+                    Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(18.dp))
                         .background(if (on) shelfColor(d).copy(alpha = 0.18f) else Color.Transparent)
                         .border(1.dp, if (on) shelfColor(d) else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(18.dp))
-                        .combinedClickable(onClick = { if (on) editing = d else selected = d.id }, onLongClick = { editing = d }, onLongClickLabel = stringResource(R.string.shelf_edit))
+                        .semantics { this.selected = on }
+                        .combinedClickable(role = Role.Tab, onClick = { if (on) editing = d else selected = d.id }, onLongClick = { editing = d }, onLongClickLabel = stringResource(R.string.shelf_edit))
                         .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -165,17 +171,17 @@ fun Shelf(
                 val on = kind == k
                 Text(
                     "${stringResource(k.second)} · $count", style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.SemiBold else null, maxLines = 1,
-                    modifier = Modifier.clip(RoundedCornerShape(18.dp))
+                    modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(18.dp))
                         .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                         .border(1.dp, if (on) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(18.dp))
-                        .clickable { selected = if (on) ShelfDef.ALL else "kind:" + k.first }
+                        .selectable(on, role = Role.Tab) { selected = if (on) ShelfDef.ALL else "kind:" + k.first }
                         .padding(horizontal = 12.dp, vertical = 7.dp),
                 )
             }
             item(key = "+") {
                 Text(
                     "+ " + stringResource(R.string.shelf_new), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable { editing = ShelfDef("s" + System.currentTimeMillis(), "", hue = 140f, created = System.currentTimeMillis()) }
+                    modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(18.dp)).clickable(role = Role.Button) { editing = ShelfDef("s" + System.currentTimeMillis(), "", hue = 140f, created = System.currentTimeMillis()) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
@@ -474,11 +480,16 @@ private fun Cover(e: LibraryEntry, modifier: Modifier, bound: Boolean = false) {
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
             val room = with(density) { (width - 26.dp).toPx() }
-            val size = remember(title, room) {
-                val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
-                var s = 13f
-                while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontWeight = FontWeight.SemiBold)).size.width > room) s -= 0.5f
-                s
+            val scale = density.fontScale
+            val size = remember(title, room, scale) {
+                fitCache.get("$title|$room|$scale") ?: run {
+                    val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
+                    fun fits(sp: Float) = measurer.measure(word, TextStyle(fontSize = sp.sp, fontWeight = FontWeight.SemiBold)).size.width <= room
+                    // Halving between 9 and 13 (in half steps): a few measurements, once per title
+                    var lo = 0; var hi = 8
+                    if (fits(13f)) lo = 8 else while (lo < hi) { val mid = (lo + hi + 1) / 2; if (fits(9f + mid * 0.5f)) lo = mid else hi = mid - 1 }
+                    (9f + lo * 0.5f).also { fitCache.put("$title|$room|$scale", it) }
+                }
             }
             Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = size.sp, lineHeight = (size + 3).sp,
                 maxLines = 6, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start, modifier = Modifier.align(Alignment.TopStart).padding(end = 10.dp))
@@ -533,6 +544,9 @@ private fun BoundCover(e: LibraryEntry, width: androidx.compose.ui.unit.Dp) {
         Text(e.format, color = GILT, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp, modifier = Modifier.align(Alignment.BottomStart))
     }
 }
+
+/** Title sizes already worked out (title, room, font scale): measured once, not again on each scroll. */
+private val fitCache = android.util.LruCache<String, Float>(1024)
 
 private fun coverColor(format: String): Color = when (format) {
     "PDF" -> Color(0xFF9C2F2F); "DOCX", "DOC", "ODT" -> Color(0xFF1F4E79); "XLSX", "XLS", "CSV" -> Color(0xFF2E6B3A)

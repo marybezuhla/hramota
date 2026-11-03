@@ -128,7 +128,6 @@ class MainActivity : ComponentActivity() {
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
         showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
         applySecureScreen()
-        if (savedInstanceState == null) openHanded(intent)
         setContent {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -145,9 +144,9 @@ class MainActivity : ComponentActivity() {
                     val known by library.entries.collectAsStateWithLifecycle()
                     val shelves by library.shelves.collectAsStateWithLifecycle()
                     // The shelf holds only documents kept inside Hramota
-                    val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
+                    val shelf = androidx.compose.runtime.remember(known) { known.values.filter { it.kept }.sortedByDescending { it.openedAt } }
                     // Recent files that open again: Hramota keeps lasting access to them, or a copy of them
-                    val copies = known.values.filter { it.copy != null && it.uri != null }.associateBy { it.uri!! }
+                    val copies = androidx.compose.runtime.remember(known) { known.values.filter { it.copy != null && it.uri != null }.groupBy { it.uri!! }.mapValues { (_, l) -> l.maxBy { it.openedAt } } }
                     var granted by androidx.compose.runtime.remember { mutableStateOf<Set<String>?>(null) }
                     androidx.compose.runtime.LaunchedEffect(files) {
                         granted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -222,7 +221,12 @@ class MainActivity : ComponentActivity() {
                         version = appVersion(),
                         onChange = { Settings.get(this).update(it) },
                         onClearRecent = { recents.clear(); ua.hramota.data.Library.get(applicationContext).clearAll() },
-                        onDeleteKept = { val app = applicationContext; lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Library.get(app).dropAllCopies() } },
+                        // With locked storage closed, its documents are not all known: unlock first
+                        onDeleteKept = {
+                            if (ua.hramota.data.Vault.locked(this)) { android.widget.Toast.makeText(this, getString(R.string.delete_kept_locked), android.widget.Toast.LENGTH_LONG).show(); false }
+                            else { val app = applicationContext; lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Library.get(app).dropAllCopies() }; true }
+                        },
+                        onUndoKept = { val app = applicationContext; lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Library.get(app).undoDropAll() } },
                         onBack = { showSettings = false },
                         vault = vaultOn,
                         vaultPossible = ua.hramota.data.Vault.canUse(this),
@@ -391,22 +395,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        openHanded(intent)
-    }
-
-    /** A document opened from another app, handed over to open here (in Hramota's window). */
-    private fun openHanded(handed: Intent?) {
-        if (handed?.action != ACTION_OPEN || handed.data == null) return
-        val open = Intent(this, ViewerInlineActivity::class.java).setAction(Intent.ACTION_VIEW).setData(handed.data)
-            .addFlags(handed.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION))
-        handed.extras?.let { open.putExtras(it) }
-        // Used once: not again when the window is made again
-        setIntent(Intent(this, MainActivity::class.java))
-        try { startActivity(open) } catch (e: Exception) {}
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         compareFirst?.let { outState.putString(KEY_FIRST, it.toString()) }
@@ -493,7 +481,6 @@ class MainActivity : ComponentActivity() {
         const val KEY_RESCUE = "rescue_saving"
         const val KEY_CREATING = "creating"
         /** A document handed over by the viewer (opened from another app), to open inside Hramota's window. */
-        const val ACTION_OPEN = "ua.hramota.OPEN"
         const val KEY_CHOOSING = "compare_choosing"
         const val KEY_COMPARING = "comparing"
         const val KEY_SETTINGS = "settings"
