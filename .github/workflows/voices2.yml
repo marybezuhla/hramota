@@ -32,7 +32,7 @@ jobs:
           # quantizing needs a newer onnx than ESPnet allows: a separate environment
           python3 -m venv /tmp/q && /tmp/q/bin/pip install -q onnx onnxruntime numpy
           /tmp/q/bin/python -u tools/voices/quantize.py 2>&1 | tee -a out/export.txt
-          rm -f out/*.wav
+          rm -f out/*.wav out/uk.onnx out/feed.npy
       - name: Push the samples
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
