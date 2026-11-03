@@ -318,6 +318,9 @@
     <string name="convert_note_doc">A new DOCX file is made; the old one stays as it is. Text, formatting, tables, pictures in the text, headers, footers and page size carry over; list numbers become text. Footnotes, comments, link addresses, text boxes, floating shapes, pictures in headers and nested tables do not; tab stops become left ones, and all sections take one orientation.</string>
     <string name="convert_note_xls">A new XLSX file is made; the old one stays as it is. Values, the look of cells, column widths, merged cells and hidden sheets carry over. Formulas keep only their results and the font becomes Calibri; charts, pictures and cell comments do not carry over.</string>
     <string name="convert_go">Choose where</string>
+    <string name="shelf_reading_now">Reading now</string>
+    <string name="shelf_continue">Continue</string>
+    <string name="shelf_everything">Everything on the shelf</string>
     <string name="book_read_percent">%1$d%% read</string>
     <string name="book_marks_notes">Bookmarks and notes</string>
     <string name="book_marks_empty">No bookmarks or notes yet. A bookmark goes where you are with the ribbon at the top; a note, on words you select.</string>

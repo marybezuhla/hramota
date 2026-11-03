@@ -1,5 +1,6 @@
 package ua.hramota.ui
 
+import androidx.compose.foundation.layout.heightIn
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -205,9 +206,26 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
         GridCells.Adaptive(108.dp), Modifier.fillMaxSize().background(tint),
         contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+        // The one being read, at the top with how far it is, to go on with one tap
+        entries.filter { it.total > 1 && it.position in 1 until it.total - 1 }.maxByOrNull { it.openedAt }?.let { now ->
+            item(key = "now", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.shelf_reading_now), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Book(now, onOpen, menu, Modifier.width(104.dp).shadow(6.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp)), spine = true)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(now.title.substringBeforeLast('.', now.title), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Progress(now)
+                            androidx.compose.material3.Button(onClick = { onOpen(now) }, modifier = Modifier.padding(top = 4.dp).heightIn(min = 44.dp)) { Text(stringResource(R.string.shelf_continue)) }
+                        }
+                    }
+                    Text(stringResource(R.string.shelf_everything), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
+                }
+            }
+        }
         items(entries, key = { it.id }) { e ->
             Column {
-                Book(e, onOpen, menu, Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp)))
+                Book(e, onOpen, menu, Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp)), spine = true)
                 Text(e.title.substringBeforeLast('.', e.title), style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
                 Progress(e)
             }
@@ -241,14 +259,23 @@ private fun WoodShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (LibraryE
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 20.dp, bottom = 24.dp)) {
             items(entries.chunked(perRow)) { row ->
                 Column {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
-                        for (e in row) Book(e, onOpen, menu, Modifier.weight(1f).shadow(6.dp, RoundedCornerShape(2.dp)).clip(RoundedCornerShape(2.dp)))
+                    // The back of the shelf darkens towards the plank above it: the books stand in a recess
+                    Row(
+                        Modifier.fillMaxWidth().background(Brush.verticalGradient(0f to Color(0x70000000), 0.3f to Color.Transparent))
+                            .padding(start = 18.dp, end = 18.dp, top = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom,
+                    ) {
+                        for (e in row) Book(e, onOpen, menu, Modifier.weight(1f).shadow(8.dp, RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 4.dp, bottomEnd = 4.dp))
+                            .clip(RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 4.dp, bottomEnd = 4.dp)), spine = true)
                         repeat(perRow - row.size) { Box(Modifier.weight(1f)) }
                     }
-                    // The plank the books stand on
-                    Box(Modifier.fillMaxWidth().height(16.dp).background(Brush.verticalGradient(t.drop(3))))
-                    Box(Modifier.fillMaxWidth().height(10.dp).background(Brush.verticalGradient(listOf(Color(0x66000000), Color.Transparent))))
-                    Box(Modifier.height(14.dp))
+                    // The plank the books stand on: a lit front edge, then its shadow on the wall
+                    Box(
+                        Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(16.dp).shadow(8.dp, RoundedCornerShape(2.dp)).clip(RoundedCornerShape(2.dp))
+                            .background(Brush.verticalGradient(listOf(t[0], t[2], t[3], t[4])))
+                            .drawBehind { drawLine(Color(0x99FFE6C8), Offset(0f, 1f), Offset(size.width, 1f), strokeWidth = 2f) },
+                    )
+                    Box(Modifier.height(10.dp))
                 }
             }
         }
@@ -284,10 +311,14 @@ private fun ListShelf(entries: List<LibraryEntry>, color: Color, onOpen: (Librar
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: @Composable (LibraryEntry, () -> Unit) -> Unit, modifier: Modifier) {
+private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: @Composable (LibraryEntry, () -> Unit) -> Unit, modifier: Modifier, spine: Boolean = false) {
     var open by remember { mutableStateOf(false) }
     Box(modifier.combinedClickable(onClick = { onOpen(e) }, onLongClick = { open = true })) {
         Cover(e, Modifier.fillMaxWidth())
+        // Light along the spine, as on a real book's binding
+        if (spine) Box(Modifier.matchParentSize().drawBehind {
+            drawRect(Brush.horizontalGradient(0f to Color(0x47FFFFFF), 0.04f to Color(0x22000000), 0.09f to Color.Transparent))
+        })
         if (e.bookmarks.isNotEmpty()) Icon(AppIcons.Bookmark, contentDescription = null, tint = Color(0xFFE5484D), modifier = Modifier.align(Alignment.TopEnd).padding(end = 6.dp).width(18.dp))
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu(e) { open = false } }
     }
