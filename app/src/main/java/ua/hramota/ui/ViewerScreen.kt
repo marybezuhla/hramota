@@ -41,6 +41,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.produceState
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -238,6 +241,8 @@ private fun ViewerContent(
     var searching by rememberSaveable { mutableStateOf(startSearch != null) }
     var query by rememberSaveable { mutableStateOf(startSearch ?: "") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
+    // The list of what was found, open under the document while going from one to another
+    var hitList by rememberSaveable { mutableStateOf(false) }
     var hitIndex by remember { mutableIntStateOf(0) }
     var scanning by remember { mutableStateOf(false) }
     // The query whose search has finished: "not found" is said only about that one
@@ -306,6 +311,8 @@ private fun ViewerContent(
             onPrev = { if (hits.isNotEmpty()) hitIndex = (hitIndex - 1 + hits.size) % hits.size },
             onNext = { if (hits.isNotEmpty()) hitIndex = (hitIndex + 1) % hits.size },
             onClose = { searching = false },
+            listOpen = hitList,
+            onList = { hitList = !hitList },
         ) else TopBar(title = name, onBack = { if (overview) overview = false else onBack() }) {
             val pageNotes = state is ViewerState.Paged && (state.pages is TextPages) && notes.isNotEmpty()
             if ((menu.isNotEmpty() || pageNotes) && !overview) {
@@ -367,6 +374,7 @@ private fun ViewerContent(
                     BookDocument(
                         state.book, textList, look, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, bookTarget, bookmarks,
                         notes, onNote, onRemoveNote, onTargetUsed = { bookTarget = null },
+                        onFind = { t -> query = t.trim().take(Search.MAX_QUERY); searching = true },
                     )
                     // Over the book: touches stop here and do not turn its pages
                     if (overview) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { detectTapGestures { } }) {
@@ -402,6 +410,18 @@ private fun ViewerContent(
                 }
             }
         }
+        // What was found, each with words around it; a tap goes there and the list stays
+        if (searching && hitList && hits.isNotEmpty() && source != null) HitList(
+            hits, hitIndex, source,
+            label = { h ->
+                when {
+                    inPages -> stringResource(R.string.search_page, h.page + 1)
+                    state is ViewerState.Reader -> "${(h.page * 100L / state.book.blocks.size.coerceAtLeast(1)).toInt()}%"
+                    else -> null
+                }
+            },
+            onPick = { hitIndex = it },
+        )
         val sel = selection
         if (sel != null && textPages != null) SelectionBar(
             onMark = { color ->
@@ -416,6 +436,7 @@ private fun ViewerContent(
                 }
             },
             onDictionary = { scope.launch { lookingUp = selectedText(textPages, sel); selection = null } },
+            onFind = { scope.launch { query = selectedText(textPages, sel).trim().take(Search.MAX_QUERY); selection = null; searching = true } },
             onApp = { component -> scope.launch {
                 val t = selectedText(textPages, sel)
                 try {
@@ -484,6 +505,7 @@ private fun copyText(context: Context, text: String) {
 private fun SearchBar(
     query: String, onQuery: (String) -> Unit, position: Int, total: Int, scanning: Boolean,
     onPrev: () -> Unit, onNext: () -> Unit, onClose: () -> Unit,
+    listOpen: Boolean = false, onList: () -> Unit = {},
 ) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: IllegalStateException) {} }
@@ -516,6 +538,56 @@ private fun SearchBar(
         )
         IconButton(onClick = onPrev, enabled = total > 0) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = stringResource(R.string.search_prev)) }
         IconButton(onClick = onNext, enabled = total > 0) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.search_next)) }
+        IconButton(onClick = onList, enabled = total > 0) {
+            Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.search_list),
+                tint = if (listOpen && total > 0) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+        }
+    }
+}
+
+/**
+ * Everything found, one line each: where (page or how far into a book) and the words around it,
+ * the match in bold. A tap goes there; the list stays open, the one shown marked.
+ */
+@Composable
+private fun HitList(hits: List<SearchHit>, current: Int, source: Searchable, label: @Composable (SearchHit) -> String?, onPick: (Int) -> Unit) {
+    val list = rememberLazyListState()
+    // Each page's text fetched once (a PDF page comes from its engine)
+    val texts = remember(source) { java.util.concurrent.ConcurrentHashMap<Int, String>() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    // The one shown stays in sight in the list
+    LaunchedEffect(current) { if (list.layoutInfo.visibleItemsInfo.none { it.index == current }) list.animateScrollToItem(current.coerceAtLeast(0)) }
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp), state = list) {
+            itemsIndexed(hits, key = { i, h -> "${h.page}:${h.start}:$i" }) { i, h ->
+                val snippet by produceState<AnnotatedString?>(null, h) {
+                    value = withContext(Dispatchers.Default) {
+                        val t = texts[h.page] ?: source.text(h.page).also { texts[h.page] = it }
+                        val from = (h.start - 40).coerceAtLeast(0); val to = (h.end + 60).coerceAtMost(t.length)
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            if (from > 0) append("…")
+                            append(t.substring(from, h.start.coerceIn(from, to)).replace('\n', ' '))
+                            pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold))
+                            append(t.substring(h.start.coerceIn(from, to), h.end.coerceIn(from, to)).replace('\n', ' '))
+                            pop()
+                            append(t.substring(h.end.coerceIn(from, to), to).replace('\n', ' '))
+                            if (to < t.length) append("…")
+                        }
+                    }
+                }
+                val on = i == current
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        .clickable { keyboard?.hide(); onPick(i) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    label(h)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(64.dp)) }
+                    Text(snippet ?: AnnotatedString("…"), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        color = if (on) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        }
     }
 }
 
@@ -524,6 +596,7 @@ private fun SearchBar(
 private fun SelectionBar(
     onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
     onMark: (Int) -> Unit = {}, onNote: () -> Unit = {}, onDictionary: () -> Unit = {}, onApp: (android.content.ComponentName) -> Unit = {},
+    onFind: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val apps = remember { textApps(context) }
@@ -537,6 +610,7 @@ private fun SelectionBar(
                 )
                 TextButton(onClick = onNote) { Text(stringResource(R.string.note_add), maxLines = 1) }
                 TextButton(onClick = onDictionary) { Text(stringResource(R.string.dict_open), maxLines = 1) }
+                TextButton(onClick = onFind) { Text(stringResource(R.string.search_find), maxLines = 1) }
                 TextButton(onClick = onCopy) { Text(stringResource(R.string.copy), maxLines = 1) }
                 TextButton(onClick = onShare) { Text(stringResource(R.string.share), maxLines = 1) }
                 for ((label, component) in apps) TextButton(onClick = { onApp(component) }) { Text(label, maxLines = 1) }

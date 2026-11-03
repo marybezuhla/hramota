@@ -134,6 +134,7 @@ internal fun BookDocument(
     target: BookTarget?, bookmarks: Set<Int>,
     notes: List<Note> = emptyList(), onNote: (Note) -> Unit = {}, onRemoveNote: (Long) -> Unit = {},
     onTargetUsed: () -> Unit = {},
+    onFind: (String) -> Unit = {},
 ) {
     val selection = remember { BookSelection() }
     val real = LocalClipboard.current
@@ -155,6 +156,7 @@ internal fun BookDocument(
             onMark = { t, c -> locate(book, visible.blocks(), t)?.let { onNote(it.copy(color = c)) } },
             onNote = { t -> locate(book, visible.blocks(), t)?.let { editing = it to true } },
             onDictionary = { t -> lookingUp = t },
+            onFind = onFind,
         )
     }
     lookingUp?.let { w -> DictionarySheet(w) { lookingUp = null } }

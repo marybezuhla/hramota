@@ -151,6 +151,7 @@ internal fun locate(book: Book, parts: List<Visible.Part>, selected: String): No
 internal fun SelectionMenu(
     selection: BookSelection, clipboard: TakingClipboard, origin: androidx.compose.ui.geometry.Offset, onMark: (String, Int) -> Unit, onNote: (String) -> Unit,
     onDictionary: (String) -> Unit = {},
+    onFind: (String) -> Unit = {},
 ) {
     val rect = selection.rect ?: return
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -171,6 +172,7 @@ internal fun SelectionMenu(
                 )
                 Item(stringResource(R.string.note_add)) { selection.take(clipboard) { onNote(it) } }
                 Item(stringResource(R.string.dict_open)) { selection.take(clipboard) { onDictionary(it) } }
+                Item(stringResource(R.string.search_find)) { selection.take(clipboard) { onFind(it) } }
                 Item(stringResource(R.string.copy)) { selection.copyToClipboard(clipboard) }
                 Item(stringResource(R.string.share)) {
                     selection.take(clipboard) { t ->
