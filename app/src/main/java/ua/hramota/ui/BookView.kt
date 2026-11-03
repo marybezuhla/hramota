@@ -430,7 +430,8 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
             if (!complete && h.page !in laidBlocks) { anchor.value = BookTarget(h.page, h.start); shown = false }
             else pager.requestScrollToPage(pageOf(pages, h.page, h.start))
         }
-        if (pages.isEmpty() || laidFor != layoutKey) { CircularProgressIndicator(Modifier.align(Alignment.Center)); return@BoxWithConstraints }
+        // (also while waiting for a place not laid out yet, or for the page to be found again)
+        if (pages.isEmpty() || laidFor != layoutKey || !shown) { CircularProgressIndicator(Modifier.align(Alignment.Center)); return@BoxWithConstraints }
 
         val scope = rememberCoroutineScope()
         val turnStyle = settings.readTurn

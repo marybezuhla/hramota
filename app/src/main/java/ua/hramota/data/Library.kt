@@ -158,10 +158,16 @@ class Library private constructor(private val context: Context) {
     @Synchronized fun undoDropAll() {
         for ((e, f) in dropped) {
             val back = File(e.copy!!)
-            if (!back.exists() && f.renameTo(back)) update(e.id) { it?.copy(copy = e.copy, shelves = e.shelves) }
+            // Only into what is still the same: the document remembered, locked storage on or off as it was then
+            val same = get(e.id) != null && back.name.endsWith(Vault.SUFFIX) == Vault.isOn(context)
+            if (same && !back.exists() && f.renameTo(back)) update(e.id) { it?.copy(copy = e.copy, shelves = e.shelves) }
+            else f.delete()
         }
         dropped = emptyList()
     }
+
+    /** What «delete all» put aside, deleted now (before storage is sealed or opened, or everything forgotten). */
+    @Synchronized fun emptyTrash() { dropped = emptyList(); trashDir(context).deleteRecursively() }
 
     /** Forgets everything about a document, and deletes the copy kept inside Hramota. */
     fun forget(id: String) {
@@ -172,6 +178,7 @@ class Library private constructor(private val context: Context) {
     }
 
     fun clearAll() {
+        emptyTrash()
         state.value.keys.toList().forEach(::forget)
         // Earlier versions kept by saves that did not finish go too (not while a save is under way)
         if (!ua.hramota.EditSaving.Rescue.busy()) File(context.filesDir, "rescue").deleteRecursively()
@@ -298,6 +305,7 @@ class Library private constructor(private val context: Context) {
 
     private fun convert(seal: Boolean) {
         val key = Vault.key() ?: throw java.io.IOException("Locked")
+        emptyTrash()
         // Plain copies of an unreadable memory are not left beside sealed storage
         if (seal) context.filesDir.listFiles().orEmpty().filter { it.name.contains(".broken-") && !it.name.endsWith(Vault.SUFFIX) }.forEach { it.delete() }
         // What is held now is the whole memory (read plain, or with the key)

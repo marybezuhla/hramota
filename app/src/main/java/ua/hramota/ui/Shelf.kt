@@ -68,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -131,6 +132,7 @@ fun Shelf(
     val kinds = remember(entries) { KINDS.map { k -> k to entries.count { kindOf(it.format) == k.first } }.filter { it.second > 0 } }
     // A kind chosen before its last document went (or with one kind left, so no chips): all are shown again
     val kind = KINDS.firstOrNull { "kind:" + it.first == selected }?.takeIf { k -> kinds.size > 1 && kinds.any { it.first == k } }
+    LaunchedEffect(kind == null && selected.startsWith("kind:")) { if (kind == null && selected.startsWith("kind:")) selected = ShelfDef.ALL }
     var editing by remember { mutableStateOf<ShelfDef?>(null) }
     var choosing by remember { mutableStateOf<LibraryEntry?>(null) }
     // Both delete the copy kept in Hramota: asked first

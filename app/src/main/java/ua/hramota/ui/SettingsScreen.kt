@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -77,7 +78,8 @@ fun SettingsScreen(
     var cleared by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var confirmKept by rememberSaveable { mutableStateOf(false) }
-    var keptDeleted by rememberSaveable { mutableStateOf(false) }
+    // (not kept past Hramota stopping: what was put aside is gone by then)
+    var keptDeleted by remember { mutableStateOf(false) }
     if (confirmKept) AlertDialog(
         onDismissRequest = { confirmKept = false },
         text = { Text(stringResource(R.string.delete_kept_confirm)) },

@@ -77,17 +77,22 @@ class PdfiumPages private constructor(
 
     /**
      * True when nothing at all was drawn: every sampled pixel white or see-through. A scanned page whose picture
-     * did not draw looks like this; so does a page left blank on purpose, which costs only a second try.
+     * did not draw looks like this; so does a page left blank on purpose, which costs a second try (see [blankBoth]).
+     * Every pixel is looked at: thin text between sample points must not make a page look empty.
      */
     private fun looksEmpty(b: Bitmap): Boolean {
-        val n = 40
-        for (j in 0 until n) for (i in 0 until n) {
-            val c = b.getPixel(((i + 0.5f) * b.width / n).toInt(), ((j + 0.5f) * b.height / n).toInt())
-            val alpha = c ushr 24
-            if (alpha != 0 && ((c shr 16 and 0xFF) < 0xF2 || (c shr 8 and 0xFF) < 0xF2 || (c and 0xFF) < 0xF2)) return false
+        val row = IntArray(b.width)
+        for (y in 0 until b.height) {
+            b.getPixels(row, 0, b.width, 0, y, b.width, 1)
+            for (c in row) {
+                if (c ushr 24 != 0 && ((c shr 16 and 0xFF) < 0xF2 || (c shr 8 and 0xFF) < 0xF2 || (c and 0xFF) < 0xF2)) return false
+            }
         }
         return true
     }
+
+    /** Pages both engines drew empty: after a few, blank pages are taken as meant (no more second tries). */
+    private var blankBoth = 0
 
     private suspend fun draw(index: Int, widthPx: Int): ImageBitmap? = run {
         // (why, said on the page: a blank page with no reason helps nobody)
@@ -100,9 +105,10 @@ class PdfiumPages private constructor(
         val bitmap = (if (inParts) null else viaSharedMemory(index, w, h)) ?: viaParts(index, w, h)
         if (bitmap == null && !binder.isBinderAlive) engineDied = true
         // An empty page from the isolated engine: the phone's own engine is asked too, and its page kept if it shows something
-        if (bitmap != null && !engineDied && looksEmpty(bitmap)) {
+        if (bitmap != null && !engineDied && blankBoth < 3 && looksEmpty(bitmap)) {
             val other = viaSystem(index, w)
             if (other != null && !looksEmpty(other.asAndroidBitmap())) { problem = "white"; return@run other.also { remember(key, it, w, h) } }
+            if (other != null) blankBoth++
         }
         // The phone's own engine only for a page the living isolated engine could not draw on this
         // phone; a file that crashed the isolated engine is never handed to an engine in this process

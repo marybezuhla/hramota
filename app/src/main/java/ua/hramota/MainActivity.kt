@@ -480,7 +480,6 @@ class MainActivity : ComponentActivity() {
         const val KEY_FIRST_NAME = "compare_first_name"
         const val KEY_RESCUE = "rescue_saving"
         const val KEY_CREATING = "creating"
-        /** A document handed over by the viewer (opened from another app), to open inside Hramota's window. */
         const val KEY_CHOOSING = "compare_choosing"
         const val KEY_COMPARING = "comparing"
         const val KEY_SETTINGS = "settings"

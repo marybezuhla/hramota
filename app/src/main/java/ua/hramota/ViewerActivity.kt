@@ -83,7 +83,8 @@ open class ViewerActivity : ComponentActivity() {
         val ownCopy = ua.hramota.data.Shelf.isOwn(this, uri)
         if (ownCopy && intent.getStringExtra(EXTRA_TOKEN) != TOKEN) { finish(); return }
         // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
-        val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
+        // (direction marks and controls out: a name another app gives must not disguise its file type)
+        val name = cleanName((if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri))
         if (!inline) labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
         // (off the main thread: it asks the file's app for lasting access and writes the list, sealed under lock)
@@ -186,7 +187,7 @@ open class ViewerActivity : ComponentActivity() {
                             is ViewerState.Text -> st.paragraphs.firstOrNull { it.text.isNotBlank() }?.text
                             else -> null
                         }?.replace(Regex("\\s+"), " ")
-                            ?.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it.isISOControl() }?.trim()?.take(60)?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+                            ?.let(::cleanName)?.trim()?.take(60)?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
                         val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
                         library.update(id) { it?.copy(title = first + ext) }
                     }
@@ -806,7 +807,9 @@ open class ViewerActivity : ComponentActivity() {
         const val EXTRA_TOKEN = "ua.hramota.TOKEN"
         /** Open straight into editing (a document just made). */
         const val EXTRA_EDIT = "ua.hramota.EDIT"
-        /** The viewer to start for a document: in its own window or inside Hramota's, as the person chose. */
+        /** A name without direction marks or control characters. */
+        fun cleanName(s: String): String = s.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' || it.isISOControl() }
+
         /** Turns on the entry for files from other apps that matches the setting (see the manifest's aliases). */
         fun syncEntry(context: android.content.Context, separate: Boolean) {
             val pm = context.packageManager
@@ -819,6 +822,7 @@ open class ViewerActivity : ComponentActivity() {
             if (separate) { set("OpenApart", true); set("OpenHere", false) } else { set("OpenHere", true); set("OpenApart", false) }
         }
 
+        /** The viewer to start for a document: in its own window or inside Hramota's, as the person chose. */
         fun viewerClass(context: android.content.Context): Class<out ViewerActivity> =
             if (ua.hramota.data.Settings.get(context).state.value.separateWindows) ViewerActivity::class.java else ViewerInlineActivity::class.java
 

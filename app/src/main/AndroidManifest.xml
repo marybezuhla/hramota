@@ -38,10 +38,11 @@
             </intent-filter>
         </activity>
 
-        <!-- A document in a window of its own (a separate card in Recents), with "each document in its own window" -->
+        <!-- A document in a window of its own (a separate card in Recents), with "each document in its own window".
+             Exported with no filter only so its card in Recents opens again after a restart; it checks what it is given. -->
         <activity
             android:name=".ViewerActivity"
-            android:exported="false"
+            android:exported="true"
             android:documentLaunchMode="intoExisting"
             android:autoRemoveFromRecents="true"
             android:maxRecents="25"
