@@ -5,7 +5,7 @@ import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,8 +20,10 @@ class VoiceTest {
     @Test fun tetianaReadsASentence() = runBlocking {
         val voice = TetianaVoice.open(context, TetianaVoice.dictionary(context))
         try {
-            // The same letters as the voice's own tools give (checked against them when the voice was made)
-            assertArrayEquals(longArrayOf(12, 10, 2, 9, 28, 17, 5, 3, 21, 8, 9, 13, 7, 2, 16, 15, 5), voice.ids(voice.text.prepare("Стежка звернула")))
+            // The letters given to the voice, read back through its own token list: stresses in place, one space
+            val tokens = context.assets.open("voice/uk-tetiana.tokens.txt").bufferedReader().readLines()
+            val back = voice.ids(voice.text.prepare("Стежка звернула")).joinToString("") { tokens[it.toInt()].replace("<space>", " ") }
+            assertEquals("ст+ежка зверн+ула", back)
             val text = "Увечері туман піднявся з долини, а мати засвітила лампу."
             val t0 = System.nanoTime()
             val sound = voice.read(text, 1f)
