@@ -75,11 +75,11 @@ object ReadAloud {
     private const val PAUSED_LIMIT = 30 * 60_000L
 
     // A failure in the sound system must never close the app: reading just stops, with a word why
-    private val guard = CoroutineExceptionHandler { _, _ ->
+    private val guard: CoroutineExceptionHandler = CoroutineExceptionHandler { _, _ ->
         _state.update { it.copy(playing = false, preparing = false, notice = NOTICE_NO_SOUND) }
         onMain { pause() }
     }
-    private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + guard)
+    private val main: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + guard)
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -103,7 +103,7 @@ object ReadAloud {
     private class Spot(val unit: Int, val start: Int, val end: Int, val text: String, val last: Boolean)
 
     /** Starts reading [document] from [unit] (and the character [from] in it). */
-    fun start(context: Context, document: Document, unit: Int, from: Int = 0, speed: Float, voice: String) = onMain {
+    fun start(context: Context, document: Document, unit: Int, from: Int = 0, speed: Float, voice: String): Unit = onMain {
         app = context.applicationContext
         job?.cancel()
         doc = document
@@ -115,13 +115,13 @@ object ReadAloud {
     /** The same document seen anew (the screen turned): its text comes from the new view from now on. */
     fun rebind(document: Document) { if (_state.value.document == document.id) doc = document }
 
-    fun pause() = onMain {
+    fun pause(): Unit = onMain {
         job?.cancel(); job = null
         _state.update { it.copy(playing = false, preparing = false) }
         idleJob?.cancel(); idleJob = main.launch { delay(PAUSED_LIMIT); stopNow() }
     }
 
-    fun resume() = onMain {
+    fun resume(): Unit = onMain {
         val s = _state.value
         if (!s.active || s.playing) return@onMain
         idleJob?.cancel()
@@ -130,23 +130,23 @@ object ReadAloud {
         run(s.unit, s.start, 0)
     }
 
-    fun toggle() = onMain { if (_state.value.playing) pause() else resume() }
+    fun toggle(): Unit = onMain { if (_state.value.playing) pause() else resume() }
 
     /** To the next or the previous sentence (while paused, only the place moves). */
-    fun skip(by: Int) = onMain {
+    fun skip(by: Int): Unit = onMain {
         val s = _state.value
         if (!s.active) return@onMain
         run(s.unit, s.start, by)
     }
 
-    fun setSpeed(speed: Float) = onMain { _state.update { it.copy(speed = speed) }; again() }
+    fun setSpeed(speed: Float): Unit = onMain { _state.update { it.copy(speed = speed) }; again() }
 
-    fun setVoice(voice: String) = onMain { _state.update { it.copy(voice = voice) }; again() }
+    fun setVoice(voice: String): Unit = onMain { _state.update { it.copy(voice = voice) }; again() }
 
     private fun again() { val s = _state.value; if (s.playing) run(s.unit, s.start, 0) }
 
     /** Stops reading after [minutes]; 0 turns the timer off; [SLEEP_CHAPTER] stops at the next chapter. */
-    fun sleep(minutes: Long) = onMain {
+    fun sleep(minutes: Long): Unit = onMain {
         sleepJob?.cancel(); sleepJob = null
         when (minutes) {
             0L -> _state.update { it.copy(sleepAt = null) }
@@ -159,7 +159,7 @@ object ReadAloud {
     }
 
     /** Ends reading (the document closed, or ✕): the controls go. With [documentId], only if that one is read. */
-    fun stop(documentId: String? = null) = onMain {
+    fun stop(documentId: String? = null): Unit = onMain {
         if (documentId != null && _state.value.document != documentId) return@onMain
         stopNow()
     }

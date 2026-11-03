@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.File
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -24,10 +26,10 @@ val joinVoice by tasks.registering {
         check(parts.isNotEmpty()) { "voice parts missing in $dir" }
         val out = joinedVoice.get().file("voice/uk-tetiana.onnx").asFile
         out.parentFile.mkdirs()
-        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val md = MessageDigest.getInstance("SHA-256")
         out.outputStream().use { o -> parts.forEach { p -> p.inputStream().use { i -> val b = ByteArray(1 shl 20); while (true) { val n = i.read(b); if (n < 0) break; o.write(b, 0, n); md.update(b, 0, n) } } } }
-        val got = md.digest().joinToString("") { "%02x".format(it) }
-        val want = java.io.File(dir, "uk-tetiana.onnx.sha256").readText().trim()
+        val got = md.digest().joinToString("") { b -> "%02x".format(b) }
+        val want = File(dir, "uk-tetiana.onnx.sha256").readText().trim()
         check(got == want) { "voice model sum $got, expected $want" }
     }
 }
