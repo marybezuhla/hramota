@@ -28,6 +28,7 @@ jobs:
           python3 tools/voices/samples.py | tee out/log.txt
           python3 tools/voices/stressed.py
           python3 tools/voices/g2p.py
+          python3 tools/voices/prominence.py | tee out/prominence.txt
       - name: Push the samples
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
