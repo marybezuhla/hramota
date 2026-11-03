@@ -1,0 +1,59 @@
+name: Prepare voice
+
+# Run by pushing the voice-prepare branch. Builds what reading aloud needs, from fixed sources, and pushes it to
+# the voice branch for review (copied into the app by hand, like PDFium):
+#  - the Ukrainian voice (Tetiana) of robinhad/ukrainian-tts release v5.0.0 (MIT; dataset Apache-2.0), exported to
+#    ONNX and stored in 8 bits; its letters (tokens) and speaker vector;
+#  - the stress dictionary from ukrainian-word-stress 2.1.0 (MIT), in the app's compact form.
+on:
+  push:
+    branches: [voice-prepare]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: python:3.10-bookworm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update -q >/dev/null && apt-get install -y -q ffmpeg git >/dev/null
+          python3 -m pip install -q torch torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git@v6.0.0"
+          python3 -m pip install -q --no-deps "onnx==1.14.1"
+          mkdir -p out voice
+          python3 -u tools/voices/export_espnet.py 2>&1 | tail -20 | tee out/export.txt
+          python3 -m venv /tmp/q && /tmp/q/bin/pip install -q onnx onnxruntime numpy marisa-trie "ukrainian-word-stress==2.1.0"
+          /tmp/q/bin/python -u tools/voices/quantize.py 2>&1 | tee -a out/export.txt
+          /tmp/q/bin/python -u tools/voices/build_stress.py voice/stress.bin | tee voice/stress.txt
+          cp out/uk.int8.onnx voice/uk-tetiana.onnx
+          cp out/tokens.txt voice/uk-tetiana.tokens.txt
+          cp out/tetiana.xvector.f32 voice/uk-tetiana.xvector.bin
+          sha256sum m/model.pth m/config.yaml m/spk_xvector.ark > voice/SOURCES.sha256
+          cp out/export.txt voice/
+          cp out/*.m4a voice/ 2>/dev/null || true
+          # Sources to port (normalising numbers, stress rules), for reading
+          P=$(python3 -c "import ukrainian_tts,os;print(os.path.dirname(ukrainian_tts.__file__))")
+          mkdir -p voice/src && cp "$P"/formatter.py "$P"/stress.py voice/src/ || true
+          cp "$P"/../ukrainian_tts-*.dist-info/LICENSE* voice/LICENSE-ukrainian-tts 2>/dev/null || true
+          (cd voice && sha256sum uk-tetiana.onnx uk-tetiana.tokens.txt uk-tetiana.xvector.bin stress.bin > SHA256SUMS)
+          ls -la voice
+      - name: Push for review
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd voice
+          git config --global --add safe.directory '*'
+          git init -q && git checkout -q -b voice && git add . && git -c user.name=ci -c user.email=ci@localhost commit -qm "voice ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}" voice
