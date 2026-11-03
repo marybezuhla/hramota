@@ -336,6 +336,7 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
         }
     }
     BoxWithConstraints(modifier.aspectRatio(0.72f)) {
+        val width = maxWidth
         val c = cover
         if (c != null) Image(c, contentDescription = e.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
         // A small cover has no room for the title: only the format
@@ -347,7 +348,7 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
             // The longest word must fit on one line: never «Порівняльн-а» broken mid-word
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
-            val room = with(density) { (maxWidth - 26.dp).toPx() }
+            val room = with(density) { (width - 26.dp).toPx() }
             val size = remember(title, room) {
                 val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
                 var s = 13f
