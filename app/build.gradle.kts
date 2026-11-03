@@ -11,6 +11,28 @@ plugins {
 val appVersion = rootProject.file("version.txt").readText().trim()
 val appVersionCode = appVersion.split('.').map { it.toInt() }.let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
 
+// The voice for reading aloud is kept in the repository in parts (a repository takes files below 100 MB); the build
+// joins them into one asset and checks it against the sum written when the voice was made (voice-assets.yml)
+val voiceParts = layout.projectDirectory.dir("src/main/voice")
+val joinedVoice = layout.buildDirectory.dir("generated/voice")
+val joinVoice by tasks.registering {
+    inputs.dir(voiceParts)
+    outputs.dir(joinedVoice)
+    doLast {
+        val dir = voiceParts.asFile
+        val parts = dir.listFiles { f -> f.name.startsWith("uk-tetiana.onnx.part") }.orEmpty().sortedBy { it.name }
+        check(parts.isNotEmpty()) { "voice parts missing in $dir" }
+        val out = joinedVoice.get().file("voice/uk-tetiana.onnx").asFile
+        out.parentFile.mkdirs()
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        out.outputStream().use { o -> parts.forEach { p -> p.inputStream().use { i -> val b = ByteArray(1 shl 20); while (true) { val n = i.read(b); if (n < 0) break; o.write(b, 0, n); md.update(b, 0, n) } } } }
+        val got = md.digest().joinToString("") { "%02x".format(it) }
+        val want = java.io.File(dir, "uk-tetiana.onnx.sha256").readText().trim()
+        check(got == want) { "voice model sum $got, expected $want" }
+    }
+}
+tasks.named("preBuild") { dependsOn(joinVoice) }
+
 android {
     namespace = "ua.hramota"
     // No list of dependencies (encrypted for Google) inside the APK
@@ -62,6 +84,8 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets { getByName("main").assets.srcDir(joinedVoice) }
 
     androidResources {
         generateLocaleConfig = true

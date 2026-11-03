@@ -316,7 +316,7 @@ private fun ViewerContent(
         source?.let { src ->
             val book = (state as? ViewerState.Reader)?.book
             ua.hramota.speech.ReadAloud.Document(
-                id = documentId, title = name.substringBeforeLast('.', name), count = { src.count }, text = src.text,
+                id = documentId, title = name.substringBeforeLast('.', name), count = { src.count }, text = src.text, complete = { src.complete },
                 isHeading = { i -> (book?.blocks?.getOrNull(i) as? ua.hramota.doc.book.BookBlock.Text)?.kind?.let { it == ua.hramota.doc.book.BookBlock.Kind.HEADING1 || it == ua.hramota.doc.book.BookBlock.Kind.HEADING2 } == true },
             )
         }
