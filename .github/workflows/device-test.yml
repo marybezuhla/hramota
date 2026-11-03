@@ -41,7 +41,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           # Each script line runs on its own; pipefail keeps a failed test run from looking green
           # Timings of the large-document tests are kept from logcat whether or not the tests pass
-          script: bash -c "set -o pipefail; gradle --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee device.log; status=\$?; adb logcat -d -s HramotaBig:I > big.log; exit \$status"
+          script: bash -c "set -o pipefail; gradle --no-daemon :app:connectedDebugAndroidTest 2>&1 | tee device.log; status=\$?; adb logcat -d -s HramotaBig:I HramotaVoice:I > big.log; exit \$status"
       - name: Collect results
         if: always()
         run: |
