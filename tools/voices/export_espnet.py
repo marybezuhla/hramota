@@ -1,36 +1,67 @@
-"""The ESPnet Ukrainian voice (Tacotron 2 + HiFi-GAN) for the phone, through espnet_onnx: encoder, one decoder step
-(the loop runs in the app), postnet and vocoder as ONNX; an 8-bit copy; the same sentences read from the export."""
-import glob, os, subprocess, time, wave, numpy as np, torch
-from ukrainian_tts.tts import TTS
+"""The robinhad/ukrainian-tts voices for the phone. v6 is Tacotron 2 + HiFi-GAN (a decoder loop, hard to move);
+earlier releases may be VITS (one ONNX model, like Piper's). Lists the releases, exports the newest VITS one
+with the Tetiana voice, and reads the test sentences from the export."""
+import json, os, subprocess, time, urllib.request, wave, numpy as np, torch, yaml
+
+rels = json.load(urllib.request.urlopen("https://api.github.com/repos/robinhad/ukrainian-tts/releases?per_page=30"))
+chosen = None
+for r in rels:
+    names = {a["name"]: a["browser_download_url"] for a in r["assets"]}
+    kind = "?"
+    if "config.yaml" in names:
+        cfg = yaml.safe_load(urllib.request.urlopen(names["config.yaml"]).read())
+        kind = cfg.get("tts")
+        if kind == "vits" and chosen is None: chosen = (r["tag_name"], names, cfg)
+    print(r["tag_name"], r["published_at"][:10], kind, sorted(names))
+if not chosen: raise SystemExit("no VITS release")
+tag, names, cfg = chosen
+print("using", tag, "spk_embed_dim", cfg.get("tts_conf", {}).get("generator_params", {}).get("spk_embed_dim"),
+      "num_speakers", cfg.get("tts_conf", {}).get("generator_params", {}).get("spks"))
+os.makedirs("m", exist_ok=True)
+for n, u in names.items():
+    if n.endswith((".pth", ".yaml", ".ark", ".npz", ".json", ".txt")): urllib.request.urlretrieve(u, "m/" + n)
+from espnet2.bin.tts_inference import Text2Speech
+s2 = Text2Speech(train_config="m/config.yaml", model_file="m/model.pth", device="cpu")
+gen = next(m for _, m in s2.model.named_modules() if type(m).__name__ == "VITSGenerator")
+gen.eval()
+spk = None
+if os.path.exists("m/spk_xvector.ark"):
+    from kaldiio import load_ark
+    xv = {k: v for k, v in load_ark("m/spk_xvector.ark")}
+    print("speakers:", list(xv))
+    spk = np.asarray(xv["tetiana"] if "tetiana" in xv else next(iter(xv.values())), dtype=np.float32).reshape(-1)
+    spk.tofile("out/tetiana.xvector.f32")
+open("out/tokens.txt", "w", encoding="utf-8").write("\n".join(s2.train_args.token_list) + "\n")
 from ukrainian_tts.formatter import preprocess_text
 from ukrainian_tts.stress import sentence_to_stress, stress_dict
-
-tts = TTS(device="cpu")
-s2 = tts.synthesizer
-spk = np.asarray(tts.xvectors["tetiana"][0], dtype=np.float32)
-print("tts:", type(s2.model.tts).__name__, "fs", s2.fs)
-from espnet_onnx.export import TTSModelExport
-m = TTSModelExport(cache_dir="exp")
-try:
-    m.export(s2, tag_name="uk", quantize=True, verbose=False)
-    print("exported with espnet_onnx")
-except Exception as e:
-    import traceback; traceback.print_exc()
-for f in sorted(glob.glob("exp/**/*", recursive=True)):
-    if os.path.isfile(f): print(f, round(os.path.getsize(f) / 1e6, 2), "MB")
 TEXT = ("Стежка звернула до потоку, і ми вперше почули, як шумить ліс над перевалом. "
-        "Увечері туман піднявся з долини, а мати засвітила лампу.")
+        "Увечері туман піднявся з долини, а мати засвітила лампу. "
+        "Чи підете ви завтра до бібліотеки? Там нова виставка українських видань.")
 t = sentence_to_stress(preprocess_text(TEXT), stress_dict)
-from espnet_onnx import Text2Speech as OnnxTTS
-for q in (False, True):
-    try:
-        o = OnnxTTS(tag_name="uk", cache_dir="exp", use_quantized=q)
-        t0 = time.time(); out = o(t, spembs=spk); wav = np.asarray(out["wav"]).squeeze()
-        print("onnx quantized" if q else "onnx", "RTF", round((time.time() - t0) / (len(wav) / s2.fs), 3))
-        a = (np.clip(wav / max(1e-6, np.abs(wav).max()) * 0.9, -1, 1) * 32767).astype(np.int16)
-        name = "export-int8" if q else "export-fp32"
-        with wave.open(f"out/{name}.wav", "wb") as wf:
-            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(s2.fs); wf.writeframes(a.tobytes())
-        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"out/{name}.wav", "-c:a", "aac", "-b:a", "96k", f"out/{name}.m4a"], check=True)
-    except Exception:
-        import traceback; traceback.print_exc()
+ids = s2.preprocess_fn("<dummy>", dict(text=t))["text"]
+x = torch.tensor(ids, dtype=torch.long)[None]
+
+class Wrap(torch.nn.Module):
+    def __init__(self, g): super().__init__(); self.g = g
+    def forward(self, text, text_lengths, spembs, scales):
+        wav, _, dur = self.g.inference(text=text, text_lengths=text_lengths, spembs=spembs,
+                                       noise_scale=scales[0], alpha=scales[1], noise_scale_dur=scales[2])
+        return wav.view(1, -1), dur
+w = Wrap(gen)
+args = (x, torch.tensor([x.shape[1]]), torch.tensor(spk)[None], torch.tensor([0.667, 1.0, 0.8]))
+with torch.no_grad():
+    torch.onnx.export(w, args, "out/uk.onnx", input_names=["text", "text_lengths", "spembs", "scales"],
+                      output_names=["wav", "durations"], dynamic_axes={"text": {1: "T"}, "wav": {1: "N"}, "durations": {1: "T"}},
+                      opset_version=17, dynamo=False)
+print("onnx MB", round(os.path.getsize("out/uk.onnx") / 1e6, 1))
+def save(a, name):
+    a = (np.clip(a / max(1e-6, np.abs(a).max()) * 0.9, -1, 1) * 32767).astype(np.int16)
+    with wave.open(f"out/{name}.wav", "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(s2.fs); wf.writeframes(a.tobytes())
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"out/{name}.wav", "-c:a", "aac", "-b:a", "96k", f"out/{name}.m4a"], check=True)
+with torch.no_grad():
+    t0 = time.time(); ref = w(*args)[0].numpy().squeeze()
+print("torch RTF", round((time.time() - t0) / (len(ref) / s2.fs), 3))
+save(ref, f"vits-{tag}-torch")
+np.save("out/feed.npy", {"text": x.numpy(), "text_lengths": np.array([x.shape[1]]), "spembs": spk[None], "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
+open("out/tag.txt", "w").write(tag)
