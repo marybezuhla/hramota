@@ -10,9 +10,14 @@ for f in ("uk.onnx", "uk.int8.onnx"):
     print(f, "inputs:", [(i.name, i.shape) for i in s.get_inputs()])
     t0 = time.time(); a = s.run(["wav"], {k: v for k, v in feed.items() if k in names})[0].squeeze()
     print(f, round(os.path.getsize("out/" + f) / 1e6, 1), "MB", "RTF", round((time.time() - t0) / (len(a) / 22050), 3))
+    # A sentence of another length must work too (the voice must not be fixed to the test one)
+    short = np.load("out/feed-short.npy", allow_pickle=True).item()
+    b = s.run(["wav"], {k: v for k, v in short.items() if k in names})[0].squeeze()
+    print(f, "short sentence:", len(short["text"][0]), "letters,", round(len(b) / 22050, 2), "s")
+    assert 0.5 < len(b) / 22050 < 4, "the short sentence came out wrong"
     a = (np.clip(a / max(1e-6, np.abs(a).max()) * 0.9, -1, 1) * 32767).astype(np.int16)
     name = f"vits-{tag}-" + f.replace(".onnx", "")
     with wave.open(f"out/{name}.wav", "wb") as wf:
         wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(a.tobytes())
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"out/{name}.wav", "-c:a", "aac", "-b:a", "96k", f"out/{name}.m4a"], check=True)
-os.remove("out/uk.onnx"); os.remove("out/feed.npy")
+os.remove("out/uk.onnx"); os.remove("out/feed.npy"); os.remove("out/feed-short.npy")

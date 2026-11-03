@@ -41,6 +41,23 @@ t = sentence_to_stress(preprocess_text(TEXT), stress_dict)
 ids = s2.preprocess_fn("<dummy>", dict(text=t))["text"]
 x = torch.tensor(ids, dtype=torch.long)[None]
 
+# ESPnet makes its masks with Python numbers (lengths.max() as an int): traced, they would fix the sentence length
+# for good (an exported voice that reads only sentences as long as the test one). A mask from tensors only:
+def make_non_pad_mask(lengths, xs=None, length_dim=-1, maxlen=None):
+    n = xs.size(length_dim) if xs is not None else lengths.max()
+    seq = torch.arange(n, device=lengths.device)
+    mask = seq.unsqueeze(0) < lengths.unsqueeze(1)
+    if xs is not None and xs.dim() == 3 and length_dim == -1:
+        mask = mask.unsqueeze(1).expand(-1, xs.size(1), -1)
+    return mask
+def make_pad_mask(lengths, xs=None, length_dim=-1, maxlen=None):
+    return ~make_non_pad_mask(lengths, xs, length_dim, maxlen)
+import sys as _sys
+for _name, _mod in list(_sys.modules.items()):
+    if _name.startswith(("espnet2.gan_tts", "espnet.nets.pytorch_backend")) and _mod is not None:
+        if hasattr(_mod, "make_non_pad_mask"): setattr(_mod, "make_non_pad_mask", make_non_pad_mask)
+        if hasattr(_mod, "make_pad_mask"): setattr(_mod, "make_pad_mask", make_pad_mask)
+
 class Wrap(torch.nn.Module):
     def __init__(self, g): super().__init__(); self.g = g
     def forward(self, text, text_lengths, spembs, scales):
@@ -63,5 +80,7 @@ with torch.no_grad():
     t0 = time.time(); ref = w(*args)[0].numpy().squeeze()
 print("torch RTF", round((time.time() - t0) / (len(ref) / s2.fs), 3))
 save(ref, f"vits-{tag}-torch")
+short = s2.preprocess_fn("<dummy>", dict(text=sentence_to_stress(preprocess_text("Чи підете ви завтра?"), stress_dict)))["text"]
+np.save("out/feed-short.npy", {"text": np.array([short], dtype=np.int64), "spembs": spk, "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
 np.save("out/feed.npy", {"text": x.numpy(), "text_lengths": np.array([x.shape[1]]), "spembs": spk, "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
 open("out/tag.txt", "w").write(tag)
