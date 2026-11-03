@@ -7,8 +7,9 @@ from ukrainian_tts.stress import sentence_to_stress, stress_dict
 
 tts = TTS(device="cpu")
 s2 = tts.synthesizer
-gen = s2.model.tts.generator
+gen = next(m for _, m in s2.model.named_modules() if type(m).__name__ == "VITSGenerator")
 gen.eval()
+print("generator:", type(gen).__name__, [n for n, _ in s2.model.named_children()])
 tokens = s2.train_args.token_list
 open("out/tokens.txt", "w", encoding="utf-8").write("\n".join(tokens) + "\n")
 spk = np.asarray(tts.xvectors["tetiana"][0], dtype=np.float32)
