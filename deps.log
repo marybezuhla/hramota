@@ -1,0 +1,81 @@
+----
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/data/Backup.kt:172:59 Condition is always 'true'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/book/BookReaders.kt:84:27 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/docx/DocxLayout.kt:684:32 'val matrix: Matrix' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/sheet/edit/XlsxEdit.kt:924:71 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:351:69 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:414:33 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:423:26 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:447:37 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:456:13 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/EditSaving.kt:100:34 Condition is always 'true'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/MainActivity.kt:112:101 The resolution result depends on the declaration order. This can lead to false-positive errors in the IDE. Specify the return type of 'val saveRescue: ActivityResultLauncher<String>' defined in 'ua.hramota.MainActivity' explicitly.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:323:144 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:325:181 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:327:148 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:328:149 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:330:149 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:333:120 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:342:37 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:343:113 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:347:96 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:357:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:365:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/data/Backup.kt:172:59 Condition is always 'true'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/book/BookReaders.kt:84:27 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/docx/DocxLayout.kt:684:32 'val matrix: Matrix' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/sheet/edit/XlsxEdit.kt:924:71 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:351:69 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:414:33 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:423:26 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:447:37 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:456:13 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+
+> Task :app:compileReleaseJavaWithJavac NO-SOURCE
+> Task :app:processReleaseJavaRes
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:dexBuilderRelease
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:mergeDexRelease
+> Task :app:mergeReleaseJavaResource
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:compileReleaseArtProfile
+> Task :app:compileReleaseUnitTestKotlin
+> Task :app:dexBuilderDebug
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:testReleaseUnitTest
+> Task :app:lintVitalReportRelease
+> Task :app:mergeDebugGlobalSynthetics
+> Task :app:lintVitalRelease
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJavaResource
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:compileDebugAndroidTestKotlin
+> Task :app:compileDebugAndroidTestJavaWithJavac NO-SOURCE
+> Task :app:dexBuilderDebugAndroidTest
+> Task :app:mergeDebugAndroidTestGlobalSynthetics
+> Task :app:processDebugAndroidTestJavaRes
+> Task :app:mergeProjectDexDebugAndroidTest
+> Task :app:mergeDebugAndroidTestJavaResource
+> Task :app:packageDebugAndroidTest
+> Task :app:createDebugAndroidTestApkListingFileRedirect
+> Task :app:assembleDebugAndroidTest
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1793742685936.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/hramota/hramota/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 6m 6s
+133 actionable tasks: 133 executed
