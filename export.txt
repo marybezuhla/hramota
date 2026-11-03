@@ -1,0 +1,399 @@
+/__w/hramota/hramota/tools/voices/export_espnet.py:68: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+  torch.onnx.export(w, args, "out/uk.onnx", input_names=["text", "text_lengths", "spembs", "scales"],
+/usr/local/lib/python3.10/site-packages/espnet/nets/pytorch_backend/transformer/embedding.py:288: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if self.pe.size(1) >= x.size(1) * 2 - 1:
+/usr/local/lib/python3.10/site-packages/espnet2/gan_tts/vits/transform.py:116: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if torch.min(inputs) < left or torch.max(inputs) > right:
+/usr/local/lib/python3.10/site-packages/espnet2/gan_tts/vits/transform.py:121: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if min_bin_width * num_bins > 1.0:
+/usr/local/lib/python3.10/site-packages/espnet2/gan_tts/vits/transform.py:123: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if min_bin_height * num_bins > 1.0:
+/usr/local/lib/python3.10/site-packages/espnet2/gan_tts/vits/transform.py:173: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  assert (discriminant >= 0).all()
+/usr/local/lib/python3.10/site-packages/torch/onnx/_internal/torchscript_exporter/jit_utils.py:308: UserWarning: Constant folding - Only steps=1 can be constant folded for opset >= 10 onnx::Slice op. Constant folding not applied. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/jit/passes/onnx/constant_fold.cpp:178.)
+  _C._jit_pass_onnx_node_shape_type_inference(node, params_dict, opset_version)
+/usr/local/lib/python3.10/site-packages/torch/onnx/_internal/torchscript_exporter/utils.py:712: UserWarning: Constant folding - Only steps=1 can be constant folded for opset >= 10 onnx::Slice op. Constant folding not applied. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/jit/passes/onnx/constant_fold.cpp:178.)
+  _C._jit_pass_onnx_graph_shape_type_inference(
+/usr/local/lib/python3.10/site-packages/torch/onnx/_internal/torchscript_exporter/utils.py:1185: UserWarning: Constant folding - Only steps=1 can be constant folded for opset >= 10 onnx::Slice op. Constant folding not applied. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/jit/passes/onnx/constant_fold.cpp:178.)
+  _C._jit_pass_onnx_graph_shape_type_inference(
+onnx MB 151.5
+torch RTF 0.605
+WARNING:root:Please consider to run pre-processing before quantization. Refer to example: https://github.com/microsoft/onnxruntime-inference-examples/blob/main/quantization/image_classification/cpu/ReadMe.md 
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/Slice_3_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 4
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__449"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_1_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__453"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_2_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__454"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_3_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__455"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_4_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__456"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/Slice_6_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 2
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/Slice_11_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 2
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_5_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__555"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.7/NonZero_6_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__561"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/Slice_3_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 4
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__670"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_1_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__674"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_2_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__675"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_3_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__676"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_4_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__677"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/Slice_6_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 2
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/Slice_11_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 2
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_5_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__776"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.5/NonZero_6_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__782"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/Slice_3_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 4
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__891"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_1_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__895"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_2_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__896"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_3_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__897"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_4_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__898"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/Slice_6_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 2
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/Slice_11_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 2
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_5_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__997"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/duration_predictor/flows.3/NonZero_6_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_param: "unk__1003"
+    }
+  }
+}
+.
+WARNING:root:Inference failed or unsupported type to quantize for tensor '/Slice_output_0', type is tensor_type {
+  elem_type: 7
+  shape {
+    dim {
+      dim_value: 3
+    }
+    dim {
+      dim_value: 2
+    }
+  }
+}
+.
+uk.onnx inputs: [('text', [1, 'T']), ('text_lengths', [1]), ('spembs', [192]), ('scales', [3])]
+uk.onnx 151.5 MB RTF 0.375
+uk.onnx short sentence: 24 letters, 1.23 s
+uk.int8.onnx inputs: [('text', [1, 'T']), ('text_lengths', [1]), ('spembs', [192]), ('scales', [3])]
+uk.int8.onnx 53.1 MB RTF 2.285
+uk.int8.onnx short sentence: 24 letters, 1.28 s
