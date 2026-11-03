@@ -22,7 +22,7 @@ object UkrainianNumbers {
     /** Grammatical form of an ordinal: masculine/neuter or feminine, and the case. */
     enum class Form(val hard: String, val soft: String) {
         NOM_M("ий", "ій"), GEN_M("ого", "ього"), LOC_M("ому", "ьому"),
-        NOM_F("а", "я"), GEN_F("ої", "ьої"), LOC_F("ій", "ій"),
+        NOM_F("а", "я"), GEN_F("ої", "ьої"), LOC_F("ій", "ій"), ACC_F("у", "ю"),
     }
 
     private fun below1000(n: Int, feminine: Boolean, out: MutableList<String>) {
@@ -70,7 +70,7 @@ object UkrainianNumbers {
             return end((if (thousands == 1L) "" else THOUSAND_PREFIX[thousands.toInt()]) + "тисячн")
         }
         val words = ArrayList<String>()
-        if (thousands > 0) words += cardinal(thousands * 1000)
+        if (thousands > 0) words += if (thousands == 1L) "тисяча" else cardinal(thousands * 1000)
         val h = rest / 100; val r = rest % 100
         if (r == 0) { words += end(ORD_HUNDREDS[h]); return words.joinToString(" ") }
         if (h > 0) words += HUNDREDS[h]
@@ -86,7 +86,10 @@ object UkrainianNumbers {
     private val LOC_PREP = setOf("у", "в", "на", "при", "о", "об", "по")
 
     // A unit after a number, with its forms (one, few, many) and gender
-    private class Unit(val one: String, val few: String, val many: String, val feminine: Boolean = false)
+    private class Unit(val one: String, val few: String, val many: String, val feminine: Boolean = false) {
+        /** After a fraction («1,5 кілометра»): the genitive singular, which is the «few» form for these words. */
+        val ofFraction get() = if (feminine || one == "євро") few else few.dropLast(1) + "а"
+    }
     private val UNITS = mapOf(
         "%" to Unit("відсоток", "відсотки", "відсотків"),
         "км" to Unit("кілометр", "кілометри", "кілометрів"), "м" to Unit("метр", "метри", "метрів"),
@@ -107,8 +110,9 @@ object UkrainianNumbers {
     private val CURRENCY_BEFORE = Regex("""([$€])\s?(\d+)""")
     private val WITH_UNIT = Regex("""\b(\d{1,12})\s?(%|км|мм|см|кг|грн|коп|год|хв|сек|тис|млн|млрд|м|г|т|л|с)(?![\p{L}])\.?""")
     private val NUMBERED = Regex("""№\s?(\d+)""")
+    private val DECIMAL_UNIT = Regex("""\b(\d+)[,.](\d+)\s?(%|км|мм|см|кг|грн|м|г|т|л)(?![\p{L}])\.?""")
     private val DECIMAL = Regex("""\b(\d+)[,.](\d+)\b""")
-    private val ORDINAL_SUFFIX = Regex("""\b(\d+)-(?:й|ий|ій|го|ого|му|ому|та|тя|ту|ої|ій)\b""")
+    private val ORDINAL_SUFFIX = Regex("""\b(\d+)-(?:й|ий|ій|го|ого|му|ому|та|тя|ту|тю|ої)\b""")
     private val NUMBER = Regex("""\b\d+\b""")
     private val SPACED = Regex("""\b(\d{1,3})(?:[  ](\d{3}))+\b""")
 
@@ -136,6 +140,17 @@ object UkrainianNumbers {
             val minutes = if (min == 0L) "" else " " + (if (min < 10) "нуль " else "") + cardinal(min, true)
             (if (prep.isNotEmpty()) m.groupValues[1] + " " else "") + ordinal(if (h == 0L) 24 else h, hourForm) + minutes
         }
+        t = DECIMAL_UNIT.replace(t) { m ->
+            val u = UNITS[m.groupValues[3]] ?: return@replace m.value
+            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value
+            val frac = m.groupValues[2]
+            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + (if (frac.startsWith("0")) "нуль " else "") + cardinal(frac.trimStart('0').ifEmpty { "0" }.toLong(), true) + " " + u.ofFraction
+        }
+        t = DECIMAL.replace(t) { m ->
+            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value
+            val frac = m.groupValues[2]
+            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + frac.trimStart('0').let { f -> (if (frac.startsWith("0")) "нуль " else "") + cardinal(f.ifEmpty { "0" }.toLong()) }
+        }
         t = CURRENCY_BEFORE.replace(t) { m -> m.groupValues[2] + " " + m.groupValues[1] }
         t = WITH_UNIT.replace(t) { m ->
             val n = m.groupValues[1].toLong(); val u = UNITS[m.groupValues[2]] ?: return@replace m.value
@@ -148,13 +163,8 @@ object UkrainianNumbers {
         t = NUMBERED.replace(t) { m -> "номер " + cardinal(m.groupValues[1].toLong()) }
         t = ORDINAL_SUFFIX.replace(t) { m ->
             val n = m.groupValues[1].toLong(); val s = m.value.substringAfter('-')
-            val form = when (s) { "й", "ий", "ій" -> Form.NOM_M; "го", "ого" -> Form.GEN_M; "му", "ому" -> Form.LOC_M; "та", "тя" -> Form.NOM_F; "ої" -> Form.GEN_F; else -> Form.LOC_F }
+            val form = when (s) { "й", "ий", "ій" -> Form.NOM_M; "го", "ого" -> Form.GEN_M; "му", "ому" -> Form.LOC_M; "та", "тя" -> Form.NOM_F; "ої" -> Form.GEN_F; "ту", "тю" -> Form.ACC_F; else -> Form.LOC_F }
             ordinal(n, form)
-        }
-        t = DECIMAL.replace(t) { m ->
-            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value
-            val frac = m.groupValues[2]
-            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + frac.trimStart('0').let { f -> (if (frac.startsWith("0")) "нуль " else "") + cardinal(f.ifEmpty { "0" }.toLong()) }
         }
         t = NUMBER.replace(t) { m -> m.value.toLongOrNull()?.let { if (m.value.length > 12) m.value.map { ONES_M[it - '0'] }.joinToString(" ") else cardinal(it) } ?: m.value }
         return t

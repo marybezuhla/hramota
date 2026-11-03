@@ -146,13 +146,16 @@ fun ViewerScreen(
     notes: List<ua.hramota.data.Note> = emptyList(),
     onNote: (ua.hramota.data.Note) -> Unit = {},
     onRemoveNote: (Long) -> Unit = {},
+    /** Which document this window shows, for reading aloud (two files of the same name stay apart). */
+    documentId: String = name,
 ) {
     // A book takes the colours of its paper, the bars too
-    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings, notes = notes, onNote = onNote, onRemoveNote = onRemoveNote) }
+    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(documentId = documentId, name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings, notes = notes, onNote = onNote, onRemoveNote = onRemoveNote) }
 }
 
 @Composable
 private fun ViewerContent(
+    documentId: String,
     name: String,
     state: ViewerState,
     onBack: () -> Unit,
@@ -288,7 +291,7 @@ private fun ViewerContent(
 
     // Reading aloud: the sentence being said is shown like a found match (search, when open, comes first)
     val readState by ua.hramota.speech.ReadAloud.state.collectAsStateWithLifecycle()
-    val readingHere = readState.document == name
+    val readingHere = readState.document == documentId
     val spoken = if (readingHere && !searching && readState.end > readState.start) SearchHit(readState.unit, readState.start, readState.end) else null
     val shownHit = if (searching) currentHit else spoken
     val spokenHits = remember(spoken) { spoken?.let { mapOf(it.page to listOf(it)) } ?: emptyMap() }
@@ -308,15 +311,22 @@ private fun ViewerContent(
         onVoice = { v -> ua.hramota.speech.ReadAloud.setVoice(v); onReadSettings { it.copy(readVoice = v) } },
         onSpeed = { v -> ua.hramota.speech.ReadAloud.setSpeed(v); onReadSettings { it.copy(readSpeed = v) } },
     ) { readSheet = false }
-    val startReading: () -> Unit = {
-        val src = source
-        if (src != null) {
+    // What reading aloud reads in this view; when the screen turns, the new view's text takes over
+    val readDocument = remember(source, documentId) {
+        source?.let { src ->
             val book = (state as? ViewerState.Reader)?.book
-            val doc = ua.hramota.speech.ReadAloud.Document(
-                id = name, title = name.substringBeforeLast('.', name), count = { src.count }, text = src.text,
+            ua.hramota.speech.ReadAloud.Document(
+                id = documentId, title = name.substringBeforeLast('.', name), count = { src.count }, text = src.text,
                 isHeading = { i -> (book?.blocks?.getOrNull(i) as? ua.hramota.doc.book.BookBlock.Text)?.kind?.let { it == ua.hramota.doc.book.BookBlock.Kind.HEADING1 || it == ua.hramota.doc.book.BookBlock.Kind.HEADING2 } == true },
             )
-            val from = if (inPages) list.firstVisibleItemIndex else textList.firstVisibleItemIndex
+        }
+    }
+    LaunchedEffect(readDocument) { readDocument?.let { ua.hramota.speech.ReadAloud.rebind(it) } }
+    val startReading: () -> Unit = {
+        readDocument?.let { doc ->
+            // The first item seen; a note shown above a document's text is not part of it
+            val offset = if (!inPages && state is ViewerState.Text && hasNote(state)) 1 else 0
+            val from = if (inPages) list.firstVisibleItemIndex else (textList.firstVisibleItemIndex - offset).coerceAtLeast(0)
             ua.hramota.speech.ReadAloud.start(context, doc, from, 0, readSettings.readSpeed, readSettings.readVoice)
         }
     }

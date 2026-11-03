@@ -381,7 +381,7 @@
     <string name="read_settings">Голос і налаштування</string>
     <string name="read_voice">Голос</string>
     <string name="read_voice_hramota">Голос Грамоти</string>
-    <string name="read_voice_hramota_hint">Українська, жіночий, без інтернету. Англійський та інші — голосом телефона.</string>
+    <string name="read_voice_hramota_hint">Українська, жіночий, без інтернету. Англійську та інші мови читає голос телефона.</string>
     <string name="read_voice_phone">Голос телефона</string>
     <string name="read_voice_phone_hint">Як налаштовано в Android; для будь-якої мови, яку знає телефон.</string>
     <string name="read_speed">Швидкість · %1$s×</string>

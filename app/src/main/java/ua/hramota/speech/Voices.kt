@@ -112,41 +112,50 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
  */
 class PhoneVoice private constructor(private val tts: TextToSpeech, private val dir: File) : Voice {
     @Volatile var language: Locale = Locale.getDefault()
+    private val waiting = java.util.concurrent.ConcurrentHashMap<String, (Boolean) -> Unit>()
+
+    init {
+        // One listener for all sentences: each finishes (done, error or stopped) by its own id
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) { utteranceId?.let { waiting.remove(it)?.invoke(true) } }
+            @Deprecated("Deprecated in Java") override fun onError(utteranceId: String?) { utteranceId?.let { waiting.remove(it)?.invoke(false) } }
+            override fun onError(utteranceId: String?, errorCode: Int) { utteranceId?.let { waiting.remove(it)?.invoke(false) } }
+            override fun onStop(utteranceId: String?, interrupted: Boolean) { utteranceId?.let { waiting.remove(it)?.invoke(false) } }
+        })
+    }
 
     override suspend fun read(text: String, speed: Float): Sound? {
         val lang = Sentences.language(text)
         val locale = when (lang) { "uk" -> Locale.forLanguageTag("uk-UA"); "en" -> Locale.UK; else -> language }
         if (tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return null
+        if (text.length > TextToSpeech.getMaxSpeechInputLength()) return null
         tts.language = locale
         tts.setSpeechRate(speed)
-        val file = File(dir, "sentence.wav")
-        val id = System.nanoTime().toString()
-        val ok = suspendCancellableCoroutine { c ->
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) { if (utteranceId == id && c.isActive) c.resume(true) }
-                @Deprecated("Deprecated in Java") override fun onError(utteranceId: String?) { if (utteranceId == id && c.isActive) c.resume(false) }
-                override fun onError(utteranceId: String?, errorCode: Int) { if (utteranceId == id && c.isActive) c.resume(false) }
-            })
-            if (tts.synthesizeToFile(text, null, file, id) != TextToSpeech.SUCCESS && c.isActive) c.resume(false)
-            c.invokeOnCancellation { tts.stop() }
-        }
-        if (!ok) return null
-        return try { Wav.read(file) } finally { file.delete() }
+        val id = "s" + System.nanoTime()
+        // Each sentence its own file: a sentence stopped late can never delete the next one's
+        val file = File(dir, "$id.wav")
+        // On the phone, not over the network, where the engine allows choosing
+        val params = android.os.Bundle().apply { putString(TextToSpeech.Engine.KEY_FEATURE_EMBEDDED_SYNTHESIS, "true") }
+        try {
+            val ok = suspendCancellableCoroutine { c ->
+                waiting[id] = { done -> if (c.isActive) c.resume(done) }
+                if (tts.synthesizeToFile(text, params, file, id) != TextToSpeech.SUCCESS) waiting.remove(id)?.invoke(false)
+                c.invokeOnCancellation { waiting.remove(id) }
+            }
+            return if (ok) Wav.read(file) else null
+        } finally { file.delete() }
     }
 
     override fun close() { try { tts.shutdown() } catch (_: Exception) {} }
-
-    /** Whether the phone has a voice for [locale]. */
-    fun has(locale: Locale) = tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
 
     companion object {
         /** Starts the phone's voice; null when the phone has none. */
         suspend fun open(context: Context): PhoneVoice? = suspendCancellableCoroutine { c ->
             var tts: TextToSpeech? = null
             tts = TextToSpeech(context.applicationContext) { status ->
-                if (!c.isActive) return@TextToSpeech
-                if (status == TextToSpeech.SUCCESS) c.resume(PhoneVoice(tts!!, File(context.cacheDir, "speech").apply { mkdirs() }))
+                if (!c.isActive) { tts?.shutdown(); return@TextToSpeech }
+                if (status == TextToSpeech.SUCCESS) c.resume(PhoneVoice(tts!!, File(context.cacheDir, "speech").apply { mkdirs(); listFiles()?.forEach { it.delete() } }))
                 else { tts?.shutdown(); c.resume(null) }
             }
         }
@@ -168,7 +177,8 @@ internal object Wav {
                 b.short; channels = b.short.toInt(); rate = b.int; b.int; b.short; bits = b.short.toInt()
                 b.position(at + size)
             } else if (id == "data") {
-                if (bits != 16) return null
+                // Only what an engine on a phone writes; anything else is not played
+                if (bits != 16 || rate !in 8000..48000 || channels !in 1..2) return null
                 val n = minOf(size, b.remaining()) / 2 / channels
                 val out = FloatArray(n)
                 for (i in 0 until n) { out[i] = b.short / 32768f; repeat(channels - 1) { b.short } }

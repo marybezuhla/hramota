@@ -54,6 +54,10 @@ class SpeechTest {
         assertEquals("двадцять третього листопада дві тисячі двадцять шостого року", n.expand("23.11.2026"))
         assertEquals("номер дванадцять", n.expand("№ 12"))
         assertEquals("одна кома п'ять", n.expand("1,5"))
+        assertEquals("у тисяча дев'ятсот дев'яносто першому році", n.expand("у 1991 році"))
+        assertEquals("одна кома п'ять кілометра", n.expand("1,5 км"))
+        assertEquals("дві кома п'ять відсотка", n.expand("2,5%"))
+        assertEquals("п'яту", n.expand("5-ту"))
     }
 
     @Test fun sentencesAreCutWhereTheyEnd() {
@@ -69,6 +73,13 @@ class SpeechTest {
         assertTrue(parts.size > 1 && parts.all { it.length <= Sentences.LONG + 1 })
         assertEquals("uk", Sentences.language("Привіт, світе"))
         assertEquals("en", Sentences.language("Hello, world"))
+    }
+
+    @Test fun abbreviationsAfterNumbersStayTheirs() {
+        // «р.» after a year is «року», not «річка»; «м.» before a name is «місто»
+        val p = text.prepare("У 1991 р. Україна стала незалежною.").replace("+", "")
+        assertTrue(p, p.contains("тисяча дев'ятсот дев'яносто першому році Україна"))
+        assertTrue(text.prepare("Він жив у м. Києві.").replace("+", "").contains("місто Києві"))
     }
 
     @Test fun preparedTextHasStressesAndNumbers() {

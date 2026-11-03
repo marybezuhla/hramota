@@ -85,7 +85,9 @@ open class ViewerActivity : ComponentActivity() {
         // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
         // (direction marks and controls out: a name another app gives must not disguise its file type)
         val name = cleanName((if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri))
-        docName = name
+        // This window's document for reading aloud: its address and a mark of the window (kept when the screen turns)
+        readToken = savedInstanceState?.getString(KEY_READ) ?: java.util.UUID.randomUUID().toString()
+        docName = "$uri#$readToken"
         if (!inline) labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
         // (off the main thread: it asks the file's app for lasting access and writes the list, sealed under lock)
@@ -306,6 +308,7 @@ open class ViewerActivity : ComponentActivity() {
                     }
                     ViewerScreen(
                         name, state, onBack = { leave() },
+                        documentId = docName ?: name,
                         startInReading = settings.docxReading,
                         showInspector = settings.inspector,
                         bookmarks = docId?.let { entries[it]?.bookmarks }.orEmpty(),
@@ -770,6 +773,12 @@ open class ViewerActivity : ComponentActivity() {
 
     /** The document's name, as reading aloud knows it (it stops when this window closes for good). */
     private var docName: String? = null
+    private var readToken: String? = null
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        readToken?.let { outState.putString(KEY_READ, it) }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -812,6 +821,7 @@ open class ViewerActivity : ComponentActivity() {
         const val EXTRA_TOKEN = "ua.hramota.TOKEN"
         /** Open straight into editing (a document just made). */
         const val EXTRA_EDIT = "ua.hramota.EDIT"
+        private const val KEY_READ = "readToken"
         /** A name without direction marks or control characters. */
         fun cleanName(s: String): String = s.filterNot { it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' || it.isISOControl() }
 

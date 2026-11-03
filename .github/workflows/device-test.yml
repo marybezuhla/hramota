@@ -48,7 +48,7 @@ jobs:
           mkdir -p out
           cp device.log out/ 2>/dev/null || true
           cp big.log out/ 2>/dev/null || true
-          grep -h "HramotaBig" big.log 2>/dev/null | sed 's/^.*HramotaBig: //' | while IFS= read -r l; do echo "::notice title=large documents::$l"; done || true
+          grep -hE "HramotaBig|HramotaVoice" big.log 2>/dev/null | sed -E "s/^.*Hramota(Big|Voice): //" | while IFS= read -r l; do echo "::notice title=large documents::$l"; done || true
           find app/build/outputs/androidTest-results -name "*.xml" -exec cp {} out/ \; 2>/dev/null || true
           grep -h -o -E '<failure message="[^"]{0,300}' out/*.xml 2>/dev/null | head -5 | while IFS= read -r l; do echo "::warning title=device test::${l#<failure message=\"}"; done || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

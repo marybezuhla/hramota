@@ -67,7 +67,9 @@ class ReadAloudService : Service() {
                     .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
                         PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP)
                     .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f).build())
-                session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, title)
+                // The lock screen's player shows this: the document's name only when screens are not kept private
+                val private = ua.hramota.data.Settings.get(this@ReadAloudService).state.value.secureScreen
+                session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, if (private) getString(R.string.read_aloud) else title)
                     .putString(MediaMetadata.METADATA_KEY_ARTIST, getString(R.string.app_name)).build())
                 show(playing, title)
             }
@@ -91,13 +93,18 @@ class ReadAloudService : Service() {
         PendingIntent.getService(this, code, Intent(this, ReadAloudService::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     private fun show(playing: Boolean, title: String) {
+        val open = packageManager.getLaunchIntentForPackage(packageName)?.let { PendingIntent.getActivity(this, 9, it, PendingIntent.FLAG_IMMUTABLE) }
+        // On the lock screen, without the document's name
+        val public = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_read_aloud).setContentTitle(getString(R.string.read_aloud)).build()
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_read_aloud)
             .setContentTitle(title)
             .setContentText(getString(R.string.read_aloud))
+            .setContentIntent(open)
             .setOngoing(playing)
             .setShowWhen(false)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(public)
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_previous), getString(R.string.read_previous), action(1, ACTION_PREVIOUS)).build())
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, if (playing) R.drawable.ic_pause else R.drawable.ic_play),
                 getString(if (playing) R.string.read_pause else R.string.read_play), action(2, ACTION_TOGGLE)).build())
@@ -109,8 +116,7 @@ class ReadAloudService : Service() {
             // Android may refuse it from the background (resumed later): then the controls are only shown
             foreground = try { startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK); true } catch (e: Exception) { getSystemService(NotificationManager::class.java).notify(ID, n); false }
         } else getSystemService(NotificationManager::class.java).notify(ID, n)
-        // Paused: it may be put away, but the controls stay until reading ends
-        if (!playing) stopForeground(STOP_FOREGROUND_DETACH).also { foreground = false }
+        // Paused, the controls stay (and Hramota with them) until reading ends; long paused, reading ends by itself
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -120,9 +126,10 @@ class ReadAloudService : Service() {
             ACTION_PREVIOUS -> ReadAloud.skip(-1)
             ACTION_STOP -> ReadAloud.stop()
         }
-        // Started to read: in the foreground at once (Android asks for it within seconds)
-        if (!foreground && ReadAloud.state.value.active) show(ReadAloud.state.value.playing, ReadAloud.state.value.title)
-        if (!ReadAloud.state.value.active) stopSelf()
+        // In the foreground at once, every time it is started (Android asks for it within seconds, even when
+        // reading has already ended by now); then it goes if there is nothing to read
+        if (!foreground) show(ReadAloud.state.value.playing, ReadAloud.state.value.title)
+        if (!ReadAloud.state.value.active) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf() }
         return START_NOT_STICKY
     }
 

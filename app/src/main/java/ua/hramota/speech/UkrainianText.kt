@@ -18,13 +18,11 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         Regex("""\bст\.(?=\s*\d)""") to "стаття", Regex("""\bс\.(?=\s*\d)""") to "сторінка", Regex("""\bрис\.(?=\s*\d)""") to "рисунок",
         Regex("""\bтабл\.(?=\s*\d)""") to "таблиця", Regex("""\bп\.(?=\s*\d)""") to "пункт", Regex("""\bч\.(?=\s*\d)""") to "частина",
         Regex("""\bтел\.""") to "телефон", Regex("""\bпроф\.""") to "професор", Regex("""\bд-р\b""") to "доктор",
-        Regex("""\bм\.(?=\s*\p{Lu})""") to "місто", Regex("""\bс\.(?=\s*\p{Lu})""") to "село", Regex("""\bр\.(?=\s*\p{Lu})""") to "річка",
-        Regex("""\bст\.""") to "століття",
+        // (not after a number: «1991 р. Україна» is a year, «5 м. Далі» metres; numbers come after these)
+        Regex("""(?<!\d\s?)\bм\.(?=\s*\p{Lu})""") to "місто", Regex("""(?<!\d\s?)\bс\.(?=\s*\p{Lu})""") to "село", Regex("""(?<!\d\s?)\bр\.(?=\s*\p{Lu})""") to "річка",
+        Regex("""(?<=[\dIVXLC]\s?)\bст\.""") to "століття",
     )
 
-    // Words said with the next one, without a stress of their own
-    private val CLITICS = setOf("а", "і", "й", "у", "в", "з", "зі", "із", "зо", "до", "на", "над", "під", "по", "при", "про", "за", "від", "без",
-        "для", "та", "чи", "не", "ні", "ж", "же", "б", "би", "то", "о", "об", "як", "що", "ще", "аж", "ба", "бо")
     private val GEN_PREP = setOf("до", "з", "із", "зі", "від", "без", "для", "біля", "після", "крім", "окрім", "серед", "навколо", "замість", "щодо", "коло", "проти", "від", "у", "в")
     private val LOC_PREP = setOf("у", "в", "на", "при", "о", "об", "по")
     private val INS_PREP = setOf("з", "із", "зі", "над", "під", "перед", "за", "між", "поміж")
@@ -60,6 +58,7 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         val vowels = lower.count { it in VOWELS }
         if (vowels == 0) return word
         CORRECTIONS[lower]?.let { return keepCase(word, it) }
+        // One vowel: marked too, as the voice was trained («д+о», «м+и»)
         if (vowels == 1) return mark(word, intArrayOf(lower.indexOfFirst { it in VOWELS } + 1))
         val options = dictionary?.lookup(lower).orEmpty()
         if (options.isEmpty()) {
@@ -107,9 +106,6 @@ class UkrainianText(private val dictionary: StressDictionary?) {
 
     private fun keepCase(original: String, corrected: String) =
         if (original.firstOrNull()?.isUpperCase() == true) corrected.replaceFirstChar { it.uppercase() } else corrected
-
-    /** Whether [word] is one said with its neighbour (no stress of its own). */
-    fun isClitic(word: String) = word.lowercase() in CLITICS
 
     companion object {
         private val WORD = Regex("""[\p{L}'+]+(?:-[\p{L}'+]+)*""")

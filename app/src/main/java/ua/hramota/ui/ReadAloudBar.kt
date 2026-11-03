@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -65,7 +66,8 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
             )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(speedLabel(state.speed) + "×", maxLines = 1) }
+                val speedSays = stringResource(R.string.read_speed, speedLabel(state.speed))
+                TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = speedSays }) { Text(speedLabel(state.speed) + "×", maxLines = 1) }
                 IconButton(onClick = { ReadAloud.skip(-1) }, modifier = Modifier.size(48.dp)) {
                     Icon(painterResource(R.drawable.ic_previous), contentDescription = stringResource(R.string.read_previous))
                 }
@@ -76,7 +78,8 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
                 IconButton(onClick = { ReadAloud.skip(1) }, modifier = Modifier.size(48.dp)) {
                     Icon(painterResource(R.drawable.ic_next), contentDescription = stringResource(R.string.read_next))
                 }
-                TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                val sleepSays = stringResource(R.string.read_sleep)
+                TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = sleepSays }) {
                     Text(
                         when (val at = state.sleepAt) {
                             null -> "☾"
