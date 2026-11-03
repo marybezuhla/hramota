@@ -73,3 +73,8 @@ for key, sid in small.items():
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"out/{name}.wav", "-c:a", "libopus", "-b:a", "48k", f"out/{name}.ogg"], check=True)
         os.remove(f"out/{name}.wav")
     print(key, "int8 MB", round(os.path.getsize(q) / 1e6, 1))
+
+# What the voices' own symbol tables hold (is there a stress mark to give them?)
+for key in ("uk_UA-ukrainian_tts-medium", "uk_UA-tetiana-high"):
+    cfg = json.load(open(os.path.join("models", key + ".onnx.json")))
+    print(key, "phonemes:", "".join(sorted(cfg["phoneme_id_map"].keys())), "espeak voice:", cfg.get("espeak", {}))
