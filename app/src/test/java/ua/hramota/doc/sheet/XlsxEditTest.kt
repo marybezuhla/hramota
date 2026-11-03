@@ -128,8 +128,9 @@ class XlsxEditTest {
     @Test fun insertedAndDeletedRowsMoveEverythingThatRefersToThem() {
         val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
         assertNull(edit.moveRows(0, 4, 2))
-        // The total takes in the moved rows, and works out at once
-        assertEquals(Value.Num(550.0), edit.recalc()[CellKey(0, 0, 2)])
+        // The total takes in the moved rows; its value is the same (empty rows came in), so it is not worked out again
+        assertEquals("=SUM(A1:A12)", edit.content(CellKey(0, 0, 2)))
+        assertNull(edit.recalc()[CellKey(0, 0, 2)])
         assertEquals("=A7", edit.content(CellKey(0, 1, 2)))
         val out = save("docs-edit/rows.xlsx", edit, "rows-inserted")
         val sheet = part(out, "xl/worksheets/sheet1.xml")!!
