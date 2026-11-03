@@ -65,6 +65,8 @@ android {
 
     androidResources {
         generateLocaleConfig = true
+        // The voice is read straight from the APK (mapped, not copied): it must not be compressed
+        noCompress += listOf("onnx", "bin")
     }
 
     // Screens are drawn on the computer (Robolectric) and need the app's resources
@@ -92,6 +94,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Reading aloud: the voice model runs on the phone (MIT); nothing is sent anywhere
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
 
     testImplementation("junit:junit:4.13.2")
     // Screens drawn on the computer (Robolectric) with made-up documents, for review
