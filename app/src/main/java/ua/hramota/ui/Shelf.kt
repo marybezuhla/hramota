@@ -385,15 +385,14 @@ private fun StandingBook(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: 
     val shape = RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 5.dp, bottomEnd = 3.dp)
     Box(
         modifier
-            .drawWithCache {
-                // A soft shadow, as from a lamp up and to the left: the book's own shape, blurred, moved right and down
-                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.argb(150, 0, 0, 0)
-                    maskFilter = android.graphics.BlurMaskFilter(7.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
-                }
-                val dx = 6.dp.toPx(); val dy = 2.dp.toPx()
-                onDrawBehind {
-                    drawIntoCanvas { it.nativeCanvas.drawRect(dx, dy + 4.dp.toPx(), size.width + dx, size.height, paint) }
+            .drawBehind {
+                // A soft shadow, as from a lamp up and to the left: the book's shape moved right and down,
+                // drawn in a few widening, fainter layers (a blur that looks the same on every phone)
+                val dx = 5.dp.toPx(); val top = 7.dp.toPx(); val step = 1.6.dp.toPx()
+                for (i in 0 until 7) {
+                    val g = i * step
+                    drawRoundRect(Color.Black.copy(alpha = 0.075f), topLeft = Offset(dx - g * 0.4f, top - g * 0.6f),
+                        size = Size(size.width + g, size.height - top + g * 0.6f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(g + 2f))
                 }
             }
             .clip(shape)
