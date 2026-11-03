@@ -22,10 +22,11 @@ jobs:
       - name: Read with each voice
         run: |
           sudo apt-get install -y -q ffmpeg >/dev/null
-          python3 -m pip install -q --user "piper-tts==1.3.0" onnx
+          python3 -m pip install -q --user "piper-tts==1.3.0" onnx ukrainian-word-stress
           mkdir -p out
           bash tools/voices/stress.sh | tee out/stress.txt
           python3 tools/voices/samples.py | tee out/log.txt
+          python3 tools/voices/stressed.py
       - name: Push the samples
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
