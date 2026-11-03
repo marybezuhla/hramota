@@ -1,12 +1,10 @@
-import os, ukrainian_word_stress as u, importlib.metadata as md, inspect
+import os, inspect, ukrainian_word_stress as u
 root = os.path.dirname(u.__file__)
-for d, _, fs in os.walk(root):
-    for f in fs:
-        p = os.path.join(d, f); print(p.replace(root, "pkg"), os.path.getsize(p))
-print(md.metadata("ukrainian-word-stress").get("License"), md.requires("ukrainian-word-stress"))
-for f in md.files("ukrainian-word-stress"):
-    if "LICEN" in str(f).upper(): print("LICENSE FILE", f); print(open(f.locate()).read()[:1500])
-src = inspect.getsource(u)
-print(src[:3000])
-import ukrainian_word_stress.stressify as s
-print(inspect.getsource(s)[:6000])
+for f in ("compile_dict.py", "stressify_.py", "tags.py"):
+    print("=====", f); print(open(os.path.join(root, f)).read())
+import marisa_trie
+t = marisa_trie.BytesTrie(); t.load(os.path.join(root, "data/stress.trie"))
+keys = t.keys()
+print("entries", len(keys))
+for k in ("мама", "замок", "черговий", "листопада", "шумить"):
+    print(k, t.get(k))
