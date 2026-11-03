@@ -27,6 +27,7 @@ jobs:
           bash tools/voices/stress.sh | tee out/stress.txt
           python3 tools/voices/samples.py | tee out/log.txt
           python3 tools/voices/stressed.py
+          python3 tools/voices/g2p.py
       - name: Push the samples
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
