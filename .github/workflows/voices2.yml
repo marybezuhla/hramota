@@ -4,7 +4,7 @@ name: Voice samples (ESPnet)
 on:
   push:
     branches: [next]
-    paths: ["tools/voices/robinhad.py", ".github/workflows/voices2.yml"]
+    paths: ["tools/voices/robinhad.py", "tools/voices/export_espnet.py", ".github/workflows/voices2.yml"]
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ jobs:
           python3 -m pip install -q torch --extra-index-url https://download.pytorch.org/whl/cpu
           python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git"
           mkdir -p out
-          python3 tools/voices/robinhad.py
+          python3 tools/voices/export_espnet.py | tee out/export.txt
           rm -f out/*.wav
       - name: Push the samples
         env:
