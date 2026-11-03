@@ -1,5 +1,7 @@
 package ua.hramota.ui
 
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
@@ -355,6 +357,8 @@ private fun WoodRow(index: Int, row: List<LibraryEntry>, perRow: Int, gap: andro
 /** A plank: its top seen from above (darker at the back, where the books stand), then the lit front edge. */
 @Composable
 private fun Plank(index: Int, w: Wood) {
+    // (at night the edge only glints)
+    val edge = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0x55FFEBD2) else Color(0xAAFFEBD2)
     Box(
         Modifier.fillMaxWidth().height(22.dp).drawWithCache {
             val top = 7.dp.toPx()
@@ -366,7 +370,7 @@ private fun Plank(index: Int, w: Wood) {
                 clipRect(top = top) { front() }
                 drawRect(frontShade, topLeft = Offset(0f, top))
                 // The sharp edge where top meets front catches the light
-                drawLine(Color(0xAAFFEBD2), Offset(0f, top), Offset(size.width, top), 1.6f * density)
+                drawLine(edge, Offset(0f, top), Offset(size.width, top), 1.6f * density)
                 drawLine(Color(0x88000000), Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f), 2f)
             }
         },
@@ -381,11 +385,16 @@ private fun StandingBook(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: 
     val shape = RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 5.dp, bottomEnd = 3.dp)
     Box(
         modifier
-            .drawBehind {
-                val o = 5.dp.toPx()
-                drawRect(Brush.horizontalGradient(0f to Color(0x77000000), 1f to Color.Transparent, startX = size.width - 2f, endX = size.width + 3 * o),
-                    topLeft = Offset(size.width - 2f, o * 1.5f), size = Size(3 * o + 2f, size.height - o * 1.5f))
-                drawRect(Brush.verticalGradient(0f to Color(0x55000000), 1f to Color.Transparent, startY = -o, endY = 0f), topLeft = Offset(0f, -o), size = Size(size.width, o))
+            .drawWithCache {
+                // A soft shadow, as from a lamp up and to the left: the book's own shape, blurred, moved right and down
+                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = android.graphics.Color.argb(150, 0, 0, 0)
+                    maskFilter = android.graphics.BlurMaskFilter(7.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+                }
+                val dx = 6.dp.toPx(); val dy = 2.dp.toPx()
+                onDrawBehind {
+                    drawIntoCanvas { it.nativeCanvas.drawRect(dx, dy + 4.dp.toPx(), size.width + dx, size.height, paint) }
+                }
             }
             .clip(shape)
             .combinedClickable(onClick = { onOpen(e) }, onLongClick = { open = true }),
