@@ -65,11 +65,14 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
         OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { t ->
             OnnxTensor.createTensor(env, FloatBuffer.wrap(speaker), longArrayOf(speaker.size.toLong())).use { s ->
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(3)).use { sc ->
-                    session.run(mapOf("text" to t, "spembs" to s, "scales" to sc)).use { r ->
+                    // The sentence's length too, when the model asks for it
+                    val lengths = if ("text_lengths" in session.inputNames) OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(ids.size.toLong())), longArrayOf(1)) else null
+                    val inputs = buildMap { put("text", t); put("spembs", s); put("scales", sc); lengths?.let { put("text_lengths", it) } }
+                    try { session.run(inputs).use { r ->
                         @Suppress("UNCHECKED_CAST")
                         val wav = (r[0].value as Array<FloatArray>)[0]
                         return Sound(wav, RATE)
-                    }
+                    } } finally { lengths?.close() }
                 }
             }
         }

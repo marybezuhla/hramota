@@ -81,6 +81,6 @@ with torch.no_grad():
 print("torch RTF", round((time.time() - t0) / (len(ref) / s2.fs), 3))
 save(ref, f"vits-{tag}-torch")
 short = s2.preprocess_fn("<dummy>", dict(text=sentence_to_stress(preprocess_text("Чи підете ви завтра?"), stress_dict)))["text"]
-np.save("out/feed-short.npy", {"text": np.array([short], dtype=np.int64), "spembs": spk, "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
+np.save("out/feed-short.npy", {"text": np.array([short], dtype=np.int64), "text_lengths": np.array([len(short)]), "spembs": spk, "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
 np.save("out/feed.npy", {"text": x.numpy(), "text_lengths": np.array([x.shape[1]]), "spembs": spk, "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
 open("out/tag.txt", "w").write(tag)
