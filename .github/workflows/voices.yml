@@ -23,6 +23,7 @@ jobs:
         run: |
           sudo apt-get install -y -q ffmpeg >/dev/null
           python3 -m pip install -q --user "piper-tts==1.3.0" onnx
+          mkdir -p out
           bash tools/voices/stress.sh | tee out/stress.txt
           python3 tools/voices/samples.py | tee out/log.txt
       - name: Push the samples
