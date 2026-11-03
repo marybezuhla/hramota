@@ -2,8 +2,8 @@ name: Prepare voice
 
 # Run by pushing the voice-prepare branch. Builds what reading aloud needs, from fixed sources, and pushes it to
 # the voice branch for review (copied into the app by hand, like PDFium):
-#  - the Ukrainian voice (Tetiana) of robinhad/ukrainian-tts release v5.0.0 (MIT; dataset Apache-2.0), exported to
-#    ONNX and stored in 8 bits; its letters (tokens) and speaker vector;
+#  - the Ukrainian voice (Tetiana) of robinhad/ukrainian-tts release v5.0.0 (MIT; dataset Apache-2.0; source files
+#    checked by SHA-256), exported to ONNX (full precision, in two parts); its letters (tokens) and speaker vector;
 #  - the stress dictionary from ukrainian-word-stress 2.1.0 (MIT), in the app's compact form.
 on:
   push:
@@ -36,17 +36,25 @@ jobs:
           python3 -m venv /tmp/q && /tmp/q/bin/pip install -q onnx onnxruntime numpy marisa-trie "ukrainian-word-stress==2.1.0"
           /tmp/q/bin/python -u tools/voices/quantize.py 2>&1 | tee -a out/export.txt
           /tmp/q/bin/python -u tools/voices/build_stress.py voice/stress.bin | tee voice/stress.txt
-          cp out/uk.int8.onnx voice/uk-tetiana.onnx
+          # The full model (the 8-bit one was too slow on phones' and computers' processors alike); in two parts,
+          # as a repository takes files below 100 MB; the build joins them (app/build.gradle.kts) and checks the sum
+          (cd out && sha256sum uk.onnx | cut -d' ' -f1 > ../voice/uk-tetiana.onnx.sha256)
+          split -b 80M -d -a 1 out/uk.onnx voice/uk-tetiana.onnx.part
+          # Licences of what goes into the app
+          curl -fsSL -o voice/LICENSE-ukrainian-tts https://raw.githubusercontent.com/robinhad/ukrainian-tts/main/LICENSE || true
+          curl -fsSL -o voice/LICENSE-ukrainian-word-stress https://raw.githubusercontent.com/lang-uk/ukrainian-word-stress/main/LICENSE || true
+          curl -fsSL -o voice/LICENSE-ukrainian-tts-datasets https://raw.githubusercontent.com/egorsmkv/ukrainian-tts-datasets/main/LICENSE || true
           cp out/tokens.txt voice/uk-tetiana.tokens.txt
           cp out/tetiana.xvector.f32 voice/uk-tetiana.xvector.bin
           sha256sum m/model.pth m/config.yaml m/spk_xvector.ark > voice/SOURCES.sha256
           cp out/export.txt voice/
           cp out/*.m4a voice/ 2>/dev/null || true
+          rm -f out/uk.onnx out/uk.int8.onnx
           # Sources to port (normalising numbers, stress rules), for reading
           P=$(python3 -c "import ukrainian_tts,os;print(os.path.dirname(ukrainian_tts.__file__))")
           mkdir -p voice/src && cp "$P"/formatter.py "$P"/stress.py voice/src/ || true
           cp "$P"/../ukrainian_tts-*.dist-info/LICENSE* voice/LICENSE-ukrainian-tts 2>/dev/null || true
-          (cd voice && sha256sum uk-tetiana.onnx uk-tetiana.tokens.txt uk-tetiana.xvector.bin stress.bin > SHA256SUMS)
+          (cd voice && sha256sum uk-tetiana.onnx.part* uk-tetiana.tokens.txt uk-tetiana.xvector.bin stress.bin > SHA256SUMS)
           ls -la voice
       - name: Push for review
         shell: bash

@@ -20,4 +20,4 @@ for f in ("uk.onnx", "uk.int8.onnx"):
     with wave.open(f"out/{name}.wav", "wb") as wf:
         wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(a.tobytes())
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"out/{name}.wav", "-c:a", "aac", "-b:a", "96k", f"out/{name}.m4a"], check=True)
-os.remove("out/uk.onnx"); os.remove("out/feed.npy"); os.remove("out/feed-short.npy")
+os.remove("out/feed.npy"); os.remove("out/feed-short.npy")

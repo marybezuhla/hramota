@@ -3,23 +3,21 @@ earlier releases may be VITS (one ONNX model, like Piper's). Lists the releases,
 with the Tetiana voice, and reads the test sentences from the export."""
 import json, os, subprocess, time, urllib.request, wave, numpy as np, torch, yaml
 
-rels = json.load(urllib.request.urlopen("https://api.github.com/repos/robinhad/ukrainian-tts/releases?per_page=30"))
-chosen = None
-for r in rels:
-    names = {a["name"]: a["browser_download_url"] for a in r["assets"]}
-    kind = "?"
-    if "config.yaml" in names:
-        cfg = yaml.safe_load(urllib.request.urlopen(names["config.yaml"]).read())
-        kind = cfg.get("tts")
-        if kind == "vits" and chosen is None: chosen = (r["tag_name"], names, cfg)
-    print(r["tag_name"], r["published_at"][:10], kind, sorted(names))
-if not chosen: raise SystemExit("no VITS release")
-tag, names, cfg = chosen
-print("using", tag, "spk_embed_dim", cfg.get("tts_conf", {}).get("generator_params", {}).get("spk_embed_dim"),
-      "num_speakers", cfg.get("tts_conf", {}).get("generator_params", {}).get("spks"))
+# The release and its files are fixed and checked before anything is loaded (torch.load runs code from the file)
+tag = "v5.0.0"
+SOURCES = {
+    "model.pth": "ed7a1f0add130e0a850795d9b31cf591b3c041ec663e637d30ffed345103eaf9",
+    "config.yaml": "f4ca8d931f926c3904d0c5d8b42f4dc85b1788db30883749fa92291d330f2da6",
+    "spk_xvector.ark": "fd0682096117f3b7bd617e4703f7698ffc050d167911306e99460532144ec6eb",
+}
+names = {n: f"https://github.com/robinhad/ukrainian-tts/releases/download/{tag}/{n}" for n in SOURCES}
 os.makedirs("m", exist_ok=True)
+import hashlib
 for n, u in names.items():
-    if n.endswith((".pth", ".yaml", ".ark", ".npz", ".json", ".txt")): urllib.request.urlretrieve(u, "m/" + n)
+    urllib.request.urlretrieve(u, "m/" + n)
+    got = hashlib.sha256(open("m/" + n, "rb").read()).hexdigest()
+    if got != SOURCES[n]: raise SystemExit(f"{n}: sha256 {got}, expected {SOURCES[n]}")
+print("sources checked:", tag)
 from espnet2.bin.tts_inference import Text2Speech
 s2 = Text2Speech(train_config="m/config.yaml", model_file="m/model.pth", device="cpu")
 gen = next(m for _, m in s2.model.named_modules() if type(m).__name__ == "VITSGenerator")
