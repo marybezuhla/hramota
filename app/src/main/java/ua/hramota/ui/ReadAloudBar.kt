@@ -45,14 +45,15 @@ import ua.hramota.speech.ReadAloud
 /** Speeds offered: a little slower to a little faster than a calm narrator. */
 internal val READ_SPEEDS = listOf(0.8f, 0.9f, 1f, 1.2f, 1.5f)
 
-internal fun speedLabel(s: Float) = if (s == s.toInt().toFloat()) "${s.toInt()},0" else s.toString().replace('.', ',')
+/** «1,0» in Ukrainian, «1.0» in English: the decimal mark of the app's language. */
+internal fun speedLabel(s: Float) = java.text.NumberFormat.getInstance(java.util.Locale.getDefault()).apply { minimumFractionDigits = 1; maximumFractionDigits = 1 }.format(s.toDouble())
 
 /**
  * The player at the bottom, within the thumb's reach: the sentence back and forward, pause, speed and the sleep
  * timer at hand; the bookmark, the voice and closing below them.
  */
 @Composable
-internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSettings: () -> Unit) {
+internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSettings: () -> Unit, bookmarked: Boolean = false) {
     // A notice (no voice for a language) is said for a few seconds
     LaunchedEffect(state.notice) { if (state.notice != null) { delay(6000); ReadAloud.clearNotice() } }
     Surface(
@@ -78,20 +79,20 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
                 IconButton(onClick = { ReadAloud.skip(1) }, modifier = Modifier.size(48.dp)) {
                     Icon(painterResource(R.drawable.ic_next), contentDescription = stringResource(R.string.read_next))
                 }
-                val sleepSays = stringResource(R.string.read_sleep)
+                val left = state.sleepAt?.takeIf { it != ReadAloud.SLEEP_CHAPTER }?.let { ((it - android.os.SystemClock.uptimeMillis()) / 60_000 + 1).coerceAtLeast(1).toInt() }
+                val sleepSays = when {
+                    state.sleepAt == null -> stringResource(R.string.read_sleep)
+                    left == null -> stringResource(R.string.read_sleep_left, stringResource(R.string.read_sleep_chapter))
+                    else -> stringResource(R.string.read_sleep_left, stringResource(R.string.read_sleep_minutes, left))
+                }
                 TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = sleepSays }) {
-                    Text(
-                        when (val at = state.sleepAt) {
-                            null -> "☾"
-                            ReadAloud.SLEEP_CHAPTER -> "☾ §"
-                            else -> "☾ " + ((at - android.os.SystemClock.uptimeMillis()) / 60_000 + 1).coerceAtLeast(1)
-                        }, maxLines = 1,
-                    )
+                    Text(when { state.sleepAt == null -> "☾"; left == null -> "☾ §"; else -> "☾ $left" }, maxLines = 1)
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBookmark, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Icon(AppIcons.Bookmark, contentDescription = null, modifier = Modifier.size(18.dp))
+                val markSays = stringResource(if (bookmarked) R.string.read_bookmark_remove else R.string.read_bookmark)
+                TextButton(onClick = onBookmark, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = markSays }) {
+                    Icon(if (bookmarked) AppIcons.Bookmark else AppIcons.BookmarkOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text(stringResource(R.string.read_bookmark), modifier = Modifier.padding(start = 6.dp), maxLines = 1)
                 }
                 // Short on the button (it fits with large type too); said in full to TalkBack
@@ -140,7 +141,7 @@ internal fun ReadAloudSheet(state: ReadAloud.State, chapters: Boolean, onVoice: 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val on = state.sleepAt
                 FilterChip(selected = on == null, onClick = { ReadAloud.sleep(0) }, label = { Text(stringResource(R.string.read_sleep_off)) }, modifier = Modifier.heightIn(min = 48.dp))
-                for (m in listOf(15L, 30L, 60L)) FilterChip(selected = false, onClick = { ReadAloud.sleep(m) }, label = { Text(stringResource(R.string.read_sleep_minutes, m.toInt())) }, modifier = Modifier.heightIn(min = 48.dp))
+                for (m in listOf(15L, 30L, 60L)) FilterChip(selected = state.sleepMinutes == m && on != null && on != ReadAloud.SLEEP_CHAPTER, onClick = { ReadAloud.sleep(m) }, label = { Text(stringResource(R.string.read_sleep_minutes, m.toInt())) }, modifier = Modifier.heightIn(min = 48.dp))
                 if (chapters) FilterChip(selected = on == ReadAloud.SLEEP_CHAPTER, onClick = { ReadAloud.sleep(ReadAloud.SLEEP_CHAPTER) }, label = { Text(stringResource(R.string.read_sleep_chapter)) }, modifier = Modifier.heightIn(min = 48.dp))
             }
             Spacer(Modifier.size(4.dp))

@@ -355,6 +355,7 @@ class ScreensTest {
     @Test fun homeLargeFont() = shot("02-home-large-font") { home(recentsUk) }
     // Reading aloud: the player under the document, while a sentence is being read
     private val reading = ua.hramota.speech.ReadAloud.State(document = "Протокол зустрічі.docx", title = "Протокол зустрічі", playing = true, unit = 1, start = 0, end = 40, speed = 1f, sleepAt = ua.hramota.speech.ReadAloud.SLEEP_CHAPTER)
+    // (the highlight of the sentence read is drawn by the viewer from the live state; here the bar alone)
     @Composable private fun readingScreen(state: ua.hramota.speech.ReadAloud.State) = androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
         ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {})
         androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)) { ua.hramota.ui.ReadAloudBar(state, onBookmark = {}, onSettings = {}) }

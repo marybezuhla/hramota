@@ -527,7 +527,7 @@ private fun ViewerContent(
             onClose = { selection = null },
         )
         // The player, under the thumb, while this document is read aloud
-        if (readingHere && selection == null) ReadAloudBar(readState, onBookmark = { onToggleBookmark(readState.unit) }, onSettings = { readSheet = true })
+        if (readingHere && selection == null) ReadAloudBar(readState, onBookmark = { onToggleBookmark(readState.unit) }, onSettings = { readSheet = true }, bookmarked = readState.unit in bookmarks)
     }
 }
 

@@ -56,6 +56,8 @@ object ReadAloud {
         val voice: String = HRAMOTA,
         /** When the sleep timer stops reading (ms, uptime clock), or [SLEEP_CHAPTER], or null. */
         val sleepAt: Long? = null,
+        /** The minutes the sleep timer was set to (to show the choice). */
+        val sleepMinutes: Long = 0,
         /** Said when something could not be read (no voice for the language). */
         val notice: Int? = null,
     ) { val active get() = document != null }
@@ -142,7 +144,7 @@ object ReadAloud {
             0L -> _state.update { it.copy(sleepAt = null) }
             SLEEP_CHAPTER -> _state.update { it.copy(sleepAt = SLEEP_CHAPTER) }
             else -> {
-                _state.update { it.copy(sleepAt = android.os.SystemClock.uptimeMillis() + minutes * 60_000) }
+                _state.update { it.copy(sleepAt = android.os.SystemClock.uptimeMillis() + minutes * 60_000, sleepMinutes = minutes) }
                 sleepJob = main.launch { delay(minutes * 60_000); _state.update { it.copy(sleepAt = null) }; pause() }
             }
         }
