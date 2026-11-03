@@ -83,7 +83,7 @@ class PdfEngineService : Service() {
                         val height = data.readInt()
                         val memory: SharedMemory? = try {
                             if (data.readInt() == 1) SharedMemory.CREATOR.createFromParcel(data) else null
-                        } catch (e: Exception) { problem = e.toString(); null }
+                        } catch (e: Exception) { problem = e.javaClass.simpleName; null }
                         var status = if (memory == null) R_TRANSPORT else R_FAILED
                         if (handle <= 0) status = R_NO_DOCUMENT
                         if (handle > 0 && memory != null) {
@@ -96,7 +96,7 @@ class PdfEngineService : Service() {
                                 }
                             } catch (e: Exception) {
                                 // Shared memory could not be used here: the app switches to sending pixels in parts
-                                problem = e.toString(); status = R_TRANSPORT
+                                problem = e.javaClass.simpleName; status = R_TRANSPORT
                             } finally {
                                 memory.close()
                             }
@@ -114,7 +114,7 @@ class PdfEngineService : Service() {
                             status = try {
                                 val buffer = java.nio.ByteBuffer.allocateDirect(width * height * 4)
                                 if (PdfiumNative.render(handle, index, buffer, width, height, width * 4)) { kept = buffer; R_OK } else R_FAILED
-                            } catch (e: Throwable) { problem = e.toString(); R_FAILED }
+                            } catch (e: Throwable) { problem = e.javaClass.simpleName; R_FAILED }
                         }
                         reply?.writeNoException()
                         reply?.writeInt(status)

@@ -99,7 +99,7 @@ class PdfiumPages private constructor(
     }
 
     private fun viaSharedMemory(index: Int, w: Int, h: Int): Bitmap? {
-        val memory = try { SharedMemory.create("page", w * h * 4) } catch (e: Exception) { inParts = true; problem = e.toString(); return null }
+        val memory = try { SharedMemory.create("page", w * h * 4) } catch (e: Exception) { inParts = true; problem = e.javaClass.simpleName; return null }
         try {
             val result = call(PdfEngineService.RENDER, { d ->
                 d.writeInt(index); d.writeInt(w); d.writeInt(h)
@@ -120,7 +120,7 @@ class PdfiumPages private constructor(
                 SharedMemory.unmap(buffer)
             }
         } catch (e: Exception) {
-            inParts = true; problem = e.toString(); return null
+            inParts = true; problem = e.javaClass.simpleName; return null
         } finally {
             memory.close()
         }

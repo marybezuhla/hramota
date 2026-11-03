@@ -50,6 +50,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -343,7 +348,8 @@ fun DocxEditorScreen(
                     }
                 },
                 actions = {
-                    if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}") }
+                    val commentsLabel = stringResource(R.string.comments_count, state.comments.size)
+                    if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}", modifier = Modifier.clearAndSetSemantics { contentDescription = commentsLabel }) }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
@@ -507,27 +513,36 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
             ) {
                 Tool("↶", stringResource(R.string.edit_undo), enabled = enabled && state.canUndo) { state.undo() }
                 Tool("↷", stringResource(R.string.edit_redo), enabled = enabled && state.canRedo) { state.redo() }
-                Tool("B", stringResource(R.string.edit_bold), active, look.bold, TextStyle(fontWeight = FontWeight.Bold)) { state.toggle(EditorState.Mark.BOLD) }
-                Tool("I", stringResource(R.string.edit_italic), active, look.italic, TextStyle(fontStyle = FontStyle.Italic)) { state.toggle(EditorState.Mark.ITALIC) }
-                Tool("U", stringResource(R.string.edit_underline), active, look.underline, TextStyle(textDecoration = TextDecoration.Underline)) { state.toggle(EditorState.Mark.UNDERLINE) }
-                Tool("S", stringResource(R.string.edit_strike), active, look.strike, TextStyle(textDecoration = TextDecoration.LineThrough)) { state.toggle(EditorState.Mark.STRIKE) }
+                Tool("B", stringResource(R.string.edit_bold), active, look.bold, TextStyle(fontWeight = FontWeight.Bold), toggles = true) { state.toggle(EditorState.Mark.BOLD) }
+                Tool("I", stringResource(R.string.edit_italic), active, look.italic, TextStyle(fontStyle = FontStyle.Italic), toggles = true) { state.toggle(EditorState.Mark.ITALIC) }
+                Tool("U", stringResource(R.string.edit_underline), active, look.underline, TextStyle(textDecoration = TextDecoration.Underline), toggles = true) { state.toggle(EditorState.Mark.UNDERLINE) }
+                Tool("S", stringResource(R.string.edit_strike), active, look.strike, TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(EditorState.Mark.STRIKE) }
                 Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
                 KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind)
-                Tool("•", stringResource(R.string.edit_bullets), active, shown?.list == ListKind.BULLET) { state.toggleList(ListKind.BULLET) }
-                Tool("1.", stringResource(R.string.edit_numbers), active, shown?.list == ListKind.NUMBER) { state.toggleList(ListKind.NUMBER) }
+                Tool("•", stringResource(R.string.edit_bullets), active, shown?.list == ListKind.BULLET, toggles = true) { state.toggleList(ListKind.BULLET) }
+                Tool("1.", stringResource(R.string.edit_numbers), active, shown?.list == ListKind.NUMBER, toggles = true) { state.toggleList(ListKind.NUMBER) }
             }
         }
     }
 }
 
 @Composable
-internal fun Tool(label: String, description: String, enabled: Boolean = true, on: Boolean = false, style: TextStyle = TextStyle(), onClick: () -> Unit) {
+internal fun Tool(label: String, description: String, enabled: Boolean = true, on: Boolean = false, style: TextStyle = TextStyle(), toggles: Boolean = false, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val onText = stringResource(R.string.state_on)
+    val offText = stringResource(R.string.state_off)
     Box(
         Modifier.padding(2.dp)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
             .background(if (on) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.shapes.small)
-            .clickable(enabled = enabled, onClick = onClick)
-            .semantics { contentDescription = description }
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            // Read aloud as its name, and for bold or a list whether it is on (not the letter shown)
+            .clearAndSetSemantics {
+                contentDescription = description
+                role = androidx.compose.ui.semantics.Role.Button
+                if (toggles) stateDescription = if (on) onText else offText
+                if (!enabled) disabled()
+            }
             .padding(horizontal = 11.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -557,8 +572,8 @@ private val CommentTint = androidx.compose.ui.graphics.Color(0x66F2C14E)
 /** Writing a comment, with the name it is signed with (empty is allowed: nobody's name goes into the file). */
 @Composable
 private fun CommentDialog(author: String, onDismiss: () -> Unit, onDone: (String, String) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    var who by remember { mutableStateOf(author) }
+    var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var who by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(author) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.comment_add)) },

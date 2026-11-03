@@ -64,13 +64,16 @@ object Shelf {
         val key = Vault.key()
         if (sealing && key == null) return false
         val target = File(Library.copiesDir(context), "${e.id}.$ext" + if (sealing) Vault.SUFFIX else "")
+        // Written beside and put in place whole: a copy stopped halfway is never taken for the document
+        val part = File(target.path + ".part")
         return try {
             context.contentResolver.openInputStream(source)?.use { input ->
-                target.outputStream().buffered().use { out -> if (sealing) Sealed.seal(key!!, input.buffered(), out, "${e.id}.$ext") else input.copyTo(out) }
+                part.outputStream().buffered().use { out -> if (sealing) Sealed.seal(key!!, input.buffered(), out, "${e.id}.$ext") else input.copyTo(out) }
             } ?: return false
+            if (!part.renameTo(target)) { part.delete(); return false }
             Library.get(context).update(e.id) { it?.copy(copy = target.path, onShelf = true) }
             true
-        } catch (ex: Exception) { target.delete(); false }
+        } catch (ex: Exception) { part.delete(); false }
     }
 
     private fun coverFile(context: Context, id: String, sealed: Boolean): File {

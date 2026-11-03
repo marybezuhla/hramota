@@ -24,6 +24,8 @@ class HramotaApp : Application() {
         ua.hramota.data.Shelf.clearOpened(this)
         java.io.File(cacheDir, "restore").deleteRecursively()
         cacheDir.listFiles { f -> f.name.startsWith("notes-") && f.name.endsWith(".pdf") }?.forEach { it.delete() }
+        // Half-written kept copies (Hramota stopped while one was put in place)
+        java.io.File(filesDir, "documents").listFiles { f -> f.name.endsWith(".part") }?.forEach { it.delete() }
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { started++; main.removeCallbacks(lock) }
             override fun onActivityStopped(activity: Activity) {

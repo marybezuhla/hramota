@@ -2,6 +2,8 @@ package ua.hramota.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -127,7 +131,8 @@ fun WorkbookDocument(
 ) {
     val index = sheetIndex.coerceIn(0, workbook.sheets.size - 1)
     val sheet = workbook.sheets[index]
-    var selected by remember(index) { mutableStateOf(startCell) }
+    // The chosen cell stays when the phone is turned
+    var selected by androidx.compose.runtime.saveable.rememberSaveable(index, stateSaver = androidx.compose.runtime.saveable.listSaver<Pair<Int, Int>?, Int>(save = { it?.toList() ?: emptyList() }, restore = { if (it.size == 2) it[0] to it[1] else null })) { mutableStateOf(startCell) }
     // Another sheet opens at its top left (an edited one stays where it is)
     var shown by remember { mutableStateOf(index) }
     if (shown != index) { shown = index; state.x = 0f; state.y = 0f }
@@ -159,7 +164,7 @@ private fun CellBar(ref: String, text: String, onClose: () -> Unit) {
             if (text.isNotEmpty()) TextButton(onClick = {
                 context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(ref, text))
             }) { Text(stringResource(R.string.copy)) }
-            TextButton(onClick = onClose) { Text("✕") }
+            TextButton(onClick = onClose) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
         }
     }
 }
@@ -167,7 +172,7 @@ private fun CellBar(ref: String, text: String, onClose: () -> Unit) {
 @Composable
 private fun SheetTabs(names: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 2.dp).selectableGroup()) {
             names.forEachIndexed { i, n ->
                 val on = i == selected
                 Text(
@@ -178,7 +183,7 @@ private fun SheetTabs(names: List<String>, selected: Int, onSelect: (Int) -> Uni
                     maxLines = 1,
                     modifier = Modifier.padding(end = 6.dp).clip(RoundedCornerShape(8.dp))
                         .background(if (on) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                        .clickable { onSelect(i) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { onSelect(i) }.padding(horizontal = 12.dp, vertical = 14.dp),
                 )
             }
         }
@@ -471,7 +476,7 @@ class SheetEditing(
 @Composable
 private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
     val ref = "${columnName(col)}${row + 1}"
-    var value by remember(sheet, row, col) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
+    var value by androidx.compose.runtime.saveable.rememberSaveable(sheet, row, col, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
     var refused by remember(sheet, row, col) { mutableStateOf(false) }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     fun put(): Boolean {
@@ -493,11 +498,11 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onNext = { if (put()) onDone(row + 1 to col) }),
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
-            TextButton(onClick = { if (put()) onDone(row to col) }, enabled = editing.enabled) { Text("✓") }
+            TextButton(onClick = { if (put()) onDone(row to col) }, enabled = editing.enabled) { val l = stringResource(R.string.cell_put); Text("✓", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
             editing.rows?.let { rows ->
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    TextButton(onClick = { menu = true }, enabled = editing.enabled) { Text("⋮") }
+                    TextButton(onClick = { menu = true }, enabled = editing.enabled) { val l = stringResource(R.string.rows_menu); Text("⋮", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
                     androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         // What was typed is put in first (a wrong formula stays, and the rows wait)
                         fun act(delete: Boolean, below: Boolean) {
@@ -513,7 +518,7 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                     }
                 }
             }
-            TextButton(onClick = onClose) { Text("✕") }
+            TextButton(onClick = onClose) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
         }
     }
 }

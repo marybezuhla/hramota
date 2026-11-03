@@ -35,7 +35,7 @@ object PptxReader {
                 val lower = name.lowercase()
                 when {
                     lower.endsWith("vbaproject.bin") -> macros = true
-                    lower.startsWith("ppt/embeddings/") -> embedded += name.substringAfterLast('/')
+                    lower.startsWith("ppt/embeddings/") -> if (embedded.size < 100) embedded += name.substringAfterLast('/')
                     withMedia && lower.startsWith("ppt/media/") && (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".bmp") || lower.endsWith(".webp")) -> {
                         if (mediaTotal < Deck.MAX_MEDIA) {
                             val bytes = readLimited(zip, minOf(64L * 1024 * 1024, Deck.MAX_MEDIA - mediaTotal))

@@ -111,7 +111,7 @@ object XlsxReader {
                 val lower = name.lowercase()
                 when {
                     lower.endsWith("vbaproject.bin") -> macros = true
-                    lower.startsWith("xl/embeddings/") -> embedded += name.substringAfterLast('/')
+                    lower.startsWith("xl/embeddings/") -> if (embedded.size < 100) embedded += name.substringAfterLast('/')
                     lower.startsWith("xl/externallinks/") && lower.endsWith(".xml") -> external++
                     lower.startsWith("xl/worksheets/") && lower.endsWith(".xml") && !lower.contains("/_rels/") && built.size < SheetLimits.MAX_SHEETS -> {
                         val b = SheetBuilder(name, budget)
@@ -247,7 +247,7 @@ object XlsxReader {
 
     /** A worksheet streamed row by row: a sheet of a million cells is never one tree. */
     private fun sheet(input: InputStream, b: SheetBuilder) {
-        val p = Xml.parser(input)
+        val p = Xml.parser(Xml.guarded(input))
         var row = -1
         var nextCol = 0
         var cellRef: String? = null

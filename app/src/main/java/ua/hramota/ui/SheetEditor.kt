@@ -23,6 +23,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.Dispatchers
@@ -223,7 +225,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
 @Composable
 fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, onSave: () -> Unit, onClose: () -> Unit, startCell: Pair<Int, Int>? = null) {
     var askClose by remember { mutableStateOf(false) }
-    var sheetIndex by remember { mutableIntStateOf(0) }
+    var sheetIndex by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     val view = remember { SheetViewState() }
     BackHandler { if (state.dirty) askClose = true else onClose() }
     LaunchedEffect(state.version) { if (state.version > 0) state.refresh() }
@@ -245,8 +247,9 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     }
                 },
                 actions = {
-                    TextButton(onClick = { state.undo() }, enabled = state.canUndo && !saving && !state.busy) { Text("↶") }
-                    TextButton(onClick = { state.redo() }, enabled = state.canRedo && !saving && !state.busy) { Text("↷") }
+                    val undoLabel = stringResource(R.string.edit_undo); val redoLabel = stringResource(R.string.edit_redo)
+                    TextButton(onClick = { state.undo() }, enabled = state.canUndo && !saving && !state.busy) { Text("↶", modifier = Modifier.clearAndSetSemantics { contentDescription = undoLabel }) }
+                    TextButton(onClick = { state.redo() }, enabled = state.canRedo && !saving && !state.busy) { Text("↷", modifier = Modifier.clearAndSetSemantics { contentDescription = redoLabel }) }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving && !state.busy) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )

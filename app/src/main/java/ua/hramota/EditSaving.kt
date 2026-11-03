@@ -310,7 +310,7 @@ object EditSaving {
                 val label = File(dir(context), "$stem.txt$suffix")
                 val bytes = name.take(200).toByteArray(Charsets.UTF_8)
                 label.writeBytes(if (key != null) Sealed.seal(key, bytes, "$stem.txt") else bytes)
-                val file = File(dir(context), "$stem.${if (ext == "xlsx" || ext == "pptx") ext else "docx"}$suffix")
+                val file = File(dir(context), "$stem.${if (ext == "xlsx" || ext == "pptx" || ext == "pdf") ext else "docx"}$suffix")
                 inUse += file.path
                 return Rescue(file, label, key, File(context.cacheDir, "open"))
             }
@@ -323,12 +323,14 @@ object EditSaving {
             /** Originals left by saves that did not finish. */
             fun left(context: Context): List<Rescue> {
                 val files = dir(context).listFiles().orEmpty()
+                fun stem(f: File) = f.name.removeSuffix(".part").removeSuffix(Vault.SUFFIX).substringBeforeLast('.')
+                // Saves under way in another window: their files (half-written ones too) are left alone
+                val busy = synchronized(inUse) { inUse.map { stem(File(it)) }.toSet() }
                 // A copy that was never finished holds nothing worth offering
-                files.filter { it.name.endsWith(".part") }.forEach { it.delete() }
-                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.(docx|xlsx|pptx)(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
-                fun stem(f: File) = f.name.removeSuffix(Vault.SUFFIX).substringBeforeLast('.')
+                files.filter { it.name.endsWith(".part") && stem(it) !in busy }.forEach { it.delete() }
+                val kept = files.filter { it.name.matches(Regex("r[0-9a-z]{1,30}\\.(docx|xlsx|pptx|pdf)(${Regex.escape(Vault.SUFFIX)})?")) && it.path !in inUse }
                 // Labels whose copy never came to be (not of a save under way)
-                files.filter { it.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && files.none { k -> !k.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && stem(k) == stem(it) } }.forEach { it.delete() }
+                files.filter { it.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && stem(it) !in busy && files.none { k -> !k.name.removeSuffix(Vault.SUFFIX).endsWith(".txt") && !k.name.endsWith(".part") && stem(k) == stem(it) } }.forEach { it.delete() }
                 return kept.map { k ->
                     val label = File(k.parentFile, stem(k) + ".txt" + if (k.name.endsWith(Vault.SUFFIX)) Vault.SUFFIX else "")
                     Rescue(k, label, null, File(context.cacheDir, "open"))

@@ -62,7 +62,8 @@ class ViewerActivity : ComponentActivity() {
         val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
         labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
-        if (savedInstanceState == null) Recents.get(applicationContext).add(uri, name)
+        // (off the main thread: it asks the file's app for lasting access and writes the list, sealed under lock)
+        if (savedInstanceState == null) { val app = applicationContext; lifecycleScope.launch(Dispatchers.IO) { Recents.get(app).add(uri, name) } }
         val format = formatOf(this, uri, name)
         val library = Library.get(applicationContext)
         val remember = ua.hramota.data.Settings.get(this).state.value.rememberRecent
@@ -196,7 +197,9 @@ class ViewerActivity : ComponentActivity() {
                                     savingNotes = null
                                     docId?.let { id ->
                                         lifecycleScope.launch {
-                                            val newId = withContext(Dispatchers.IO) { saveNotesInto(pdf, uri, id) }
+                                            // The storage stays open meanwhile (locking empties the folder the work is done in)
+                                            ua.hramota.data.Vault.hold()
+                                            val newId = try { withContext(Dispatchers.IO) { saveNotesInto(pdf, uri, id) } } finally { ua.hramota.data.Vault.release() }
                                             android.widget.Toast.makeText(this@ViewerActivity, getString(if (newId != null) R.string.pdf_notes_saved else R.string.pdf_notes_not_saved), android.widget.Toast.LENGTH_LONG).show()
                                             // The file is different now: opened again (a kept copy through a fresh temporary file),
                                             // so its new notes show and the next save builds on them
@@ -238,6 +241,7 @@ class ViewerActivity : ComponentActivity() {
                             dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDrop = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
                         )
                     }
+                    if (held.opening) androidx.compose.ui.window.Dialog(onDismissRequest = {}) { androidx.compose.material3.CircularProgressIndicator() }
                     val editor = held.editor
                     // A save finished (perhaps while the window was being made again): said and acted on here
                     held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
@@ -365,6 +369,8 @@ class ViewerActivity : ComponentActivity() {
             val ok = withContext(Dispatchers.IO) {
                 try {
                     wasEmpty = EditSaving.isEmpty(applicationContext, target)
+                    // A file chosen from those already there is not written over
+                    if (!wasEmpty) return@withContext false
                     val notes = Library.get(applicationContext).get(id)?.notes.orEmpty()
                     contentResolver.openFileDescriptor(target, "wt")?.use { pdf.saveNotes(notes, ::noteArgb, it) } == true
                 } catch (e: Exception) { false }
@@ -380,11 +386,13 @@ class ViewerActivity : ComponentActivity() {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         held.withComments = withComments
         val app = applicationContext
+        if (held.opening) return
+        held.opening = true
         held.scope.launch {
-            val edit = withContext(Dispatchers.IO) {
+            val edit = try { withContext(Dispatchers.IO) {
                 try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) }?.let { ua.hramota.ui.EditorState(it) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
-            }
+            } } finally { held.opening = false }
             if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
             else held.editor = edit
         }
@@ -394,11 +402,13 @@ class ViewerActivity : ComponentActivity() {
     private fun startSlideEditing(uri: android.net.Uri) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         val app = applicationContext
+        if (held.opening) return
+        held.opening = true
         held.scope.launch {
-            val edit = withContext(Dispatchers.IO) {
+            val edit = try { withContext(Dispatchers.IO) {
                 try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.slides.edit.PptxEdit.open(it.buffered()) }?.let { ua.hramota.ui.SlideEditorState(it) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
-            }
+            } } finally { held.opening = false }
             if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
             else held.slides = edit
         }
@@ -408,11 +418,13 @@ class ViewerActivity : ComponentActivity() {
     private fun startSheetEditing(uri: android.net.Uri, workbook: ua.hramota.doc.sheet.Workbook) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         val app = applicationContext
+        if (held.opening) return
+        held.opening = true
         held.scope.launch {
-            val edit = withContext(Dispatchers.IO) {
+            val edit = try { withContext(Dispatchers.IO) {
                 try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.sheet.edit.XlsxEdit.open(it.buffered()) }?.let { ua.hramota.ui.SheetEditorState(it, workbook) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
-            }
+            } } finally { held.opening = false }
             if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
             else held.sheet = edit
         }
@@ -574,16 +586,19 @@ class ViewerActivity : ComponentActivity() {
             if (ua.hramota.data.Shelf.isOwn(this, uri) && copy != null) {
                 if (!EditSaving.replaceKeptCopy(copy, temp)) return null
             } else {
-                // Checked above to begin with the original: only the addition is written. Some apps that
-                // hold files ignore "append" and keep only what was written: then the whole file is written
-                contentResolver.openOutputStream(uri, "wa")?.use { out ->
-                    temp.inputStream().use { input -> input.skip(shownSize); input.copyTo(out) }
-                } ?: return null
-                val now = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
-                val whole = now == temp.length() && contentResolver.openInputStream(uri)?.use { a -> temp.inputStream().use { b -> sameStart(a, b, now) } } == true
-                if (!whole) {
-                    contentResolver.openOutputStream(uri, "wt")?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
+                // Written whole as an edited document is: the original kept in Hramota first, the result read
+                // back, the original put back if it does not match (and offered on the home screen if even that fails)
+                if (ua.hramota.data.Vault.sealing(this) && ua.hramota.data.Vault.key() == null) return null
+                val app = applicationContext
+                val rescue = EditSaving.Rescue.create(app, Recents.displayName(app, uri), "pdf")
+                val io = object : EditSaving.Io {
+                    override fun read() = app.contentResolver.openInputStream(uri)
+                    override fun write(mode: String) = app.contentResolver.openOutputStream(uri, mode)
                 }
+                val done = try { EditSaving.writeWhole(io, temp, rescue) } finally { EditSaving.Rescue.done(rescue) }
+                if (done != EditSaving.Write.BROKEN) rescue.delete()
+                // The notes stay in Hramota unless they are surely in the file
+                if (done != EditSaving.Write.DONE) return null
             }
             val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return null
             library.update(newId) { entry.copy(id = newId, notes = emptyList()) }
@@ -696,6 +711,8 @@ class ViewerActivity : ComponentActivity() {
         /** What saving needs from whichever editor is open (taken now: later typing is not part of it). */
         fun maker(): EditSaving.Maker? = editor?.let { EditSaving.docx(it.edit, it.paras) } ?: sheet?.maker() ?: slides?.maker()
         var saving by mutableStateOf(false)
+        /** An editor being opened (a large file takes a moment): shown, and not opened twice. */
+        var opening by mutableStateOf(false)
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
         /** Why the edits went into a copy (what is said when it is saved). */
         var copyReason: EditSaving.Result? = null

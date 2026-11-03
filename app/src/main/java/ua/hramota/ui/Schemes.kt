@@ -24,7 +24,7 @@ object Schemes {
     }
 
     /** [c] moved towards [toward] just enough to read on [bg] (at least [min]:1); the hue stays. */
-    private fun readable(c: Color, bg: Color, toward: Color, min: Double = 4.5): Color {
+    internal fun readable(c: Color, bg: Color, toward: Color, min: Double = 4.5): Color {
         var t = 0f
         var r = c
         while (contrast(r, bg) < min && t < 1f) { t += 0.04f; r = lerp(c, toward, t) }
@@ -45,8 +45,8 @@ object Schemes {
         val bg = Color(page); val text = Color(ink)
         val light = Color.White; val black = Color.Black
         // Accents are also text (buttons, links): kept readable on the page
-        val p = readable(Color(primary), bg, if (dark) text else black)
-        val s = readable(Color(secondary), bg, if (dark) text else black)
+        val p = readable(Color(primary), bg, if (dark) text else black, 4.8)
+        val s = readable(Color(secondary), bg, if (dark) text else black, 4.8)
         val onP = readable(better(p, Color(onPrimary), if (dark) Color(page) else light), p, if (p.luminance() > 0.4f) black else light)
         val onS = readable(better(s, Color(onPrimary), if (dark) Color(page) else light), s, if (s.luminance() > 0.4f) black else light)
         val pc = lerp(Color(primary), bg, if (dark) 0.62f else 0.84f)

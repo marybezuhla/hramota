@@ -329,7 +329,6 @@ class ScreensTest {
     @Test fun editorCommentsDark() = shot("13-edit-docx-comments-dark") { ua.hramota.ui.DocxEditorScreen("Коментарі.docx", androidx.compose.runtime.remember { editor("docs-edit/comments.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(fontScale = 1.5f)
     @Test fun editorLargeFont() = shot("13-edit-docx-large-font") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
-    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     private fun sheetEditor() = ua.hramota.ui.SheetEditorState(
         ua.hramota.doc.sheet.edit.XlsxEdit.open(File(javaClass.classLoader!!.getResource("sheets/01-budget.xlsx")!!.toURI()).inputStream()), budget())
     @Test fun sheetEditorScreen() = shot("14-edit-xlsx") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
@@ -341,6 +340,20 @@ class ScreensTest {
         }
         ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", st, saving = false, onSave = {}, onClose = {})
     }
+    @Config(fontScale = 1.5f)
+    @Test fun sheetEditorLargeFont() = shot("14-edit-xlsx-large-font") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
+    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
+    @Test fun sheetEditorEnglish() = shot("14-edit-xlsx-en") { ua.hramota.ui.SheetEditorScreen("Family budget.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
+    @Config(fontScale = 1.5f)
+    @Test fun slideEditorLargeFont() = shot("15-edit-pptx-large-font") {
+        val st = androidx.compose.runtime.remember {
+            ua.hramota.ui.SlideEditorState(ua.hramota.doc.slides.edit.PptxEdit.open(File(javaClass.classLoader!!.getResource("slides/01-project.pptx")!!.toURI()).inputStream()))
+        }
+        ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", st, saving = false, onSave = {}, onClose = {})
+    }
+    @Config(fontScale = 1.5f)
+    @Test fun homeLargeFont() = shot("02-home-large-font") { home(recentsUk) }
+    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun editorEnglish() = shot("13-edit-docx-en") { ua.hramota.ui.DocxEditorScreen("Contract.docx", androidx.compose.runtime.remember { editor("05-flow.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Test fun homeShelf() = shot("12-home-shelf") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, startOnShelf = true, now = now)

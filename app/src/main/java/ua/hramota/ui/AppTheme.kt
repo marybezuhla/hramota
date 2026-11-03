@@ -27,5 +27,12 @@ fun ComponentActivity.AppTheme(content: @Composable (AppSettings) -> Unit) {
         "dark" -> true
         else -> isSystemInDarkTheme()
     }
+    // The clock and battery icons follow Hramota's own theme, not the phone's (dark icons on a dark screen would vanish)
+    SideEffect {
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
     HramotaTheme(dark = dark, dynamic = settings.dynamicColor, day = settings.dayScheme, night = settings.nightScheme) { content(settings) }
 }

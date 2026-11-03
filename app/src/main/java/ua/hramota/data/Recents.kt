@@ -15,7 +15,7 @@ data class RecentFile(val uri: String, val name: String, val openedAt: Long)
 
 /**
  * The recent files list: only on this phone (no cloud backup), at most [MAX] entries, and it can be
- * cleared. Hramota keeps read access only to files listed here and gives it back when removed.
+ * cleared. Hramota keeps access (reading, and writing where the file's app allows it, so an edited file can be saved into itself) only to files listed here, and gives it back when removed.
  */
 class Recents private constructor(private val context: Context) {
     private val state = MutableStateFlow(load())

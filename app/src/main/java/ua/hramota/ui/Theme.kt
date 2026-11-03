@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -89,10 +90,13 @@ fun FormatBadge(format: Format, modifier: Modifier = Modifier) {
         Format.EPUB, Format.FB2 -> Color(0xFF7A4E9C)
         else -> Color(0xFF6B6B6B)
     }
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val fg = if (dark) lerp(base, Color.White, 0.45f) else base
+    val page = MaterialTheme.colorScheme.background
+    val dark = page.luminance() < 0.5f
+    val fill = base.copy(alpha = if (dark) 0.24f else 0.12f)
+    // The small letters read on the badge in every colour scheme (at least 4.5:1)
+    val fg = Schemes.readable(if (dark) lerp(base, Color.White, 0.45f) else base, fill.compositeOver(page), if (dark) Color.White else Color.Black)
     Box(
-        modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(base.copy(alpha = if (dark) 0.24f else 0.12f)),
+        modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(fill),
         contentAlignment = Alignment.Center,
     ) {
         Text(format.label.ifEmpty { "•" }.take(4), color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, letterSpacing = 0.3.sp)

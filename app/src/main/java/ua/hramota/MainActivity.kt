@@ -123,6 +123,7 @@ class MainActivity : ComponentActivity() {
         compareFirst = savedInstanceState?.getString(KEY_FIRST)?.let(Uri::parse)
         compareFirstName = savedInstanceState?.getString(KEY_FIRST_NAME)
         savingRescuePath = savedInstanceState?.getString(KEY_RESCUE)
+        creating = savedInstanceState?.getBoolean(KEY_CREATING) == true
         choosing = savedInstanceState?.getBoolean(KEY_CHOOSING) ?: false
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
         showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
@@ -263,11 +264,14 @@ class MainActivity : ComponentActivity() {
         busy = Triple(getString(R.string.backup_writing), 0, 0)
         lifecycleScope.launch {
             var wasEmpty = false
+            var exists = false
             val reason = try {
                 ua.hramota.data.Vault.work.withLock {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         try {
                             wasEmpty = EditSaving.isEmpty(this@MainActivity, uri)
+                            // A file chosen from those already there is not written over (an old backup, say)
+                            if (!wasEmpty) { exists = true; throw java.io.IOException("Exists") }
                             val out = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("No file")
                             out.use { ua.hramota.data.Backup.write(this@MainActivity, it, pw, ids) { d, n -> busy = Triple(getString(R.string.backup_writing), d, n) } }
                             null
@@ -278,11 +282,13 @@ class MainActivity : ComponentActivity() {
             // Only a file made for this backup is removed again (one chosen from those already there stays)
             if (reason != null && wasEmpty) { val app = applicationContext; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { EditSaving.remove(app, uri) } }
             busy = null
-            android.widget.Toast.makeText(this@MainActivity, getString(when (reason) {
+            android.widget.Toast.makeText(this@MainActivity, getString(when {
+                exists -> R.string.create_exists
+                else -> when (reason) {
                 null -> R.string.backup_written
                 ua.hramota.data.Backup.Reason.LOCKED -> R.string.backup_locked
                 else -> R.string.backup_failed
-            }), android.widget.Toast.LENGTH_LONG).show()
+            } }), android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
@@ -373,6 +379,7 @@ class MainActivity : ComponentActivity() {
         compareFirstName?.let { outState.putString(KEY_FIRST_NAME, it) }
         (savingRescue?.path ?: savingRescuePath)?.let { outState.putString(KEY_RESCUE, it) }
         outState.putBoolean(KEY_CHOOSING, choosing)
+        outState.putBoolean(KEY_CREATING, creating)
         outState.putBoolean(KEY_COMPARING, comparing)
         outState.putBoolean(KEY_SETTINGS, showSettings)
     }
@@ -380,10 +387,12 @@ class MainActivity : ComponentActivity() {
     private fun onPicked(uri: Uri?) {
         // Back from the file picker without a file: the list to choose from comes back
         if (uri == null) { if (comparing) choosing = true; return }
-        val name = Recents.displayName(this, uri)
-        recents.add(uri, name)
-        if (!comparing) { openViewer(uri, name); return }
-        chosen(uri, name)
+        // The file's app is asked for its name and lasting access off the main thread (a cloud app can be slow)
+        val app = applicationContext
+        lifecycleScope.launch {
+            val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Recents.displayName(app, uri).also { recents.add(uri, it) } }
+            if (!comparing) openViewer(uri, name) else chosen(uri, name)
+        }
     }
 
     /** A version chosen for comparing: the first one, then the second (from the list again). */
@@ -449,6 +458,7 @@ class MainActivity : ComponentActivity() {
         const val KEY_FIRST = "compare_first"
         const val KEY_FIRST_NAME = "compare_first_name"
         const val KEY_RESCUE = "rescue_saving"
+        const val KEY_CREATING = "creating"
         const val KEY_CHOOSING = "compare_choosing"
         const val KEY_COMPARING = "comparing"
         const val KEY_SETTINGS = "settings"

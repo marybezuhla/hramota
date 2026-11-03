@@ -128,7 +128,7 @@ object TextExtractor {
 
     private fun parser(input: InputStream): XmlPullParser =
         XmlPullParserFactory.newInstance().apply { isNamespaceAware = true }.newPullParser().apply {
-            setInput(input, "UTF-8")
+            setInput(ua.hramota.doc.docx.Xml.guarded(input), "UTF-8")
         }
 
     private const val W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"

@@ -245,10 +245,10 @@ fun SlideEditorScreen(
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         Tool("↶", stringResource(R.string.edit_undo), enabled = !saving && state.canUndo) { state.undo() }
                         Tool("↷", stringResource(R.string.edit_redo), enabled = !saving && state.canRedo) { state.redo() }
-                        Tool("B", stringResource(R.string.edit_bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold)) { state.toggle(SlideEditorState.Mark.BOLD) }
-                        Tool("I", stringResource(R.string.edit_italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic)) { state.toggle(SlideEditorState.Mark.ITALIC) }
-                        Tool("U", stringResource(R.string.edit_underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline)) { state.toggle(SlideEditorState.Mark.UNDERLINE) }
-                        Tool("S", stringResource(R.string.edit_strike), active, active && state.has(SlideEditorState.Mark.STRIKE), TextStyle(textDecoration = TextDecoration.LineThrough)) { state.toggle(SlideEditorState.Mark.STRIKE) }
+                        Tool("B", stringResource(R.string.edit_bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold), toggles = true) { state.toggle(SlideEditorState.Mark.BOLD) }
+                        Tool("I", stringResource(R.string.edit_italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic), toggles = true) { state.toggle(SlideEditorState.Mark.ITALIC) }
+                        Tool("U", stringResource(R.string.edit_underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline), toggles = true) { state.toggle(SlideEditorState.Mark.UNDERLINE) }
+                        Tool("S", stringResource(R.string.edit_strike), active, active && state.has(SlideEditorState.Mark.STRIKE), TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(SlideEditorState.Mark.STRIKE) }
                     }
                 }
             }
@@ -294,7 +294,7 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
     val style = TextStyle(color = if (p.editable) colors.onSurface else colors.onSurface.copy(alpha = 0.6f), fontSize = if (title) 21.sp else 17.sp, lineHeight = if (title) 28.sp else 25.sp,
         fontWeight = if (title) FontWeight.SemiBold else null)
     // Deeper list levels sit further in, as on the slide
-    val level = Regex("\\blvl=\"(\\d)\"").find(p.pPr)?.groupValues?.get(1)?.toInt() ?: 0
+    val level = LEVEL.find(p.pPr)?.groupValues?.get(1)?.toInt() ?: 0
     val boxModifier = Modifier.fillMaxWidth().background(colors.surfaceVariant.copy(alpha = 0.45f)).padding(start = 10.dp + 18.dp * level, end = 10.dp, top = 4.dp, bottom = 4.dp)
     if (!p.editable) {
         Text(p.text.ifEmpty { "⋯" }, style = style, modifier = boxModifier.clickable(onClick = onLocked))
@@ -350,3 +350,6 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
         },
     )
 }
+
+/** A paragraph's list level in its pPr (made once, not on every drawing). */
+private val LEVEL = Regex("\\blvl=\"(\\d)\"")

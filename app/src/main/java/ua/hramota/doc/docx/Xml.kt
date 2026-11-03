@@ -56,6 +56,21 @@ object Xml {
         }
     }
 
+    /**
+     * [input] after its start was checked for a DOCTYPE (for parts streamed, not read whole): the
+     * parser could otherwise expand entities the file defines.
+     */
+    fun guarded(input: InputStream): InputStream {
+        val b = java.io.BufferedInputStream(input, 64 * 1024)
+        b.mark(64 * 1024)
+        val head = ByteArray(64 * 1024)
+        var n = 0
+        while (n < head.size) { val r = b.read(head, n, head.size - n); if (r < 0) break; n += r }
+        checkNoDoctype(head.copyOf(n))
+        b.reset()
+        return b
+    }
+
     fun parser(input: InputStream): XmlPullParser =
         XmlPullParserFactory.newInstance().apply { isNamespaceAware = true }.newPullParser().apply { setInput(input, "UTF-8") }
 

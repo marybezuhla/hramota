@@ -143,6 +143,8 @@ class Library private constructor(private val context: Context) {
         state.value.keys.toList().forEach(::forget)
         // Earlier versions kept by saves that did not finish go too (not while a save is under way)
         if (!ua.hramota.EditSaving.Rescue.busy()) File(context.filesDir, "rescue").deleteRecursively()
+        // Copies of an unreadable memory, kept aside
+        context.filesDir.listFiles().orEmpty().filter { it.name.contains(".broken-") }.forEach { it.delete() }
         synchronized(this) { shelfState.value = shelfState.value.filter { it.id == ShelfDef.ALL }; saveShelves(shelfState.value) }
     }
 
@@ -162,7 +164,8 @@ class Library private constructor(private val context: Context) {
     private fun keepAside(name: String) {
         // Unreadable: kept aside rather than overwritten, so nothing is lost for good
         for (f in listOf(File(context.filesDir, name + Vault.SUFFIX), File(context.filesDir, name)))
-            if (f.exists()) try { f.copyTo(File(context.filesDir, "$name.broken-${System.currentTimeMillis()}")) } catch (_: Exception) {}
+            // (a sealed one stays sealed, and says so in its name)
+            if (f.exists()) try { f.copyTo(File(context.filesDir, "$name.broken-${System.currentTimeMillis()}" + if (f.name.endsWith(Vault.SUFFIX)) Vault.SUFFIX else "")) } catch (_: Exception) {}
     }
 
     private fun load(): Map<String, LibraryEntry> {
@@ -263,6 +266,8 @@ class Library private constructor(private val context: Context) {
 
     private fun convert(seal: Boolean) {
         val key = Vault.key() ?: throw java.io.IOException("Locked")
+        // Plain copies of an unreadable memory are not left beside sealed storage
+        if (seal) context.filesDir.listFiles().orEmpty().filter { it.name.contains(".broken-") && !it.name.endsWith(Vault.SUFFIX) }.forEach { it.delete() }
         // What is held now is the whole memory (read plain, or with the key)
         loadedSealed = true
         // Memory and shelves: written again in the new form (the old one is removed by the writer)
