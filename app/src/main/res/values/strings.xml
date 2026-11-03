@@ -332,7 +332,7 @@
     <string name="notes_not_saved">Couldn’t save the notes</string>
     <string name="kind_books">Books</string>
     <string name="kind_docs">Documents</string>
-    <string name="kind_sheets">Tables</string>
+    <string name="kind_sheets">Spreadsheets</string>
     <string name="kind_slides">Presentations</string>
     <string name="kind_pdf">PDF</string>
     <string name="delete_kept">Delete all documents kept in Hramota</string>

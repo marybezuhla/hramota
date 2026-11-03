@@ -140,7 +140,7 @@
     <string name="settings_docx_open_hint">Сторінки, як на папері, з розташуванням оригіналу. Текст суцільний, під ширину екрана, зручніше читати на телефоні. Перемкнути можна будь-коли в самому документі.</string>
     <string name="settings_dynamic">Кольори зі шпалер</string>
     <string name="settings_dynamic_hint">Material You: застосунок бере кольори акцентів із ваших шпалер</string>
-    <string name="recent_elsewhere">Відкривається знову лише з того застосунку</string>
+    <string name="recent_elsewhere">Знову відкрити можна лише з того застосунку</string>
     <string name="recent_no_access">«%1$s» відкрили з іншого застосунку лише один раз, тож зі списку його вже не відкрити. Відкрийте його знову з того застосунку або через «Відкрити файл».</string>
     <string name="shelf">Полиця (%1$d)</string>
     <string name="shelf_forget">Забути документ</string>
@@ -331,7 +331,7 @@
     <string name="shelf_everything">Усе на полиці</string>
     <string name="book_read_percent">Прочитано %1$d%%</string>
     <string name="book_marks_notes">Закладки й нотатки</string>
-    <string name="book_marks_empty">Закладок і нотаток ще немає. Закладка ставиться стрічкою вгорі там, де ви читаєте; нотатка — на виділених словах.</string>
+    <string name="book_marks_empty">Закладок і нотаток ще немає. Щоб поставити закладку, торкніться стрічки вгорі там, де читаєте; щоб додати нотатку, виділіть слова.</string>
     <string name="book_mark_label">Закладка · %1$d%%</string>
     <string name="book_note_label">Нотатка · %1$d%%</string>
     <string name="notes_save_file">Зберегти нотатки файлом</string>
