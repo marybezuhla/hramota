@@ -318,6 +318,8 @@
     <string name="convert_note_doc">A new DOCX file is made; the old one stays as it is. Text, formatting, tables, pictures in the text, headers, footers and page size carry over; list numbers become text. Footnotes, comments, link addresses, text boxes, floating shapes, pictures in headers and nested tables do not; tab stops become left ones, and all sections take one orientation.</string>
     <string name="convert_note_xls">A new XLSX file is made; the old one stays as it is. Values, the look of cells, column widths, merged cells and hidden sheets carry over. Formulas keep only their results and the font becomes Calibri; charts, pictures and cell comments do not carry over.</string>
     <string name="convert_go">Choose where</string>
+    <string name="settings_windows">Each document in its own window</string>
+    <string name="settings_windows_hint">A separate card in recent apps for every document. Off: documents open inside Hramota, and “back” returns to the home screen.</string>
     <string name="state_on">on</string>
     <string name="state_off">off</string>
     <string name="cell_put">Enter</string>

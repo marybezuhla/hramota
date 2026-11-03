@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
             }
             if (problem != null) { android.widget.Toast.makeText(this@MainActivity, getString(problem), android.widget.Toast.LENGTH_LONG).show(); return@launch }
             val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Recents.displayName(app, uri) }
-            val intent = Intent(this@MainActivity, ViewerActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri)
+            val intent = Intent(this@MainActivity, ViewerActivity.viewerClass(this@MainActivity)).setAction(Intent.ACTION_VIEW).setData(uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 .putExtra(ViewerActivity.EXTRA_NAME, name).putExtra(ViewerActivity.EXTRA_EDIT, true).putExtra(ViewerActivity.EXTRA_TOKEN, ViewerActivity.TOKEN)
             recents.add(uri, name)
@@ -128,6 +128,7 @@ class MainActivity : ComponentActivity() {
         comparing = savedInstanceState?.getBoolean(KEY_COMPARING) ?: false
         showSettings = savedInstanceState?.getBoolean(KEY_SETTINGS) ?: false
         applySecureScreen()
+        if (savedInstanceState == null) openHanded(intent)
         setContent {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -389,6 +390,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openHanded(intent)
+    }
+
+    /** A document opened from another app, handed over to open here (in Hramota's window). */
+    private fun openHanded(handed: Intent?) {
+        if (handed?.action != ACTION_OPEN || handed.data == null) return
+        val open = Intent(this, ViewerInlineActivity::class.java).setAction(Intent.ACTION_VIEW).setData(handed.data)
+            .addFlags(handed.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION))
+        handed.extras?.let { open.putExtras(it) }
+        // Used once: not again when the window is made again
+        setIntent(Intent(this, MainActivity::class.java))
+        try { startActivity(open) } catch (e: Exception) {}
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         compareFirst?.let { outState.putString(KEY_FIRST, it.toString()) }
@@ -434,7 +451,7 @@ class MainActivity : ComponentActivity() {
 
     private fun openViewer(uri: Uri, name: String) {
         // Each file in its own window: the viewer is declared with documentLaunchMode="intoExisting"
-        val intent = Intent(this, ViewerActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(ViewerActivity.EXTRA_NAME, name)
+        val intent = Intent(this, ViewerActivity.viewerClass(this)).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(ViewerActivity.EXTRA_NAME, name)
             .putExtra(ViewerActivity.EXTRA_TOKEN, ViewerActivity.TOKEN)
         try {
             startActivity(intent)
@@ -474,6 +491,8 @@ class MainActivity : ComponentActivity() {
         const val KEY_FIRST_NAME = "compare_first_name"
         const val KEY_RESCUE = "rescue_saving"
         const val KEY_CREATING = "creating"
+        /** A document handed over by the viewer (opened from another app), to open inside Hramota's window. */
+        const val ACTION_OPEN = "ua.hramota.OPEN"
         const val KEY_CHOOSING = "compare_choosing"
         const val KEY_COMPARING = "comparing"
         const val KEY_SETTINGS = "settings"

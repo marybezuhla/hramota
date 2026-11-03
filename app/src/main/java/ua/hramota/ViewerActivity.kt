@@ -47,11 +47,30 @@ import ua.hramota.ui.applySecureScreen
 import ua.hramota.ui.ViewerScreen
 import ua.hramota.ui.ViewerState
 
-/** One file in its own window (a separate card in Recents). */
-class ViewerActivity : ComponentActivity() {
+/**
+ * A file: in its own window (a separate card in Recents) when the person chose so, otherwise inside
+ * Hramota's window ([ViewerInlineActivity]), where "back" returns to the home screen or the shelf.
+ */
+open class ViewerActivity : ComponentActivity() {
+    /** In Hramota's own window (not a separate one). */
+    private val inline: Boolean get() = this is ViewerInlineActivity
+
+    /** Leaves the document: its own window goes, inside Hramota the home screen shows again. */
+    protected fun leave() { if (inline) finish() else finishAndRemoveTask() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // A file opened from another app goes into Hramota's window, unless documents have windows of their own
+        if (!inline && !ua.hramota.data.Settings.get(this).state.value.separateWindows && savedInstanceState == null) {
+            val forward = android.content.Intent(this, MainActivity::class.java).setAction(MainActivity.ACTION_OPEN).setData(intent.data)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or (intent.flags and (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)))
+            intent.extras?.let { forward.putExtras(it) }
+            try { startActivity(forward) } catch (e: Exception) {}
+            finishAndRemoveTask()
+            return
+        }
         val uri = intent.data
         // Only documents handed over by address (content://); Hramota's own copies only when Hramota itself asks
         // An address with a "user@" part is refused: Android would ignore it and reach the same files
@@ -60,7 +79,7 @@ class ViewerActivity : ComponentActivity() {
         if (ownCopy && intent.getStringExtra(EXTRA_TOKEN) != TOKEN) { finish(); return }
         // A copy kept inside Hramota is opened under the document's own name, not the copy's file name
         val name = (if (ownCopy) intent.getStringExtra(EXTRA_NAME) else null) ?: Recents.displayName(this, uri)
-        labelTask(name)
+        if (!inline) labelTask(name)
         // Files opened from other apps ("Open with") also appear in the recent list
         // (off the main thread: it asks the file's app for lasting access and writes the list, sealed under lock)
         if (savedInstanceState == null) { val app = applicationContext; lifecycleScope.launch(Dispatchers.IO) { Recents.get(app).add(uri, name) } }
@@ -265,7 +284,7 @@ class ViewerActivity : ComponentActivity() {
                         return@Surface
                     }
                     ViewerScreen(
-                        name, state, onBack = { finishAndRemoveTask() },
+                        name, state, onBack = { leave() },
                         startInReading = settings.docxReading,
                         showInspector = settings.inspector,
                         bookmarks = docId?.let { entries[it]?.bookmarks }.orEmpty(),
@@ -478,9 +497,9 @@ class ViewerActivity : ComponentActivity() {
                 held.editor = null; held.sheet = null; held.slides = null
                 // The copy is opened in place of the original
                 o.copy?.let { target ->
-                    startActivity(android.content.Intent(this, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
+                    startActivity(android.content.Intent(this, viewerClass(this)).setAction(android.content.Intent.ACTION_VIEW).setData(target)
                         .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
-                    finishAndRemoveTask()
+                    leave()
                 }
             }
         }
@@ -531,7 +550,7 @@ class ViewerActivity : ComponentActivity() {
             }
             android.widget.Toast.makeText(app, app.getString(message), android.widget.Toast.LENGTH_LONG).show()
             if (outcome.result != EditSaving.Result.COPY_SAVED) return@launch
-            startActivity(android.content.Intent(app, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(target)
+            startActivity(android.content.Intent(app, viewerClass(app)).setAction(android.content.Intent.ACTION_VIEW).setData(target)
                 .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
@@ -621,9 +640,9 @@ class ViewerActivity : ComponentActivity() {
         lifecycleScope.launch {
             val fresh = withContext(Dispatchers.IO) { e.copy?.let { ua.hramota.data.Shelf.copyUri(this@ViewerActivity, it, e.title) } } ?: run { recreate(); return@launch }
             intent.data?.let { ua.hramota.data.Shelf.closeOpened(this@ViewerActivity, it) }
-            startActivity(android.content.Intent(this@ViewerActivity, ViewerActivity::class.java).setAction(android.content.Intent.ACTION_VIEW).setData(fresh)
+            startActivity(android.content.Intent(this@ViewerActivity, viewerClass(this@ViewerActivity)).setAction(android.content.Intent.ACTION_VIEW).setData(fresh)
                 .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION).putExtra(EXTRA_NAME, e.title).putExtra(EXTRA_TOKEN, TOKEN))
-            finishAndRemoveTask()
+            leave()
         }
     }
 
@@ -684,7 +703,7 @@ class ViewerActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         // A copy kept under lock is not left on screen once Hramota has locked again
-        if (ua.hramota.data.Shelf.isOwn(this, intent.data) && ua.hramota.data.Vault.locked(this)) { finishAndRemoveTask(); return }
+        if (ua.hramota.data.Shelf.isOwn(this, intent.data) && ua.hramota.data.Vault.locked(this)) { leave(); return }
         // Another document, after Hramota locked: ask again, so bookmarks and notes are not lost unseen
         if (!startedOnce) { startedOnce = true; return }
         if (ua.hramota.data.Vault.locked(this) && !asking) {
@@ -734,8 +753,14 @@ class ViewerActivity : ComponentActivity() {
         const val EXTRA_TOKEN = "ua.hramota.TOKEN"
         /** Open straight into editing (a document just made). */
         const val EXTRA_EDIT = "ua.hramota.EDIT"
+        /** The viewer to start for a document: in its own window or inside Hramota's, as the person chose. */
+        fun viewerClass(context: android.content.Context): Class<out ViewerActivity> =
+            if (ua.hramota.data.Settings.get(context).state.value.separateWindows) ViewerActivity::class.java else ViewerInlineActivity::class.java
+
         /** Known only inside this process: proves an own copy was opened by Hramota, not by another app. */
         val TOKEN: String = java.util.UUID.randomUUID().toString()
     }
 }
 
+/** A document inside Hramota's own window: "back" returns to the home screen, and Hramota stays in Recents. */
+class ViewerInlineActivity : ViewerActivity()

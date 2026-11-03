@@ -40,6 +40,8 @@ data class AppSettings(
     val readTurn: String = "slide",
     /** Books: the volume keys turn pages. */
     val readVolumeKeys: Boolean = true,
+    /** Each document in its own window (a card in Recents); otherwise inside Hramota's window. */
+    val separateWindows: Boolean = false,
     /** The name put on Word comments written here (empty: none). */
     val commentAuthor: String = "",
 )
@@ -66,6 +68,7 @@ class Settings private constructor(context: Context) {
             .putBoolean("readJustify", s.readJustify).putBoolean("readPaged", s.readPaged)
             .putString("readTurn", s.readTurn).putBoolean("readVolumeKeys", s.readVolumeKeys)
             .putString("commentAuthor", s.commentAuthor)
+            .putBoolean("separateWindows", s.separateWindows)
             .apply()
         flow.value = s
     }
@@ -80,6 +83,7 @@ class Settings private constructor(context: Context) {
             put("readPaper", s.readPaper); put("readFont", s.readFont); put("readSize", s.readSize.toDouble()); put("readSpacing", s.readSpacing.toDouble())
             put("readMargin", s.readMargin.toDouble()); put("readJustify", s.readJustify); put("readPaged", s.readPaged); put("readTurn", s.readTurn); put("readVolumeKeys", s.readVolumeKeys)
             put("commentAuthor", s.commentAuthor)
+            put("separateWindows", s.separateWindows)
         }
     }
 
@@ -100,6 +104,7 @@ class Settings private constructor(context: Context) {
             readTurn = o.optString("readTurn", s.readTurn).takeIf { it in setOf("slide", "curl", "none") } ?: s.readTurn,
             readVolumeKeys = o.optBoolean("readVolumeKeys", s.readVolumeKeys),
             commentAuthor = o.optString("commentAuthor", s.commentAuthor).take(100),
+            separateWindows = o.optBoolean("separateWindows", s.separateWindows),
         )
     }
 
@@ -123,6 +128,7 @@ class Settings private constructor(context: Context) {
         readTurn = prefs.getString("readTurn", "slide").takeIf { it in setOf("slide", "curl", "none") } ?: "slide",
         readVolumeKeys = prefs.getBoolean("readVolumeKeys", true),
         commentAuthor = prefs.getString("commentAuthor", "").orEmpty().take(100),
+        separateWindows = prefs.getBoolean("separateWindows", false),
     )
 
     companion object {

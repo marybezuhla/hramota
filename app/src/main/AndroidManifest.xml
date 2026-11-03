@@ -38,8 +38,8 @@
             </intent-filter>
         </activity>
 
-        <!-- One window per file: each document (by its URI) gets its own card in Recents;
-             opening the same file again brings back its window. -->
+        <!-- Files from other apps arrive here. With "each document in its own window" on, each document
+             (by its URI) gets its own card in Recents; otherwise it is handed to Hramota's window. -->
         <activity
             android:name=".ViewerActivity"
             android:exported="true"
@@ -71,6 +71,12 @@
                 <data android:mimeType="application/x-fictionbook" />
             </intent-filter>
         </activity>
+
+        <!-- A file inside Hramota's own window (the default): "back" returns to the home screen -->
+        <activity
+            android:name=".ViewerInlineActivity"
+            android:exported="false"
+            android:label="@string/app_name" />
 
         <!-- PDFium in an isolated process: no permissions, no access to the app's files, one process
              per open document. A file built to attack the PDF engine stays locked in there. -->

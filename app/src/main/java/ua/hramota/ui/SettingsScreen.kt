@@ -123,6 +123,7 @@ fun SettingsScreen(
                 }
             }
             Toggle(stringResource(R.string.settings_inspector), stringResource(R.string.settings_inspector_hint), settings.inspector) { v -> onChange { it.copy(inspector = v) } }
+            Toggle(stringResource(R.string.settings_windows), stringResource(R.string.settings_windows_hint), settings.separateWindows) { v -> onChange { it.copy(separateWindows = v) } }
 
             Section(stringResource(R.string.settings_privacy))
             Toggle(stringResource(R.string.settings_remember), stringResource(R.string.settings_remember_hint), settings.rememberRecent) { v -> onChange { it.copy(rememberRecent = v) } }
