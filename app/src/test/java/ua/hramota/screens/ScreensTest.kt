@@ -353,6 +353,18 @@ class ScreensTest {
     }
     @Config(fontScale = 1.5f)
     @Test fun homeLargeFont() = shot("02-home-large-font") { home(recentsUk) }
+    // Reading aloud: the player under the document, while a sentence is being read
+    private val reading = ua.hramota.speech.ReadAloud.State(document = "Протокол зустрічі.docx", title = "Протокол зустрічі", playing = true, unit = 1, start = 0, end = 40, speed = 1f, sleepAt = ua.hramota.speech.ReadAloud.SLEEP_CHAPTER)
+    @Composable private fun readingScreen(state: ua.hramota.speech.ReadAloud.State) = androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+        ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {})
+        androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)) { ua.hramota.ui.ReadAloudBar(state, onBookmark = {}, onSettings = {}) }
+    }
+    @Test fun readAloud() = shot("15-read-aloud") { readingScreen(reading) }
+    @Config(qualifiers = "+night", fontScale = 1.5f)
+    @Test fun readAloudDark() = shot("15-read-aloud-dark") { readingScreen(reading.copy(playing = false, notice = ua.hramota.speech.ReadAloud.NOTICE_NO_LANGUAGE)) }
+    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
+    @Test fun readAloudEnglish() = shot("15-read-aloud-en") { readingScreen(reading.copy(preparing = true, sleepAt = null)) }
+
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun editorEnglish() = shot("13-edit-docx-en") { ua.hramota.ui.DocxEditorScreen("Contract.docx", androidx.compose.runtime.remember { editor("05-flow.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Test fun homeShelf() = shot("12-home-shelf") {
