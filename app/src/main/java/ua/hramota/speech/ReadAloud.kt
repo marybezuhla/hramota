@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,8 @@ object ReadAloud {
         val text: suspend (Int) -> String,
         /** A unit that starts a chapter (a heading): «until the end of the chapter» stops before the next one. */
         val isHeading: (Int) -> Boolean = { false },
+        /** All units known (a PDF's text still being taken out: reading waits for more instead of ending). */
+        val complete: () -> Boolean = { true },
     )
 
     data class State(
@@ -72,7 +75,10 @@ object ReadAloud {
     private const val PAUSED_LIMIT = 30 * 60_000L
 
     // A failure in the sound system must never close the app: reading just stops, with a word why
-    private val guard = CoroutineExceptionHandler { _, _ -> _state.update { it.copy(playing = false, preparing = false, notice = NOTICE_NO_SOUND) } }
+    private val guard = CoroutineExceptionHandler { _, _ ->
+        _state.update { it.copy(playing = false, preparing = false, notice = NOTICE_NO_SOUND) }
+        onMain { pause() }
+    }
     private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + guard)
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -86,6 +92,8 @@ object ReadAloud {
 
     // The voices: opened once, used by one sentence at a time, closed only when nothing reads
     private val voices = Mutex()
+    /** The voice model runs here, one sentence at a time, never holding up other work. */
+    private val synth = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "voice") }.asCoroutineDispatcher()
     private var tetiana: TetianaVoice? = null
     private var tetianaFailed = false
     private var phone: PhoneVoice? = null
@@ -97,7 +105,7 @@ object ReadAloud {
     /** Starts reading [document] from [unit] (and the character [from] in it). */
     fun start(context: Context, document: Document, unit: Int, from: Int = 0, speed: Float, voice: String) = onMain {
         app = context.applicationContext
-        job?.cancel(); job = null
+        job?.cancel()
         doc = document
         _state.value = State(document.id, document.title, playing = true, unit = unit, start = from, end = from, speed = speed, voice = voice, sleepAt = _state.value.sleepAt)
         ReadAloudService.show(app)
@@ -195,7 +203,9 @@ object ReadAloud {
     /** The sentences from ([unit], [from]) on, one after another. */
     private fun sentencesFrom(unit: Int, from: Int) = flow {
         var u = unit; var first = true
-        while (u < (doc?.count?.invoke() ?: 0)) {
+        while (true) {
+            val d = doc ?: break
+            if (u >= d.count()) { if (d.complete()) break; delay(200); continue }
             val (text, spans) = sentences(u)
             for ((k, sp) in spans.withIndex()) {
                 if (first && sp.end <= from) continue
@@ -209,12 +219,11 @@ object ReadAloud {
     /** One reading: moves [by] sentences first, then (when playing) reads on from there. */
     private fun run(unit: Int, from: Int, by: Int) {
         job?.cancel()
-        val previous = job
         job = main.launch(Dispatchers.Default) {
-            previous?.join()
             var u = unit; var f = from
             if (by != 0) {
-                val spot = neighbour(unit, from, by) ?: return@launch
+                // No sentence before the first or after the last: the current one stays
+                val spot = neighbour(unit, from, by) ?: neighbour(unit, from, 0) ?: return@launch
                 u = spot.unit; f = spot.start
                 _state.update { it.copy(unit = spot.unit, start = spot.start, end = spot.end) }
             }
@@ -242,13 +251,15 @@ object ReadAloud {
                 while (next.isFailure && !next.isClosed && isActive) { out.silence(0.1f); next = made.tryReceive() }
                 val (spot, sound) = next.getOrNull() ?: break
                 _state.update { it.copy(unit = spot.unit, start = spot.start, end = spot.end, preparing = false) }
+                // No voice for it: reading stops here (the place kept), saying why, instead of running on in silence
+                if (sound === NO_VOICE) { withContext(Dispatchers.Main) { pause() }; return@coroutineScope }
                 if (sound != null) { out.play(sound); out.silence(if (spot.last) 0.55f else 0.28f) }
             }
             out.drain()
             // The end (of the document, or of the chapter the timer waits for)
             if (isActive) {
-                _state.update { it.copy(playing = false, sleepAt = if (it.sleepAt == SLEEP_CHAPTER) null else it.sleepAt) }
-                if (_state.value.sleepAt == null) withContext(Dispatchers.Main) { pause() }
+                _state.update { it.copy(sleepAt = if (it.sleepAt == SLEEP_CHAPTER) null else it.sleepAt) }
+                withContext(Dispatchers.Main) { pause() }
             }
         } finally {
             maker.cancel()
@@ -256,20 +267,27 @@ object ReadAloud {
         }
     }
 
+    /** Marks a sentence no voice could say (reading stops there). */
+    private val NO_VOICE = Sound(FloatArray(0), TetianaVoice.RATE)
+
     /** A sentence made into sound by the voice for its language (the person's choice first). */
     private suspend fun make(text: String): Sound? {
         val lang = Sentences.language(text) ?: return null
         val speed = _state.value.speed
         if (lang == "uk" && _state.value.voice != PHONE) {
+            var opened = false
             val sound = voices.withLock {
                 if (tetiana == null && !tetianaFailed) {
                     _state.update { it.copy(preparing = true) }
-                    tetiana = try { TetianaVoice.open(app, TetianaVoice.dictionary(app)) } catch (e: Exception) { tetianaFailed = true; null } catch (e: OutOfMemoryError) { tetianaFailed = true; null }
+                    tetiana = withContext(synth) { try { TetianaVoice.open(app, TetianaVoice.dictionary(app)) } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null } }
+                    if (tetiana == null) tetianaFailed = true
                 }
+                opened = tetiana != null
                 // The model runs under the lock: it is never closed while a sentence is being made
-                tetiana?.let { v -> try { v.read(text, speed) } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
+                tetiana?.let { v -> try { withContext(synth) { v.read(text, speed) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
             }
-            if (sound != null) return sound
+            // Hramota's voice is there but could not say this one: skipped, never handed to another voice
+            if (opened) return sound
         }
         val sound = voices.withLock {
             if (phone == null && !phoneFailed) {
@@ -278,36 +296,38 @@ object ReadAloud {
             }
             phone?.let { p -> try { p.read(text, speed) } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
         }
-        if (sound == null) _state.update { it.copy(notice = if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }
+        if (sound == null) { _state.update { it.copy(notice = if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }; return NO_VOICE }
         return sound
     }
 
     /** Frees the voices (memory); they open again when needed. Waits for a sentence being made to finish. */
     fun release() {
         main.launch(Dispatchers.Default) {
-            if (_state.value.active) return@launch
-            voices.withLock { tetiana?.close(); tetiana = null; tetianaFailed = false; phone?.close(); phone = null; phoneFailed = false }
+            voices.withLock {
+                if (_state.value.active) return@withLock
+                tetiana?.close(); tetiana = null; tetianaFailed = false; phone?.close(); phone = null; phoneFailed = false
+            }
         }
     }
 
-    /** Sound output of one reading: its own track, made for the voice's rate, released when the reading ends. */
+    /** Sound output of one reading: its own track at the voice's rate (other rates resampled), released at the end. */
     private class Output {
+        private val rate = TetianaVoice.RATE
         private var track: AudioTrack? = null
-        private var rate = TetianaVoice.RATE
         private var written = 0L
 
-        private suspend fun track(r: Int): AudioTrack {
-            track?.let { if (r == rate) return it; drain(); it.release() }
-            rate = r; written = 0
+        private fun track(): AudioTrack = track ?: run {
             val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
-            val format = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(r).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
-            val min = AudioTrack.getMinBufferSize(r, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
-            return AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(format).setBufferSizeInBytes(maxOf(min, r))
+            val format = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
+            val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
+            AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(format).setBufferSizeInBytes(maxOf(min, rate / 2 * 4))
                 .setTransferMode(AudioTrack.MODE_STREAM).build().also { track = it; it.play() }
         }
 
+        private fun head(t: AudioTrack) = t.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+
         suspend fun play(sound: Sound) {
-            val s = sound.samples
+            val s = if (sound.rate == rate) sound.samples else resample(sound.samples, sound.rate, rate)
             val all = FloatArray(s.size)
             // A gentle edge: no click where the sound starts and ends
             val fade = minOf(220, s.size / 4)
@@ -315,32 +335,48 @@ object ReadAloud {
                 val g = when { i < fade -> i / fade.toFloat(); i >= s.size - fade -> (s.size - i) / fade.toFloat(); else -> 1f }
                 all[i] = (s[i] * g * 0.95f).coerceIn(-1f, 1f)
             }
-            write(all, sound.rate)
-            // Shown as it is heard: wait until this sentence has been played, not just handed over
+            write(all)
+            // Shown as it is heard: wait until most of this sentence has been played, not just handed over
             val t = track ?: return
-            val target = written - (rate / 10)
-            while (kotlinx.coroutines.currentCoroutineContext().isActive && t.playbackHeadPosition.toLong() and 0xFFFFFFFFL < target) delay(15)
+            val target = written - rate / 10
+            val deadline = android.os.SystemClock.uptimeMillis() + all.size * 1000L / rate + 2000
+            while (kotlinx.coroutines.currentCoroutineContext().isActive && head(t) < target && android.os.SystemClock.uptimeMillis() < deadline) delay(15)
         }
 
-        suspend fun silence(seconds: Float) = write(FloatArray((rate * seconds).toInt()), rate)
+        suspend fun silence(seconds: Float) = write(FloatArray((rate * seconds).toInt()))
 
-        private suspend fun write(data: FloatArray, r: Int) = withContext(Dispatchers.IO) {
-            val t = track(r)
+        private suspend fun write(data: FloatArray) = withContext(Dispatchers.IO) {
+            val t = track()
             var off = 0
             while (off < data.size && isActive) {
                 val n = t.write(data, off, minOf(2048, data.size - off), AudioTrack.WRITE_BLOCKING)
-                if (n <= 0) break
+                // The sound system lost the track (restarted, the output changed): reading stops with a word why
+                if (n < 0) throw IllegalStateException("audio")
+                if (n == 0) break
                 off += n
             }
             written += off
         }
 
-        /** Waits until what was written has been heard (the end of a reading). */
+        /** The end of a reading: what is left is played out (stop() plays a stream to its end), within a time. */
         suspend fun drain() {
             val t = track ?: return
-            while (kotlinx.coroutines.currentCoroutineContext().isActive && (t.playbackHeadPosition.toLong() and 0xFFFFFFFFL) < written) delay(20)
+            val left = written - head(t)
+            try { t.stop() } catch (_: Exception) { return }
+            val deadline = android.os.SystemClock.uptimeMillis() + left.coerceAtLeast(0) * 1000 / rate + 500
+            while (kotlinx.coroutines.currentCoroutineContext().isActive && t.playState != AudioTrack.PLAYSTATE_STOPPED && android.os.SystemClock.uptimeMillis() < deadline) delay(20)
+            while (kotlinx.coroutines.currentCoroutineContext().isActive && head(t) < written && android.os.SystemClock.uptimeMillis() < deadline) delay(20)
         }
 
         fun release() { track?.let { try { it.pause(); it.flush(); it.release() } catch (_: Exception) {} }; track = null }
+
+        private fun resample(x: FloatArray, from: Int, to: Int): FloatArray {
+            val n = (x.size.toLong() * to / from).toInt()
+            return FloatArray(n) { i ->
+                val p = i.toDouble() * from / to; val a = p.toInt(); val f = (p - a).toFloat()
+                val v0 = x.getOrElse(a) { 0f }; val v1 = x.getOrElse(a + 1) { v0 }
+                v0 + (v1 - v0) * f
+            }
+        }
     }
 }

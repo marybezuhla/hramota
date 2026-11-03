@@ -23,6 +23,7 @@ object UkrainianNumbers {
     enum class Form(val hard: String, val soft: String) {
         NOM_M("ий", "ій"), GEN_M("ого", "ього"), LOC_M("ому", "ьому"),
         NOM_F("а", "я"), GEN_F("ої", "ьої"), LOC_F("ій", "ій"), ACC_F("у", "ю"),
+        NOM_N("е", "є"), PLURAL("их", "іх"),
     }
 
     private fun below1000(n: Int, feminine: Boolean, out: MutableList<String>) {
@@ -54,8 +55,43 @@ object UkrainianNumbers {
         val thousands = rest / 1000; rest %= 1000
         if (billions > 0) { out += cardinal(billions); out += plural(billions, "мільярд", "мільярди", "мільярдів") }
         if (millions > 0) { below1000(millions.toInt(), false, out); out += plural(millions, "мільйон", "мільйони", "мільйонів") }
-        if (thousands > 0) { below1000(thousands.toInt(), true, out); out += plural(thousands, "тисяча", "тисячі", "тисяч") }
+        if (thousands == 1L && out.isEmpty()) out += "тисяча"
+        else if (thousands > 0) { below1000(thousands.toInt(), true, out); out += plural(thousands, "тисяча", "тисячі", "тисяч") }
         if (rest > 0) below1000(rest.toInt(), feminine, out)
+        return out.joinToString(" ")
+    }
+
+    // The genitive of counts: «до десяти», «від п'яти», «близько тридцяти»
+    private val ONES_GEN = arrayOf("нуля", "одного", "двох", "трьох", "чотирьох", "п'яти", "шести", "семи", "восьми", "дев'яти")
+    private val ONES_GEN_F = arrayOf("нуля", "однієї", "двох", "трьох", "чотирьох", "п'яти", "шести", "семи", "восьми", "дев'яти")
+    private val TEENS_GEN = arrayOf("десяти", "одинадцяти", "дванадцяти", "тринадцяти", "чотирнадцяти", "п'ятнадцяти", "шістнадцяти", "сімнадцяти", "вісімнадцяти", "дев'ятнадцяти")
+    private val TENS_GEN = arrayOf("", "", "двадцяти", "тридцяти", "сорока", "п'ятдесяти", "шістдесяти", "сімдесяти", "вісімдесяти", "дев'яноста")
+    private val HUNDREDS_GEN = arrayOf("", "ста", "двохсот", "трьохсот", "чотирьохсот", "п'ятисот", "шестисот", "семисот", "восьмисот", "дев'ятисот")
+
+    private fun below1000Gen(n: Int, feminine: Boolean, out: MutableList<String>) {
+        val h = n / 100; val r = n % 100
+        if (h > 0) out += HUNDREDS_GEN[h]
+        when {
+            r in 10..19 -> out += TEENS_GEN[r - 10]
+            else -> {
+                if (r / 10 > 0) out += TENS_GEN[r / 10]
+                if (r % 10 > 0) out += (if (feminine) ONES_GEN_F else ONES_GEN)[r % 10]
+            }
+        }
+    }
+
+    /** A count in the genitive («двох тисяч п'ятисот»), as after «до», «від», «близько». */
+    fun cardinalGen(n: Long, feminine: Boolean = false): String {
+        if (n == 0L) return "нуля"
+        if (n < 0 || n >= 1_000_000_000) return cardinal(n, feminine)
+        val out = ArrayList<String>()
+        var rest = n
+        val millions = rest / 1_000_000; rest %= 1_000_000
+        val thousands = rest / 1000; rest %= 1000
+        if (millions > 0) { below1000Gen(millions.toInt(), false, out); out += if (millions % 10 == 1L && millions % 100 != 11L) "мільйона" else "мільйонів" }
+        if (thousands == 1L && out.isEmpty()) out += "тисячі"
+        else if (thousands > 0) { below1000Gen(thousands.toInt(), true, out); out += if (thousands % 10 == 1L && thousands % 100 != 11L) "тисячі" else "тисяч" }
+        if (rest > 0) below1000Gen(rest.toInt(), feminine, out)
         return out.joinToString(" ")
     }
 
@@ -83,92 +119,157 @@ object UkrainianNumbers {
     }
 
     private val MONTHS = listOf("січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня")
-    private val LOC_PREP = setOf("у", "в", "на", "при", "о", "об", "по")
-
-    // A unit after a number, with its forms (one, few, many) and gender
-    private class Unit(val one: String, val few: String, val many: String, val feminine: Boolean = false) {
-        /** After a fraction («1,5 кілометра»): the genitive singular, which is the «few» form for these words. */
-        val ofFraction get() = if (feminine || one == "євро") few else few.dropLast(1) + "а"
-    }
-    private val UNITS = mapOf(
-        "%" to Unit("відсоток", "відсотки", "відсотків"),
-        "км" to Unit("кілометр", "кілометри", "кілометрів"), "м" to Unit("метр", "метри", "метрів"),
-        "см" to Unit("сантиметр", "сантиметри", "сантиметрів"), "мм" to Unit("міліметр", "міліметри", "міліметрів"),
-        "кг" to Unit("кілограм", "кілограми", "кілограмів"), "г" to Unit("грам", "грами", "грамів"),
-        "т" to Unit("тонна", "тонни", "тонн", true), "л" to Unit("літр", "літри", "літрів"),
-        "грн" to Unit("гривня", "гривні", "гривень", true), "коп" to Unit("копійка", "копійки", "копійок", true),
-        "год" to Unit("година", "години", "годин", true), "хв" to Unit("хвилина", "хвилини", "хвилин", true),
-        "с" to Unit("секунда", "секунди", "секунд", true), "сек" to Unit("секунда", "секунди", "секунд", true),
-        "$" to Unit("долар", "долари", "доларів"), "€" to Unit("євро", "євро", "євро"),
-        "тис" to Unit("тисяча", "тисячі", "тисяч", true), "млн" to Unit("мільйон", "мільйони", "мільйонів"), "млрд" to Unit("мільярд", "мільярди", "мільярдів"),
-    )
 
     private val DATE = Regex("""\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b""")
     private val DAY_MONTH = Regex("""\b(\d{1,2})\s+(${MONTHS.joinToString("|")})""", RegexOption.IGNORE_CASE)
     private val YEAR = Regex("""(?:\b(у|в)\s+)?\b(\d{3,4})\s*(?:-?(?:го|му|й))?\s+(році|року|рік|р\.)""", RegexOption.IGNORE_CASE)
+    private val YEARS = Regex("""\b(\d{3,4})\s*[–—-]\s*(\d{3,4})\s*(рр\.|роки|років|роках)""", RegexOption.IGNORE_CASE)
+    private val DECADE = Regex("""\b(\d*0)-(?:х|их|ті|тих)\b""")
     private val TIME = Regex("""(?:\b(о|об|до|після|з|від)\s+)?\b([01]?\d|2[0-3])([:.])([0-5]\d)\b""", RegexOption.IGNORE_CASE)
-    private val CURRENCY_BEFORE = Regex("""([$€])\s?(\d+)""")
-    private val WITH_UNIT = Regex("""\b(\d{1,12})\s?(%|км|мм|см|кг|грн|коп|год|хв|сек|тис|млн|млрд|м|г|т|л|с)(?![\p{L}])\.?""")
+    private val PHONE = Regex("""(?:\+\s?\d{1,3}[\s-]?)?(?:\(?0\d{2}\)?[\s-]?)\d{3}[\s-]?\d{2}[\s-]?\d{2}\b|\+\d{7,15}\b""")
+    // A minus at the start or after a space (not «10 - 15», a range)
+    private val MINUS = Regex("""(^|(?<!\d)\s|\()[-−](\d)""")
+    private val MONEY_UAH = Regex("""\b(\d+)[,.](\d{2})\s?(грн|₴)(?![\p{L}])""")
+    private val MONEY_BEFORE = Regex("""([$€])\s?(\d+)(?:[,.](\d{2}))?""")
+    private val MONEY_AFTER = Regex("""\b(\d+)(?:[,.](\d{2}))?\s?([$€₴])""")
+    private val UNIT_NAMES = "%|км/год|км|мм|см|кг|грн|коп|год|хв|сек|тис|млн|млрд|°C|°|м|г|т|л|с"
+    private val WITH_UNIT = Regex("""(?:\b(\p{L}+)\s+)?\b(\d{1,12})\s?($UNIT_NAMES)(?![\p{L}])""")
     private val NUMBERED = Regex("""№\s?(\d+)""")
-    private val DECIMAL_UNIT = Regex("""\b(\d+)[,.](\d+)\s?(%|км|мм|см|кг|грн|м|г|т|л)(?![\p{L}])\.?""")
+    private val DECIMAL_UNIT = Regex("""\b(\d+)[,.](\d+)\s?($UNIT_NAMES)(?![\p{L}])""")
     private val DECIMAL = Regex("""\b(\d+)[,.](\d+)\b""")
-    private val ORDINAL_SUFFIX = Regex("""\b(\d+)-(?:й|ий|ій|го|ого|му|ому|та|тя|ту|тю|ої)\b""")
-    private val NUMBER = Regex("""\b\d+\b""")
+    private val ORDINAL_SUFFIX = Regex("""\b(\d+)-(й|ий|ій|го|ого|му|ому|та|тя|ту|тю|ої|те|тє|ше|ге|ме|ке|ша|га|ма|ка|х)\b""")
+    private val NUMBER = Regex("""(?:\b(\p{L}+)\s+)?\b(\d+)\b""")
     private val SPACED = Regex("""\b(\d{1,3})(?:[  ](\d{3}))+\b""")
+    /** Words after which a count is in the genitive. */
+    private val GEN_WORDS = setOf("до", "від", "з", "із", "зі", "близько", "біля", "після", "без", "для", "понад", "кілька", "декілька", "більше", "менше", "протягом", "упродовж", "навколо", "щонайменше", "щонайбільше", "замість", "крім", "окрім", "серед")
+
+    private class UnitName(val one: String, val few: String, val many: String, val feminine: Boolean = false, val gen: String = few)
+    private val UNIT_FULL = mapOf(
+        "%" to UnitName("відсоток", "відсотки", "відсотків", gen = "відсотка"),
+        "км/год" to UnitName("кілометр на годину", "кілометри на годину", "кілометрів на годину", gen = "кілометра на годину"),
+        "км" to UnitName("кілометр", "кілометри", "кілометрів", gen = "кілометра"), "м" to UnitName("метр", "метри", "метрів", gen = "метра"),
+        "см" to UnitName("сантиметр", "сантиметри", "сантиметрів", gen = "сантиметра"), "мм" to UnitName("міліметр", "міліметри", "міліметрів", gen = "міліметра"),
+        "кг" to UnitName("кілограм", "кілограми", "кілограмів", gen = "кілограма"), "г" to UnitName("грам", "грами", "грамів", gen = "грама"),
+        "т" to UnitName("тонна", "тонни", "тонн", true), "л" to UnitName("літр", "літри", "літрів", gen = "літра"),
+        "грн" to UnitName("гривня", "гривні", "гривень", true), "₴" to UnitName("гривня", "гривні", "гривень", true),
+        "коп" to UnitName("копійка", "копійки", "копійок", true),
+        "год" to UnitName("година", "години", "годин", true), "хв" to UnitName("хвилина", "хвилини", "хвилин", true),
+        "с" to UnitName("секунда", "секунди", "секунд", true), "сек" to UnitName("секунда", "секунди", "секунд", true),
+        "$" to UnitName("долар", "долари", "доларів", gen = "долара"), "€" to UnitName("євро", "євро", "євро", gen = "євро"),
+        "°C" to UnitName("градус Цельсія", "градуси Цельсія", "градусів Цельсія", gen = "градуса Цельсія"), "°" to UnitName("градус", "градуси", "градусів", gen = "градуса"),
+        "тис" to UnitName("тисяча", "тисячі", "тисяч", true), "млн" to UnitName("мільйон", "мільйони", "мільйонів", gen = "мільйона"), "млрд" to UnitName("мільярд", "мільярди", "мільярдів", gen = "мільярда"),
+    )
+    private val CENTS = mapOf("$" to UnitName("цент", "центи", "центів"), "€" to UnitName("цент", "центи", "центів"), "₴" to UnitName("копійка", "копійки", "копійок", true), "грн" to UnitName("копійка", "копійки", "копійок", true))
+
+    /** [n] with its unit, in the right form; after «до», «від»… in the genitive. */
+    private fun counted(n: Long, u: UnitName, genitive: Boolean): String =
+        if (genitive) cardinalGen(n, u.feminine) + " " + (if (n % 10 == 1L && n % 100 != 11L) u.gen else u.many)
+        else cardinal(n, u.feminine) + " " + plural(n, u.one, u.few, u.many)
+
+    /** The digits of a fraction: «нуль нуль п'ять», «п'ятдесят». */
+    private fun fraction(f: String, feminine: Boolean): String {
+        val zeros = f.takeWhile { it == '0' }.length
+        val rest = f.drop(zeros)
+        return (List(zeros.coerceAtMost(f.length - if (rest.isEmpty()) 1 else 0)) { "нуль" } + (if (rest.isEmpty()) emptyList() else listOf(cardinal(rest.toLongOrNull() ?: 0, feminine)))).joinToString(" ")
+    }
 
     /** [text] with its numbers written out. */
     fun expand(text: String): String {
-        var t = SPACED.replace(text) { it.value.replace(" ", "").replace(" ", "") }
+        // Phone numbers digit group by group, before anything joins their groups into one big number
+        var t = PHONE.replace(text) { m ->
+            m.value.replace("+", " плюс ").split(Regex("""[\s()\-]+""")).filter { it.isNotBlank() }.joinToString(" ") { g ->
+                if (g.all { it.isDigit() }) (if (g.length > 2 || g.startsWith("0")) g.map { ONES_M[it - '0'] }.joinToString(" ") else cardinal(g.toLong())) else g
+            }.trim()
+        }
+        t = SPACED.replace(t) { it.value.replace(" ", "").replace(" ", "") }
+        t = MINUS.replace(t) { m -> m.groupValues[1] + "мінус " + m.groupValues[2] }
         t = DATE.replace(t) { m ->
-            val d = m.groupValues[1].toInt(); val mo = m.groupValues[2].toInt(); val y = m.groupValues[3].toLong()
+            val d = m.groupValues[1].toInt(); val mo = m.groupValues[2].toInt(); val y = m.groupValues[3].toLongOrNull() ?: return@replace m.value
             if (d !in 1..31 || mo !in 1..12) m.value
             else "${ordinal(d.toLong(), Form.GEN_M)} ${MONTHS[mo - 1]} ${ordinal(y, Form.GEN_M)} року"
         }
-        t = DAY_MONTH.replace(t) { m -> "${ordinal(m.groupValues[1].toLong(), Form.GEN_M)} ${m.groupValues[2]}" }
+        t = DAY_MONTH.replace(t) { m -> "${ordinal(m.groupValues[1].toLongOrNull() ?: return@replace m.value, Form.GEN_M)} ${m.groupValues[2]}" }
+        t = YEARS.replace(t) { m ->
+            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value; val b = m.groupValues[2].toLongOrNull() ?: return@replace m.value
+            val noun = m.groupValues[3].lowercase().let { if (it == "рр.") "років" else it }
+            val form = if (noun == "роках") Form.LOC_M else Form.GEN_M
+            "${ordinal(a, form)} – ${ordinal(b, form)} $noun"
+        }
         t = YEAR.replace(t) { m ->
-            val prep = m.groupValues[1]; val y = m.groupValues[2].toLong(); val word = m.groupValues[3].lowercase()
+            val prep = m.groupValues[1]; val y = m.groupValues[2].toLongOrNull() ?: return@replace m.value; val word = m.groupValues[3].lowercase()
             val loc = prep.isNotEmpty() || word == "році"
             val noun = when { word == "р." -> if (loc) "році" else "року"; else -> word }
             val form = when (noun) { "рік" -> Form.NOM_M; "році" -> Form.LOC_M; else -> Form.GEN_M }
             (if (prep.isNotEmpty()) "$prep " else "") + ordinal(y, form) + " " + noun
         }
+        // «1990-х» — «дев'яностих» (the plural of the ordinal)
+        t = DECADE.replace(t) { m -> m.groupValues[1].toLongOrNull()?.takeIf { it >= 10 }?.let { ordinal(it, Form.PLURAL) } ?: m.value }
         t = TIME.replace(t) { m ->
             val prep = m.groupValues[1].lowercase(); val h = m.groupValues[2].toLong(); val min = m.groupValues[4].toLong()
             // «9.30» is a time only after «о», «до»…; on its own it may be a number
             if (m.groupValues[3] == "." && prep.isEmpty()) return@replace m.value
             val hourForm = when (prep) { "о", "об" -> Form.LOC_F; "до", "після", "з", "від" -> Form.GEN_F; else -> Form.NOM_F }
             val minutes = if (min == 0L) "" else " " + (if (min < 10) "нуль " else "") + cardinal(min, true)
-            (if (prep.isNotEmpty()) m.groupValues[1] + " " else "") + ordinal(if (h == 0L) 24 else h, hourForm) + minutes
+            (if (prep.isNotEmpty()) m.groupValues[1] + " " else "") + (if (h == 0L) "нуль" else ordinal(h, hourForm)) + minutes
+        }
+        // Money with kopecks or cents: «12,50 грн» — «дванадцять гривень п'ятдесят копійок»
+        t = MONEY_UAH.replace(t) { m ->
+            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value; val k = m.groupValues[2].toLong()
+            counted(a, UNIT_FULL["грн"]!!, false) + if (k > 0) " " + counted(k, CENTS["грн"]!!, false) else ""
+        }
+        t = MONEY_BEFORE.replace(t) { m ->
+            val a = m.groupValues[2].toLongOrNull() ?: return@replace m.value; val c = m.groupValues[3].toLongOrNull() ?: 0
+            val sign = m.groupValues[1]
+            counted(a, UNIT_FULL[sign]!!, false) + if (c > 0) " " + counted(c, CENTS[sign]!!, false) else ""
+        }
+        t = MONEY_AFTER.replace(t) { m ->
+            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value; val c = m.groupValues[2].toLongOrNull() ?: 0
+            val sign = m.groupValues[3]
+            counted(a, UNIT_FULL[sign]!!, false) + if (c > 0) " " + counted(c, CENTS[sign]!!, false) else ""
         }
         t = DECIMAL_UNIT.replace(t) { m ->
-            val u = UNITS[m.groupValues[3]] ?: return@replace m.value
+            val u = UNIT_FULL[m.groupValues[3]] ?: return@replace m.value
             val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value
             val frac = m.groupValues[2]
-            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + (if (frac.startsWith("0")) "нуль " else "") + cardinal(frac.trimStart('0').ifEmpty { "0" }.toLong(), true) + " " + u.ofFraction
+            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + fraction(frac, true) + " " + (if (u.feminine) u.few else u.gen)
         }
         t = DECIMAL.replace(t) { m ->
             val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value
             val frac = m.groupValues[2]
-            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + frac.trimStart('0').let { f -> (if (frac.startsWith("0")) "нуль " else "") + cardinal(f.ifEmpty { "0" }.toLong()) }
+            if (frac.length > 6) m.value else cardinal(a, true) + " кома " + fraction(frac, true)
         }
-        t = CURRENCY_BEFORE.replace(t) { m -> m.groupValues[2] + " " + m.groupValues[1] }
         t = WITH_UNIT.replace(t) { m ->
-            val n = m.groupValues[1].toLong(); val u = UNITS[m.groupValues[2]] ?: return@replace m.value
-            cardinal(n, u.feminine) + " " + plural(n, u.one, u.few, u.many)
+            val before = m.groupValues[1]
+            val n = m.groupValues[2].toLongOrNull() ?: return@replace m.value; val u = UNIT_FULL[m.groupValues[3]] ?: return@replace m.value
+            (if (before.isNotEmpty()) "$before " else "") + counted(n, u, before.lowercase() in GEN_WORDS)
         }
-        t = t.replace(Regex("""(\d+)\s?([$€])""")) { m ->
-            val n = m.groupValues[1].toLong(); val u = UNITS[m.groupValues[2]]!!
-            cardinal(n, u.feminine) + " " + plural(n, u.one, u.few, u.many)
-        }
-        t = NUMBERED.replace(t) { m -> "номер " + cardinal(m.groupValues[1].toLong()) }
+        // «5 млн грн», «2 тисячі грн»: the money after a big number is in the genitive plural
+        t = t.replace(Regex("""(тисяч\p{L}*|мільйон\p{L}*|мільярд\p{L}*)\s+(грн|₴|\$|€)""")) { m -> m.groupValues[1] + " " + UNIT_FULL[m.groupValues[2]]!!.many }
+        t = NUMBERED.replace(t) { m -> m.groupValues[1].toLongOrNull()?.let { "номер " + cardinal(it) } ?: m.value }
         t = ORDINAL_SUFFIX.replace(t) { m ->
-            val n = m.groupValues[1].toLong(); val s = m.value.substringAfter('-')
-            val form = when (s) { "й", "ий", "ій" -> Form.NOM_M; "го", "ого" -> Form.GEN_M; "му", "ому" -> Form.LOC_M; "та", "тя" -> Form.NOM_F; "ої" -> Form.GEN_F; "ту", "тю" -> Form.ACC_F; else -> Form.LOC_F }
-            ordinal(n, form)
+            val n = m.groupValues[1].toLongOrNull() ?: return@replace m.value
+            when (val s = m.groupValues[2]) {
+                // «у 2-х томах», «з 3-ма»: a count, not an ordinal
+                "х" -> cardinalGen(n)
+                else -> ordinal(n, when (s) {
+                    "й", "ий" -> Form.NOM_M; "го", "ого" -> Form.GEN_M; "му", "ому" -> Form.LOC_M
+                    "та", "тя", "ша", "га", "ма", "ка" -> Form.NOM_F; "ої" -> Form.GEN_F; "ту", "тю" -> Form.ACC_F
+                    "те", "тє", "ше", "ге", "ме", "ке" -> Form.NOM_N
+                    else -> Form.LOC_F
+                })
+            }
         }
-        t = NUMBER.replace(t) { m -> m.value.toLongOrNull()?.let { if (m.value.length > 12) m.value.map { ONES_M[it - '0'] }.joinToString(" ") else cardinal(it) } ?: m.value }
+        t = NUMBER.replace(t) { m ->
+            val before = m.groupValues[1]; val digits = m.groupValues[2]
+            val n = digits.toLongOrNull() ?: return@replace m.value
+            val words = when {
+                digits.length > 12 -> digits.map { ONES_M[it - '0'] }.joinToString(" ")
+                before.lowercase() in GEN_WORDS -> cardinalGen(n)
+                else -> cardinal(n)
+            }
+            (if (before.isNotEmpty()) "$before " else "") + words
+        }
         return t
     }
 
-    internal fun isLocPrep(w: String) = w.lowercase() in LOC_PREP
 }

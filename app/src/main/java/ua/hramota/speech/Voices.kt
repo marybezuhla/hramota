@@ -6,6 +6,8 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.io.FileInputStream
@@ -58,24 +60,45 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
     }
 
     override suspend fun read(text: String, speed: Float): Sound? {
-        val ids = ids(this.text.prepare(text))
-        if (ids.isEmpty()) return null
+        val prepared = this.text.prepare(text)
+        // Numbers written out can make a sentence long: read in pieces of a sensible size, joined
+        val pieces = ArrayList<String>()
+        var rest = prepared
+        while (rest.length > PIECE) {
+            val cut = rest.lastIndexOf(' ', PIECE).takeIf { it > PIECE / 3 } ?: PIECE
+            pieces += rest.substring(0, cut); rest = rest.substring(cut).trimStart()
+        }
+        if (rest.isNotBlank()) pieces += rest
+        val parts = pieces.mapNotNull { piece -> ids(piece).takeIf { it.isNotEmpty() }?.let { run(it, speed) } }
+        if (parts.isEmpty()) return null
+        return Sound(if (parts.size == 1) parts[0] else FloatArray(parts.sumOf { it.size }).also { out -> var at = 0; for (p in parts) { p.copyInto(out, at); at += p.size } }, RATE)
+    }
+
+    /** One run of the model; stopped at once (not after the whole sentence) when reading moves on. */
+    private suspend fun run(ids: LongArray, speed: Float): FloatArray? = kotlinx.coroutines.coroutineScope {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         // Longer sounds are slower: the voice's own pace times the person's speed
         val scales = floatArrayOf(0.667f, BASE_LENGTH / speed.coerceIn(0.5f, 2.5f), 0.8f)
-        OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { t ->
-            OnnxTensor.createTensor(env, FloatBuffer.wrap(speaker), longArrayOf(speaker.size.toLong())).use { s ->
-                OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(3)).use { sc ->
-                    // The sentence's length too, when the model asks for it
-                    val lengths = if ("text_lengths" in session.inputNames) OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(ids.size.toLong())), longArrayOf(1)) else null
-                    val inputs = buildMap { put("text", t); put("spembs", s); put("scales", sc); lengths?.let { put("text_lengths", it) } }
-                    try { session.run(inputs).use { r ->
-                        @Suppress("UNCHECKED_CAST")
-                        val wav = (r[0].value as Array<FloatArray>)[0]
-                        return Sound(wav, RATE)
-                    } } finally { lengths?.close() }
+        val options = OrtSession.RunOptions()
+        // (on another thread: the voice's own thread is busy running the model)
+        val watcher = launch(kotlinx.coroutines.Dispatchers.Default) { try { kotlinx.coroutines.awaitCancellation() } finally { try { options.setTerminate(true) } catch (_: Exception) {} } }
+        try {
+            OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { t ->
+                OnnxTensor.createTensor(env, FloatBuffer.wrap(speaker), longArrayOf(speaker.size.toLong())).use { s ->
+                    OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(3)).use { sc ->
+                        // The sentence's length too, when the model asks for it
+                        val lengths = if ("text_lengths" in session.inputNames) OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(ids.size.toLong())), longArrayOf(1)) else null
+                        val inputs = buildMap { put("text", t); put("spembs", s); put("scales", sc); lengths?.let { put("text_lengths", it) } }
+                        try {
+                            session.run(inputs, options).use { r ->
+                                @Suppress("UNCHECKED_CAST")
+                                (r[0].value as Array<FloatArray>)[0]
+                            }
+                        } finally { lengths?.close() }
+                    }
                 }
             }
-        }
+        } finally { watcher.cancel(); options.close() }
     }
 
     override fun close() { try { session.close() } catch (_: Exception) {} }
@@ -85,15 +108,23 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
         /** The voice's own pace stretched to a calm narrator's, about four syllables a second. */
         const val BASE_LENGTH = 1.0f
         const val MODEL = "voice/uk-tetiana.onnx"
+        /** Longest piece read in one run (letters): longer sentences are read in pieces. */
+        private const val PIECE = 400
 
         fun open(context: Context, dictionary: StressDictionary?): TetianaVoice {
             val env = OrtEnvironment.getEnvironment()
-            val options = OrtSession.SessionOptions().apply {
+            val session = OrtSession.SessionOptions().use { options ->
                 // The big cores of a phone; the rest of the app stays quick
-                setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                options.setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
+                options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                // Memory given back after each sentence instead of kept for the longest one
+                options.setCPUArenaAllocator(false)
+                env.createSession(mapAsset(context, MODEL), options)
             }
-            val session = env.createSession(mapAsset(context, MODEL), options)
+            try { return finishOpen(context, session, env, dictionary) } catch (e: Throwable) { session.close(); throw e }
+        }
+
+        private fun finishOpen(context: Context, session: OrtSession, env: OrtEnvironment, dictionary: StressDictionary?): TetianaVoice {
             val lines = context.assets.open("voice/uk-tetiana.tokens.txt").bufferedReader().readLines()
             val tokens = HashMap<Char, Long>()
             lines.forEachIndexed { i, t -> when { t == "<space>" -> tokens[' '] = i.toLong(); t.length == 1 -> tokens[t[0]] = i.toLong() } }
@@ -130,7 +161,9 @@ class PhoneVoice private constructor(private val tts: TextToSpeech, private val 
         val locale = when (lang) { "uk" -> Locale.forLanguageTag("uk-UA"); "en" -> Locale.UK; else -> language }
         if (tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return null
         if (text.length > TextToSpeech.getMaxSpeechInputLength()) return null
-        tts.language = locale
+        // Only a voice that works on the phone itself: the document's text is not sent over the network
+        val voice = try { tts.voices?.filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality } } catch (e: Exception) { null } ?: return null
+        tts.voice = voice
         tts.setSpeechRate(speed)
         val id = "s" + System.nanoTime()
         // Each sentence its own file: a sentence stopped late can never delete the next one's
@@ -138,12 +171,16 @@ class PhoneVoice private constructor(private val tts: TextToSpeech, private val 
         // On the phone, not over the network, where the engine allows choosing
         val params = android.os.Bundle().apply { putString(TextToSpeech.Engine.KEY_FEATURE_EMBEDDED_SYNTHESIS, "true") }
         try {
-            val ok = suspendCancellableCoroutine { c ->
-                waiting[id] = { done -> if (c.isActive) c.resume(done) }
-                if (tts.synthesizeToFile(text, params, file, id) != TextToSpeech.SUCCESS) waiting.remove(id)?.invoke(false)
-                c.invokeOnCancellation { waiting.remove(id) }
-            }
-            return if (ok) Wav.read(file) else null
+            // An engine that never answers does not stop reading for good
+            val ok = kotlinx.coroutines.withTimeoutOrNull(10_000L + text.length * 100L) {
+                suspendCancellableCoroutine { c ->
+                    waiting[id] = { done -> if (c.isActive) c.resume(done) }
+                    if (tts.synthesizeToFile(text, params, file, id) != TextToSpeech.SUCCESS) waiting.remove(id)?.invoke(false)
+                    c.invokeOnCancellation { waiting.remove(id); try { tts.stop() } catch (_: Exception) {} }
+                }
+            } ?: run { waiting.remove(id); try { tts.stop() } catch (_: Exception) {}; false }
+            // A sane size only (an hour of sound is more than any sentence)
+            return if (ok && file.length() in 45..200_000_000L) Wav.read(file) else null
         } finally { file.delete() }
     }
 

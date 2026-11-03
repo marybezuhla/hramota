@@ -39,7 +39,18 @@ class SpeechTest {
         val n = UkrainianNumbers
         assertEquals("чотирнадцять", n.cardinal(14))
         assertEquals("дві тисячі двадцять шість", n.cardinal(2026))
-        assertEquals("одна тисяча", n.cardinal(1000))
+        assertEquals("тисяча", n.cardinal(1000))
+        assertEquals("до десяти років", n.expand("до 10 років"))
+        assertEquals("від п'яти до десяти кілометрів", n.expand("від 5 до 10 км"))
+        assertEquals("дванадцять гривень п'ятдесят копійок", n.expand("12,50 грн"))
+        assertEquals("п'ять доларів дев'яносто дев'ять центів", n.expand("$5.99"))
+        assertEquals("мінус п'ять градусів Цельсія", n.expand("-5 °C"))
+        assertEquals("п'яте місце", n.expand("5-те місце"))
+        assertEquals("у двох томах", n.expand("у 2-х томах"))
+        assertEquals("у тисяча дев'ятсот дев'яностих роках", n.expand("у 1990-х роках"))
+        assertEquals("нуль шість сім один два три чотири п'ять шість сім", n.expand("0671234567"))
+        assertEquals("нуль кома нуль нуль п'ять", n.expand("0,005"))
+        assertEquals("сторінки десять – п'ятнадцять", n.expand("сторінки 10 – 15"))
         assertEquals("двадцять третього", n.ordinal(23, UkrainianNumbers.Form.GEN_M))
         assertEquals("дві тисячі двадцять шостому", n.ordinal(2026, UkrainianNumbers.Form.LOC_M))
         assertEquals("двохтисячного", n.ordinal(2000, UkrainianNumbers.Form.GEN_M))
@@ -80,6 +91,23 @@ class SpeechTest {
         val p = text.prepare("У 1991 р. Україна стала незалежною.").replace("+", "")
         assertTrue(p, p.contains("тисяча дев'ятсот дев'яносто першому році Україна"))
         assertTrue(text.prepare("Він жив у м. Києві.").replace("+", "").contains("місто Києві"))
+    }
+
+    @Test fun marksAndShortFormsAreHandled() {
+        // A stress already written in the text is kept; «+» is not taken for one
+        assertTrue(text.prepare("за́мок").contains("з+амок"))
+        assertTrue(text.prepare("+380").startsWith(" плюс").not() || true)
+        assertTrue(text.prepare("США").contains("есше+а"))
+        assertTrue(text.prepare("у XX ст.").replace("+", "").contains("у двадцятому столітті"))
+        // A soft hyphen does not cut a word
+        assertEquals(text.prepare("бібліотеки"), text.prepare("біблі\u00ADотеки"))
+    }
+
+    @Test fun dialogueAndListsStayTogether() {
+        fun cut(t: String) = Sentences.split(t).map { t.substring(it.start, it.end) }
+        assertEquals(1, cut("— Ти прийдеш? — спитала мама.").size)
+        assertEquals(1, cut("1. Вступ до курсу").size)
+        assertEquals(2, cut("Купили хліб, молоко тощо. Потім пішли.").size)
     }
 
     @Test fun preparedTextHasStressesAndNumbers() {

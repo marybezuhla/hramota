@@ -12,7 +12,7 @@ object Sentences {
     private val ABBREVIATIONS = setOf(
         // Ukrainian
         "р", "рр", "ст", "с", "сс", "т", "д", "п", "ін", "інш", "ім", "вул", "просп", "пров", "м", "смт", "обл", "р-н",
-        "тис", "млн", "млрд", "грн", "коп", "див", "напр", "зокр", "тощо", "проф", "доц", "акад", "канд", "д-р", "пан", "пані",
+        "тис", "млн", "млрд", "грн", "коп", "див", "напр", "зокр", "проф", "доц", "акад", "канд", "д-р",
         "др", "гр", "тел", "№", "рис", "табл", "розд", "п", "пп", "ч", "кн", "вид", "ред", "упоряд", "пер", "арк", "стор",
         "кв", "буд", "о", "оз", "г", "хв", "сек", "год", "дол", "євр",
         // English
@@ -29,7 +29,7 @@ object Sentences {
             val c = text[i]
             if (c == '.' || c == '!' || c == '?' || c == '…' || c == '\n') {
                 var j = i + 1
-                while (j < n && (text[j] in ".!?…\"»”’)" )) j++
+                while (j < n && (text[j] in ".!?…\"»”“’)" )) j++
                 if (c == '\n' || ends(text, i, j)) {
                     add(text, start, j, out)
                     start = j
@@ -48,7 +48,12 @@ object Sentences {
         val c = text[at]
         // The text goes on without a space: a number, an address, «т.д.»
         if (after < text.length && !text[after].isWhitespace()) return false
-        if (c != '.') return true
+        // What comes next
+        var m = after
+        while (m < text.length && text[m].isWhitespace()) m++
+        // Dialogue: «— Ти прийдеш? — спитала мама.» goes on after the dash with a small letter
+        if (m + 2 < text.length && text[m] in "—–" && text.substring(m + 1).trimStart().firstOrNull()?.isLowerCase() == true) return false
+        if (c != '.') return m >= text.length || !text[m].isLowerCase()
         // The word before the stop
         var k = at - 1
         while (k >= 0 && (text[k].isLetterOrDigit() || text[k] == '-' || text[k] == '.' || text[k] == '\'')) k--
@@ -57,9 +62,9 @@ object Sentences {
         if (word in ABBREVIATIONS) return false
         // An initial: one capital letter («Т. Г. Шевченко»)
         if (word.length == 1 && text[at - 1].isUpperCase()) return false
+        // A numbered item («1. Вступ») stays with its text
+        if (word.all { it.isDigit() } && word.length <= 3 && text.substring(0, k + 1).isBlank()) return false
         // What comes next starts with a small letter: the sentence goes on
-        var m = after
-        while (m < text.length && text[m].isWhitespace()) m++
         if (m < text.length && text[m].isLowerCase()) return false
         return true
     }

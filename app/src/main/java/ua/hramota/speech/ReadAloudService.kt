@@ -47,10 +47,10 @@ class ReadAloudService : Service() {
         audio = getSystemService(AudioManager::class.java)
         session = MediaSession(this, "Hramota").apply {
             setCallback(object : MediaSession.Callback() {
-                override fun onPlay() = ReadAloud.resume()
+                override fun onPlay() { if (allowed()) ReadAloud.resume() }
                 override fun onPause() = ReadAloud.pause()
-                override fun onSkipToNext() = ReadAloud.skip(1)
-                override fun onSkipToPrevious() = ReadAloud.skip(-1)
+                override fun onSkipToNext() { if (allowed()) ReadAloud.skip(1) }
+                override fun onSkipToPrevious() { if (allowed()) ReadAloud.skip(-1) }
                 override fun onStop() = ReadAloud.stop()
             })
             isActive = true
@@ -58,7 +58,7 @@ class ReadAloudService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, getString(R.string.read_aloud), NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) }
         )
-        registerReceiver(noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), RECEIVER_NOT_EXPORTED)
+        androidx.core.content.ContextCompat.registerReceiver(this, noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         scope.launch {
             ReadAloud.state.map { Triple(it.active, it.playing, it.title) }.distinctUntilChanged().collect { (active, playing, title) ->
                 if (!active) { stopSelf(); return@collect }
@@ -68,13 +68,24 @@ class ReadAloudService : Service() {
                         PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_STOP)
                     .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f).build())
                 // The lock screen's player shows this: the document's name only when screens are not kept private
-                val private = ua.hramota.data.Settings.get(this@ReadAloudService).state.value.secureScreen
-                session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, if (private) getString(R.string.read_aloud) else title)
+                session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, if (private()) getString(R.string.read_aloud) else title)
                     .putString(MediaMetadata.METADATA_KEY_ARTIST, getString(R.string.app_name)).build())
                 show(playing, title)
             }
         }
     }
+
+    /**
+     * With locked storage on, the phone locked, nothing starts sounding from the lock screen, headphones or another
+     * app's media keys: someone holding the phone must not hear a private document. Pausing always works.
+     */
+    private fun allowed(): Boolean {
+        if (!ua.hramota.data.Vault.isOn(this)) return true
+        return !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
+    }
+
+    /** Private screens (or locked storage): the document's name is not shown outside Hramota. */
+    private fun private() = ua.hramota.data.Settings.get(this).state.value.secureScreen || ua.hramota.data.Vault.isOn(this)
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) ReadAloud.pause()
@@ -98,8 +109,8 @@ class ReadAloudService : Service() {
         val public = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_read_aloud).setContentTitle(getString(R.string.read_aloud)).build()
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_read_aloud)
-            .setContentTitle(title)
-            .setContentText(getString(R.string.read_aloud))
+            .setContentTitle(if (private()) getString(R.string.read_aloud) else title)
+            .setContentText(if (private()) getString(R.string.app_name) else getString(R.string.read_aloud))
             .setContentIntent(open)
             .setOngoing(playing)
             .setShowWhen(false)
@@ -121,9 +132,9 @@ class ReadAloudService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_TOGGLE -> ReadAloud.toggle()
-            ACTION_NEXT -> ReadAloud.skip(1)
-            ACTION_PREVIOUS -> ReadAloud.skip(-1)
+            ACTION_TOGGLE -> if (ReadAloud.state.value.playing) ReadAloud.pause() else if (allowed()) ReadAloud.resume()
+            ACTION_NEXT -> if (allowed()) ReadAloud.skip(1)
+            ACTION_PREVIOUS -> if (allowed()) ReadAloud.skip(-1)
             ACTION_STOP -> ReadAloud.stop()
         }
         // In the foreground at once, every time it is started (Android asks for it within seconds, even when
