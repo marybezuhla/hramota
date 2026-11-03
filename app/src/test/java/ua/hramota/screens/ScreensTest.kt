@@ -361,6 +361,10 @@ class ScreensTest {
     @Test fun homeShelfWood() = shot("12-home-shelf-wood") {
         HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, shelves = shelfDefs(allStyle = "wood"), startOnShelf = true, now = now)
     }
+    @Config(qualifiers = "+night")
+    @Test fun homeShelfWoodDark() = shot("12-home-shelf-wood-dark") {
+        HomeScreen(recentsUk, null, onOpenFile = {}, onCompare = {}, onOpenRecent = {}, onRemove = {}, onClear = {}, shelf = shelfEntries, shelves = shelfDefs(allStyle = "wood"), startOnShelf = true, now = now)
+    }
     private fun shelfDefs(allStyle: String = "modern") = listOf(
         ua.hramota.data.ShelfDef(ua.hramota.data.ShelfDef.ALL, "", allStyle),
         ua.hramota.data.ShelfDef("work", "Робота", "list", 210f, 1),

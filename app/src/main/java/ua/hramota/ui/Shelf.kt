@@ -1,5 +1,13 @@
 package ua.hramota.ui
 
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.draw.CacheDrawScope
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -236,52 +244,160 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
     }
 }
 
-/** Wood in its natural colour, or stained in the shelf's hue. */
-private fun woodTones(hue: Float): List<Color> = if (hue < 0f) listOf(
-    Color(0xFFB98552), Color(0xFFA06C3D), Color(0xFFB4804F), Color(0xFF7A4A22), Color(0xFF5C3517), Color(0xFF3E2410),
-) else listOf(
-    Color.hsl(hue, 0.36f, 0.44f), Color.hsl(hue, 0.38f, 0.36f), Color.hsl(hue, 0.36f, 0.42f),
-    Color.hsl(hue, 0.36f, 0.30f), Color.hsl(hue, 0.38f, 0.23f), Color.hsl(hue, 0.40f, 0.15f),
-)
+/** Wood in its natural colour, or stained in the shelf's hue: light, mid, dark, deepest. */
+private class Wood(val light: Color, val mid: Color, val dark: Color, val deep: Color)
 
-/** The old wooden bookshelf: covers standing on planks, wood grain behind. */
+private fun woodOf(hue: Float, night: Boolean): Wood {
+    val w = if (hue < 0f) Wood(Color(0xFFC79563), Color(0xFFA9743F), Color(0xFF7C4E27), Color(0xFF4A2C14))
+    else Wood(Color.hsl(hue, 0.34f, 0.52f), Color.hsl(hue, 0.36f, 0.40f), Color.hsl(hue, 0.38f, 0.28f), Color.hsl(hue, 0.40f, 0.16f))
+    // At night the wood is in lamplight: darker, the same grain
+    if (!night) return w
+    fun d(c: Color) = lerp(c, Color.Black, 0.38f)
+    return Wood(d(w.light), d(w.mid), d(w.dark), d(w.deep))
+}
+
+/**
+ * Wood grain for one board: long, gently waving fibres, a few lighter ones, now and then a knot.
+ * Seeded, so the same board always looks the same; built once per size, then only drawn.
+ */
+private fun CacheDrawScope.grain(seed: Int, w: Wood, knots: Boolean): DrawScope.() -> Unit {
+    val r = kotlin.random.Random(seed)
+    val lines = ArrayList<Triple<Path, Color, Float>>()
+    var y = r.nextFloat() * 4f
+    val step = density * 2.2f
+    while (y < size.height) {
+        val p = Path()
+        val amp = density * (0.4f + r.nextFloat() * 1.6f)
+        val wave = size.width * (0.35f + r.nextFloat() * 0.9f)
+        val phase = r.nextFloat() * 6.28f
+        var x = 0f
+        p.moveTo(0f, y + amp * kotlin.math.sin(phase))
+        while (x < size.width) { x += 8f * density; p.lineTo(x, y + amp * kotlin.math.sin(phase + x / wave * 6.28f)) }
+        val light = r.nextFloat() < 0.18f
+        val alpha = if (light) 0.05f + r.nextFloat() * 0.06f else 0.04f + r.nextFloat() * 0.12f
+        lines += Triple(p, (if (light) Color(0xFFFFE9CC) else w.deep).copy(alpha = alpha), density * (0.5f + r.nextFloat() * 1.1f))
+        y += step * (0.6f + r.nextFloat() * 1.8f)
+    }
+    val knot = if (knots && r.nextFloat() < 0.45f) Offset(size.width * (0.15f + r.nextFloat() * 0.7f), size.height * (0.3f + r.nextFloat() * 0.5f)) else null
+    val base = Brush.verticalGradient(listOf(w.mid, lerp(w.mid, w.light, 0.35f), w.mid))
+    return {
+        drawRect(base)
+        for ((p, c, width) in lines) drawPath(p, c, style = Stroke(width))
+        knot?.let { k ->
+            for (i in 0 until 5) drawOval(w.deep.copy(alpha = 0.10f + 0.04f * i), topLeft = Offset(k.x - (26 - i * 5) * density, k.y - (7 - i) * density),
+                size = Size((52 - i * 10) * density, (14 - i * 2) * density), style = Stroke(density * 0.9f))
+            drawOval(w.deep.copy(alpha = 0.35f), topLeft = Offset(k.x - 4 * density, k.y - 2 * density), size = Size(8 * density, 4 * density))
+        }
+    }
+}
+
+/**
+ * The wooden bookcase: a back wall of grained boards between two side posts, books standing on planks
+ * that are seen a little from above, each casting a shadow on the wall. Empty planks fill the rest of the
+ * screen, as in a real bookcase.
+ */
 @Composable
 private fun WoodShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (LibraryEntry) -> Unit, menu: @Composable (LibraryEntry, () -> Unit) -> Unit) {
-    val t = woodTones(hue)
-    BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(t.take(3)))
-        .drawBehind {
-            // Wood grain: faint wavy lines
-            var y = 0f
-            var k = 0
-            while (y < size.height) {
-                drawLine(Color(0x22000000), Offset(0f, y), Offset(size.width, y + 6f * ((k % 3) - 1)), strokeWidth = 1.2f)
-                y += 9f + (k * 7 % 11); k++
-            }
-        }) {
-        val perRow = (maxWidth / 112.dp).toInt().coerceIn(2, 8)
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 20.dp, bottom = 24.dp)) {
-            items(entries.chunked(perRow)) { row ->
-                Column {
-                    // The back of the shelf darkens towards the plank above it: the books stand in a recess
-                    Row(
-                        Modifier.fillMaxWidth().background(Brush.verticalGradient(0f to Color(0x70000000), 0.3f to Color.Transparent))
-                            .padding(start = 18.dp, end = 18.dp, top = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom,
-                    ) {
-                        for (e in row) Book(e, onOpen, menu, Modifier.weight(1f).shadow(8.dp, RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 4.dp, bottomEnd = 4.dp))
-                            .clip(RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 4.dp, bottomEnd = 4.dp)), spine = true)
-                        repeat(perRow - row.size) { Box(Modifier.weight(1f)) }
-                    }
-                    // The plank the books stand on: a lit front edge, then its shadow on the wall
-                    Box(
-                        Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(16.dp).shadow(8.dp, RoundedCornerShape(2.dp)).clip(RoundedCornerShape(2.dp))
-                            .background(Brush.verticalGradient(listOf(t[0], t[2], t[3], t[4])))
-                            .drawBehind { drawLine(Color(0x99FFE6C8), Offset(0f, 1f), Offset(size.width, 1f), strokeWidth = 2f) },
-                    )
-                    Box(Modifier.height(10.dp))
-                }
-            }
+    val night = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val w = remember(hue, night) { woodOf(hue, night) }
+    BoxWithConstraints(Modifier.fillMaxSize().background(w.dark)) {
+        val perRow = ((maxWidth - 40.dp) / 108.dp).toInt().coerceIn(2, 8)
+        val gap = 14.dp
+        val bookW = (maxWidth - 40.dp - gap * (perRow - 1)) / perRow
+        val rowH = bookW / 0.72f + 30.dp + 22.dp
+        val rows = entries.chunked(perRow)
+        val count = maxOf(rows.size, (maxHeight / rowH).toInt() + 1)
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(count) { i -> WoodRow(i, rows.getOrNull(i).orEmpty(), perRow, gap, w, onOpen, menu) }
         }
+    }
+}
+
+@Composable
+private fun WoodRow(index: Int, row: List<LibraryEntry>, perRow: Int, gap: androidx.compose.ui.unit.Dp, w: Wood, onOpen: (LibraryEntry) -> Unit, menu: @Composable (LibraryEntry, () -> Unit) -> Unit) {
+    val post = 12.dp
+    Column(
+        Modifier.fillMaxWidth()
+            .drawWithCache {
+                val wall = grain(index * 7919 + 13, w, knots = true)
+                val shade = Brush.verticalGradient(0f to Color(0x99000000), 0.10f to Color(0x40000000), 0.32f to Color.Transparent)
+                val p = post.toPx()
+                val sideShade = Brush.horizontalGradient(0f to Color(0x66000000), 1f to Color.Transparent, startX = p, endX = p + 18.dp.toPx())
+                val sideShadeR = Brush.horizontalGradient(0f to Color.Transparent, 1f to Color(0x55000000), startX = size.width - p - 18.dp.toPx(), endX = size.width - p)
+                val postBrush = Brush.horizontalGradient(listOf(w.dark, w.mid, w.dark))
+                onDrawWithContent {
+                    // The back wall, a little darker than the planks: it is further from the light
+                    wall()
+                    drawRect(Color(0x30000000))
+                    // Shadow under the plank (or the top of the case) above, and in the inner corners
+                    drawRect(shade)
+                    drawRect(sideShade); drawRect(sideShadeR)
+                    drawContent()
+                    // The side posts, in front of everything
+                    drawRect(postBrush, size = Size(p, size.height))
+                    drawRect(postBrush, topLeft = Offset(size.width - p, 0f), size = Size(p, size.height))
+                    drawLine(Color(0x33FFE9CC), Offset(p - 1f, 0f), Offset(p - 1f, size.height), 1.5f)
+                    drawLine(Color(0x33FFE9CC), Offset(size.width - p + 1f, 0f), Offset(size.width - p + 1f, size.height), 1.5f)
+                }
+            },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = post + 8.dp, end = post + 8.dp, top = 30.dp),
+            horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Bottom,
+        ) {
+            for (e in row) StandingBook(e, onOpen, menu, Modifier.weight(1f))
+            repeat(perRow - row.size) { Box(Modifier.weight(1f).aspectRatio(0.72f)) }
+        }
+        Plank(index, w)
+    }
+}
+
+/** A plank: its top seen from above (darker at the back, where the books stand), then the lit front edge. */
+@Composable
+private fun Plank(index: Int, w: Wood) {
+    Box(
+        Modifier.fillMaxWidth().height(22.dp).drawWithCache {
+            val top = 7.dp.toPx()
+            val topBrush = Brush.verticalGradient(0f to lerp(w.dark, w.deep, 0.3f), 1f to w.light, endY = top)
+            val front = grain(index * 104729 + 7, Wood(w.light, lerp(w.mid, w.light, 0.45f), w.dark, w.deep), knots = false)
+            val frontShade = Brush.verticalGradient(0f to Color.Transparent, 0.6f to Color.Transparent, 1f to Color(0x66000000), startY = top, endY = size.height)
+            onDrawBehind {
+                drawRect(topBrush, size = Size(size.width, top))
+                clipRect(top = top) { front() }
+                drawRect(frontShade, topLeft = Offset(0f, top))
+                // The sharp edge where top meets front catches the light
+                drawLine(Color(0xAAFFEBD2), Offset(0f, top), Offset(size.width, top), 1.6f * density)
+                drawLine(Color(0x88000000), Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f), 2f)
+            }
+        },
+    )
+}
+
+/** A book on the plank: its shadow falls on the wall behind, to the right and a little down. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun StandingBook(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: @Composable (LibraryEntry, () -> Unit) -> Unit, modifier: Modifier) {
+    var open by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 5.dp, bottomEnd = 3.dp)
+    Box(
+        modifier
+            .drawBehind {
+                val o = 5.dp.toPx()
+                drawRect(Brush.horizontalGradient(0f to Color(0x77000000), 1f to Color.Transparent, startX = size.width - 2f, endX = size.width + 3 * o),
+                    topLeft = Offset(size.width - 2f, o * 1.5f), size = Size(3 * o + 2f, size.height - o * 1.5f))
+                drawRect(Brush.verticalGradient(0f to Color(0x55000000), 1f to Color.Transparent, startY = -o, endY = 0f), topLeft = Offset(0f, -o), size = Size(size.width, o))
+            }
+            .clip(shape)
+            .combinedClickable(onClick = { onOpen(e) }, onLongClick = { open = true }),
+    ) {
+        Cover(e, Modifier.fillMaxWidth(), bound = true)
+        // The binding: light catches the spine's ridge, the hinge just after it is in shadow; a faint gloss on top
+        Box(Modifier.matchParentSize().drawBehind {
+            drawRect(Brush.horizontalGradient(0f to Color(0x30000000), 0.015f to Color(0x55FFFFFF), 0.04f to Color(0x10FFFFFF), 0.065f to Color(0x45000000), 0.095f to Color.Transparent, 0.93f to Color.Transparent, 1f to Color(0x30000000)))
+            drawRect(Brush.verticalGradient(0f to Color(0x1FFFFFFF), 0.25f to Color.Transparent, 0.85f to Color.Transparent, 1f to Color(0x26000000)))
+        })
+        if (e.bookmarks.isNotEmpty()) Icon(AppIcons.Bookmark, contentDescription = null, tint = Color(0xFFE5484D), modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp).width(16.dp))
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu(e) { open = false } }
     }
 }
 
@@ -328,7 +444,7 @@ private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: @Composa
 }
 
 @Composable
-private fun Cover(e: LibraryEntry, modifier: Modifier) {
+private fun Cover(e: LibraryEntry, modifier: Modifier, bound: Boolean = false) {
     val context = LocalContext.current
     val cover by produceState<ImageBitmap?>(null, e.id) {
         value = withContext(Dispatchers.IO) {
@@ -343,6 +459,7 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
         else if (maxWidth < 72.dp) Box(Modifier.fillMaxSize().background(coverColor(e.format)), contentAlignment = Alignment.Center) {
             Text(e.format, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
+        else if (bound) BoundCover(e, width)
         else Box(Modifier.fillMaxSize().background(coverColor(e.format)).padding(8.dp)) {
             val title = e.title.substringBeforeLast('.', e.title)
             // The longest word must fit on one line: never «Порівняльн-а» broken mid-word
@@ -370,6 +487,43 @@ private fun Progress(e: LibraryEntry) {
     Text(if (e.format == "EPUB" || e.format == "FB2") "$percent%" else stringResource(R.string.shelf_progress, page, e.total),
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     LinearProgressIndicator(progress = { page.toFloat() / e.total }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(3.dp).clip(RoundedCornerShape(2.dp)))
+}
+
+/** Book cloth, for a cover with no picture: one of a few classic bindings, always the same for a title. */
+private val CLOTH = listOf(
+    Color(0xFF7A1F1F), Color(0xFF1E3A5F), Color(0xFF2F4F3A), Color(0xFF6B4A1A), Color(0xFF4A2F55),
+    Color(0xFF1F4A4F), Color(0xFF5A2A1C), Color(0xFF2B2F3A), Color(0xFF8A5A1E),
+)
+private val GILT = Color(0xFFE2C27A)
+
+/** A cloth-bound cover: gilt rules, the title in the book face, the format in small letters at the foot. */
+@Composable
+private fun BoundCover(e: LibraryEntry, width: androidx.compose.ui.unit.Dp) {
+    val title = e.title.substringBeforeLast('.', e.title)
+    val cloth = CLOTH[(title.hashCode() and 0x7fffffff) % CLOTH.size]
+    val measurer = rememberTextMeasurer()
+    val room = with(LocalDensity.current) { (width - 30.dp).toPx() }
+    val size = remember(title, room) {
+        val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
+        var s = 14f
+        while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontFamily = Literata, fontWeight = FontWeight.Bold)).size.width > room) s -= 0.5f
+        s
+    }
+    Box(
+        Modifier.fillMaxSize()
+            .background(Brush.linearGradient(listOf(lerp(cloth, Color.White, 0.10f), cloth, lerp(cloth, Color.Black, 0.25f))))
+            .drawBehind {
+                // Gilt rules near head and foot, as stamped on cloth
+                val inset = 10.dp.toPx()
+                for (y in listOf(9.dp.toPx(), 12.dp.toPx(), size.height - 12.dp.toPx(), size.height - 9.dp.toPx()))
+                    drawLine(GILT.copy(alpha = 0.75f), Offset(inset, y), Offset(size.width - inset * 0.7f, y), 0.8.dp.toPx())
+            }
+            .padding(start = 12.dp, end = 8.dp, top = 20.dp, bottom = 18.dp),
+    ) {
+        Text(title, color = Color(0xFFF6EBD6), fontFamily = Literata, fontWeight = FontWeight.Bold, fontSize = size.sp, lineHeight = (size + 3).sp,
+            maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.TopStart))
+        Text(e.format, color = GILT, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp, modifier = Modifier.align(Alignment.BottomStart))
+    }
 }
 
 private fun coverColor(format: String): Color = when (format) {
@@ -410,7 +564,7 @@ internal fun ShelfEditor(def: ShelfDef, isNew: Boolean, onSave: (ShelfDef) -> Un
                     Slider(hue, { hue = it }, valueRange = 0f..360f, colors = SliderDefaults.colors(thumbColor = shelfColor(preview), activeTrackColor = Color.Transparent, inactiveTrackColor = Color.Transparent))
                 }
                 Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(8.dp)).let { m ->
-                    if (style == "wood") m.background(Brush.verticalGradient(woodTones(preview.hue))) else m.background(shelfColor(preview).copy(alpha = 0.25f))
+                    if (style == "wood") m.background(woodOf(preview.hue, false).let { Brush.verticalGradient(listOf(it.light, it.mid, it.dark)) }) else m.background(shelfColor(preview).copy(alpha = 0.25f))
                 })
             }
         },
