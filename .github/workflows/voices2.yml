@@ -1,0 +1,36 @@
+name: Voice samples (ESPnet)
+
+# The ESPnet Ukrainian voices, to compare by ear; nothing here goes into the app.
+on:
+  push:
+    branches: [next]
+    paths: ["tools/voices/robinhad.py", ".github/workflows/voices2.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  samples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Read
+        run: |
+          sudo apt-get install -y -q ffmpeg >/dev/null
+          python3 -m pip install -q --user torch --index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install -q --user "git+https://github.com/robinhad/ukrainian-tts.git"
+          mkdir -p out
+          python3 tools/voices/robinhad.py
+          rm -f out/*.wav
+      - name: Push the samples
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git init -q && git checkout -q -b voice-samples-espnet && git add . && git -c user.name=ci -c user.email=ci@localhost commit -qm "voice samples ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}" voice-samples-espnet
