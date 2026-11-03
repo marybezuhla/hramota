@@ -24,7 +24,7 @@ jobs:
       - name: Read
         run: |
           apt-get update -q >/dev/null && apt-get install -y -q ffmpeg git >/dev/null
-          python3 -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install -q torch --extra-index-url https://download.pytorch.org/whl/cpu
           python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git"
           mkdir -p out
           python3 tools/voices/robinhad.py
