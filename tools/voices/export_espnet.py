@@ -7,7 +7,9 @@ from ukrainian_tts.stress import sentence_to_stress, stress_dict
 
 tts = TTS(device="cpu")
 s2 = tts.synthesizer
-gen = next(m for _, m in s2.model.named_modules() if type(m).__name__ == "VITSGenerator")
+found = [(n, type(m).__name__) for n, m in s2.model.named_modules() if hasattr(m, "inference") and n.count(".") < 4]
+print("with inference:", found, "model type:", type(s2.model.tts).__name__, "generator type:", type(s2.model.tts.generator).__name__, list(s2.model.tts.generator.keys()) if hasattr(s2.model.tts.generator, "keys") else "")
+gen = next(m for n, m in s2.model.named_modules() if hasattr(m, "inference") and "Generator" in type(m).__name__)
 gen.eval()
 print("generator:", type(gen).__name__, [n for n, _ in s2.model.named_children()])
 tokens = s2.train_args.token_list
