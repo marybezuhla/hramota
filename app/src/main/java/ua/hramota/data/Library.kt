@@ -131,6 +131,9 @@ class Library private constructor(private val context: Context) {
         update(id) { it?.copy(copy = null, shelves = emptySet()) }
     }
 
+    /** Deletes every copy kept inside Hramota (the shelf empties); what is remembered about the documents stays. */
+    fun dropAllCopies() { state.value.values.filter { it.copy != null }.forEach { dropCopy(it.id) } }
+
     /** Forgets everything about a document, and deletes the copy kept inside Hramota. */
     fun forget(id: String) {
         get(id)?.copy?.let { File(it).delete() }

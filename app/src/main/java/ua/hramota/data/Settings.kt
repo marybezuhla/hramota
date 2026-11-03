@@ -40,6 +40,8 @@ data class AppSettings(
     val readTurn: String = "slide",
     /** Books: the volume keys turn pages. */
     val readVolumeKeys: Boolean = true,
+    /** Size of text in the reading view and plain text (times the usual). */
+    val textScale: Float = 1f,
     /** Each document in its own window (a card in Recents); otherwise inside Hramota's window. */
     val separateWindows: Boolean = false,
     /** The name put on Word comments written here (empty: none). */
@@ -69,6 +71,7 @@ class Settings private constructor(context: Context) {
             .putString("readTurn", s.readTurn).putBoolean("readVolumeKeys", s.readVolumeKeys)
             .putString("commentAuthor", s.commentAuthor)
             .putBoolean("separateWindows", s.separateWindows)
+            .putFloat("textScale", s.textScale)
             .apply()
         flow.value = s
     }
@@ -84,6 +87,7 @@ class Settings private constructor(context: Context) {
             put("readMargin", s.readMargin.toDouble()); put("readJustify", s.readJustify); put("readPaged", s.readPaged); put("readTurn", s.readTurn); put("readVolumeKeys", s.readVolumeKeys)
             put("commentAuthor", s.commentAuthor)
             put("separateWindows", s.separateWindows)
+            put("textScale", s.textScale.toDouble())
         }
     }
 
@@ -105,6 +109,7 @@ class Settings private constructor(context: Context) {
             readVolumeKeys = o.optBoolean("readVolumeKeys", s.readVolumeKeys),
             commentAuthor = o.optString("commentAuthor", s.commentAuthor).take(100),
             separateWindows = o.optBoolean("separateWindows", s.separateWindows),
+            textScale = f("textScale", s.textScale, 0.8f..2.2f),
         )
     }
 
@@ -129,6 +134,7 @@ class Settings private constructor(context: Context) {
         readVolumeKeys = prefs.getBoolean("readVolumeKeys", true),
         commentAuthor = prefs.getString("commentAuthor", "").orEmpty().take(100),
         separateWindows = prefs.getBoolean("separateWindows", false),
+        textScale = prefs.getFloat("textScale", 1f).coerceIn(0.8f, 2.2f),
     )
 
     companion object {

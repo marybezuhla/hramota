@@ -80,7 +80,6 @@ fun HomeScreen(
     startShelf: String = ua.hramota.data.ShelfDef.ALL,
     startOnShelf: Boolean = false,
     now: Long = System.currentTimeMillis(),
-,
     /** Recent files that cannot be opened again from here (shown quieter, with why). */
     unreachable: Set<String> = emptySet(),
 ) {

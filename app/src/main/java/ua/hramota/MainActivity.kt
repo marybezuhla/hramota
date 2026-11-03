@@ -222,6 +222,7 @@ class MainActivity : ComponentActivity() {
                         version = appVersion(),
                         onChange = { Settings.get(this).update(it) },
                         onClearRecent = { recents.clear(); ua.hramota.data.Library.get(applicationContext).clearAll() },
+                        onDeleteKept = { val app = applicationContext; lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) { ua.hramota.data.Library.get(app).dropAllCopies() } },
                         onBack = { showSettings = false },
                         vault = vaultOn,
                         vaultPossible = ua.hramota.data.Vault.canUse(this),
@@ -486,7 +487,7 @@ class MainActivity : ComponentActivity() {
         packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
     } catch (e: Exception) { "?" }
 
-    private companion object {
+    companion object {
         const val KEY_FIRST = "compare_first"
         const val KEY_FIRST_NAME = "compare_first_name"
         const val KEY_RESCUE = "rescue_saving"

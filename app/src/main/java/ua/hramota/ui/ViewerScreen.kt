@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.Dispatchers
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import ua.hramota.doc.Search
@@ -325,6 +326,20 @@ private fun ViewerContent(
                     }
                 }
             }
+            // Text that flows (the reading view, plain text): its size, smaller or larger
+            if ((readingParagraphs != null || state is ViewerState.Text) && !overview) {
+                var sizing by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { sizing = true }) { Text("Aa", style = MaterialTheme.typography.titleMedium) }
+                    androidx.compose.material3.DropdownMenu(expanded = sizing, onDismissRequest = { sizing = false }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
+                            TextButton(onClick = { onReadSettings { it.copy(textScale = (it.textScale - 0.1f).coerceAtLeast(0.8f)) } }) { Text("A−", style = MaterialTheme.typography.titleSmall) }
+                            Text("${(readSettings.textScale * 100).roundToInt()}%", modifier = Modifier.padding(horizontal = 8.dp))
+                            TextButton(onClick = { onReadSettings { it.copy(textScale = (it.textScale + 0.1f).coerceAtMost(2.2f)) } }) { Text("A+", style = MaterialTheme.typography.titleLarge) }
+                        }
+                    }
+                }
+            }
             if (state is ViewerState.Reader && !overview) TextButton(onClick = { lookSheet = true }) {
                 Text("Aa", style = MaterialTheme.typography.titleMedium, fontFamily = Literata)
             }
@@ -365,7 +380,7 @@ private fun ViewerContent(
                     stringResource(R.string.unsupported_title),
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
                 )
-                is ViewerState.Text -> TextDocument(state, textList, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
+                is ViewerState.Text -> TextDocument(state, textList, readSettings.textScale, if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null)
                 is ViewerState.Reader -> Box(Modifier.fillMaxSize()) {
                     // The book stays laid out under the contents, so coming back is instant
                     val paper = paperFor(readSettings.readPaper)
@@ -392,7 +407,7 @@ private fun ViewerContent(
                 )
                 is ViewerState.Paged -> when {
                     reading && state.reading != null -> TextDocument(
-                        ViewerState.Text(state.reading, Format.DOCX), textList,
+                        ViewerState.Text(state.reading, Format.DOCX), textList, readSettings.textScale,
                         if (searching) hitsByPage else emptyMap(), if (searching) currentHit else null, note = false,
                     )
                     overview -> PageOverview(state.pages, bookmarks, current) { page ->
@@ -633,6 +648,7 @@ private fun Message(title: String, body: String?) {
 private fun TextDocument(
     state: ViewerState.Text,
     list: LazyListState,
+    scale: Float = 1f,
     hits: Map<Int, List<SearchHit>> = emptyMap(),
     current: SearchHit? = null,
     note: Boolean = hasNote(state),
@@ -648,20 +664,21 @@ private fun TextDocument(
                         .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
                 )
             }
-            itemsIndexed(state.paragraphs) { i, p -> ParagraphText(p, hits[i], current) }
+            itemsIndexed(state.paragraphs) { i, p -> ParagraphText(p, hits[i], current, scale) }
         }
     }
 }
 
 @Composable
-private fun ParagraphText(p: Paragraph, hits: List<SearchHit>? = null, current: SearchHit? = null) {
-    val style = when (p.heading) {
+private fun ParagraphText(p: Paragraph, hits: List<SearchHit>? = null, current: SearchHit? = null, scale: Float = 1f) {
+    val base = when (p.heading) {
         1 -> MaterialTheme.typography.headlineSmall
         2 -> MaterialTheme.typography.titleLarge
         3 -> MaterialTheme.typography.titleMedium
         0 -> MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp)
         else -> MaterialTheme.typography.titleSmall
     }
+    val style = if (scale == 1f) base else base.copy(fontSize = base.fontSize * scale, lineHeight = base.lineHeight * scale)
     if (p.text.isBlank()) {
         Box(Modifier.padding(vertical = 4.dp))
     } else {

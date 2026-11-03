@@ -318,6 +318,15 @@
     <string name="convert_note_doc">A new DOCX file is made; the old one stays as it is. Text, formatting, tables, pictures in the text, headers, footers and page size carry over; list numbers become text. Footnotes, comments, link addresses, text boxes, floating shapes, pictures in headers and nested tables do not; tab stops become left ones, and all sections take one orientation.</string>
     <string name="convert_note_xls">A new XLSX file is made; the old one stays as it is. Values, the look of cells, column widths, merged cells and hidden sheets carry over. Formulas keep only their results and the font becomes Calibri; charts, pictures and cell comments do not carry over.</string>
     <string name="convert_go">Choose where</string>
+    <string name="kind_books">Books</string>
+    <string name="kind_docs">Documents</string>
+    <string name="kind_sheets">Tables</string>
+    <string name="kind_slides">Presentations</string>
+    <string name="kind_pdf">PDF</string>
+    <string name="delete_kept">Delete all documents kept in Hramota</string>
+    <string name="delete_kept_done">Documents deleted from Hramota</string>
+    <string name="delete_kept_confirm">The copies kept in Hramota are deleted and the shelf empties. The original files elsewhere stay, and so do bookmarks, notes and reading places.</string>
+    <string name="delete_kept_go">Delete</string>
     <string name="search_find">Find</string>
     <string name="search_list">List of matches</string>
     <string name="search_page">p. %1$d</string>

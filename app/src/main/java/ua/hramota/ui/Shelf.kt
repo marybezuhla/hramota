@@ -109,6 +109,9 @@ fun Shelf(
 ) {
     var selected by rememberSaveable { mutableStateOf(startShelf) }
     val current = shelves.firstOrNull { it.id == selected } ?: shelves.firstOrNull() ?: ShelfDef(ShelfDef.ALL, "")
+    // Shelves that fill themselves: by kind of document (shown when there is more than one kind)
+    val kinds = remember(entries) { KINDS.map { k -> k to entries.count { kindOf(it.format) == k.first } }.filter { it.second > 0 } }
+    val kind = KINDS.firstOrNull { "kind:" + it.first == selected }
     var editing by remember { mutableStateOf<ShelfDef?>(null) }
     var choosing by remember { mutableStateOf<LibraryEntry?>(null) }
     // Both delete the copy kept in Hramota: asked first
@@ -127,7 +130,7 @@ fun Shelf(
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(shelves, key = { it.id }) { d ->
                 val count = if (d.id == ShelfDef.ALL) entries.size else entries.count { d.id in it.shelves }
-                val on = d.id == current.id
+                val on = kind == null && d.id == current.id
                 Row(
                     Modifier.clip(RoundedCornerShape(18.dp))
                         .background(if (on) shelfColor(d).copy(alpha = 0.18f) else Color.Transparent)
@@ -144,6 +147,17 @@ fun Shelf(
                     )
                 }
             }
+            if (kinds.size > 1) items(kinds, key = { "kind:" + it.first.first }) { (k, count) ->
+                val on = kind == k
+                Text(
+                    "${stringResource(k.second)} · $count", style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.SemiBold else null, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(18.dp))
+                        .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        .border(1.dp, if (on) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(18.dp))
+                        .clickable { selected = if (on) ShelfDef.ALL else "kind:" + k.first }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+            }
             item(key = "+") {
                 Text(
                     "+ " + stringResource(R.string.shelf_new), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
@@ -152,7 +166,11 @@ fun Shelf(
                 )
             }
         }
-        val shown = if (current.id == ShelfDef.ALL) entries else entries.filter { current.id in it.shelves }
+        val shown = when {
+            kind != null -> entries.filter { kindOf(it.format) == kind.first }
+            current.id == ShelfDef.ALL -> entries
+            else -> entries.filter { current.id in it.shelves }
+        }
         val menu: @Composable (LibraryEntry, () -> Unit) -> Unit = { e, close ->
             DropdownMenuItem(text = { Text(stringResource(R.string.shelf_choose)) }, onClick = { close(); choosing = e })
             DropdownMenuItem(text = { Text(stringResource(R.string.shelf_drop_copy)) }, onClick = { close(); confirming = e to ShelfAction.DROP_COPY })
@@ -394,4 +412,19 @@ private fun ChooseShelves(e: LibraryEntry, shelves: List<ShelfDef>, onPutShelf: 
         confirmButton = { TextButton(onClick = { onDone(chosen) }) { Text(stringResource(R.string.note_save)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
+}
+
+/** The kinds of document the shelf sorts itself by: id and name. */
+private val KINDS = listOf(
+    "books" to R.string.kind_books, "docs" to R.string.kind_docs, "sheets" to R.string.kind_sheets,
+    "slides" to R.string.kind_slides, "pdf" to R.string.kind_pdf,
+)
+
+/** Which kind a format ("EPUB", "DOCX"…) is. */
+private fun kindOf(format: String): String = when (format.uppercase()) {
+    "EPUB", "FB2" -> "books"
+    "XLSX", "XLS", "ODS", "CSV" -> "sheets"
+    "PPTX", "PPT", "ODP" -> "slides"
+    "PDF" -> "pdf"
+    else -> "docs"
 }

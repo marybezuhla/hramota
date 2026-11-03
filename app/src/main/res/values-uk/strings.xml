@@ -326,6 +326,15 @@
     <string name="convert_note_doc">Буде створено новий файл DOCX, старий лишиться як є. Переносяться текст, оформлення, таблиці, малюнки в тексті, колонтитули й розмір сторінки; номери списків стають текстом. Не переносяться виноски, коментарі, адреси посилань, написи, вільно розташовані фігури, малюнки в колонтитулах і вкладені таблиці; табуляції стають лівими, а всі розділи — однієї орієнтації.</string>
     <string name="convert_note_xls">Буде створено новий файл XLSX, старий лишиться як є. Переносяться значення, вигляд клітинок, ширина стовпців, об\'єднані клітинки й приховані аркуші. Формули зберігають лише свої результати, шрифт стає Calibri; діаграми, малюнки й примітки до клітинок не переносяться.</string>
     <string name="convert_go">Вибрати місце</string>
+    <string name="kind_books">Книги</string>
+    <string name="kind_docs">Документи</string>
+    <string name="kind_sheets">Таблиці</string>
+    <string name="kind_slides">Презентації</string>
+    <string name="kind_pdf">PDF</string>
+    <string name="delete_kept">Видалити всі документи, збережені в Грамоті</string>
+    <string name="delete_kept_done">Документи видалено з Грамоти</string>
+    <string name="delete_kept_confirm">Копії, збережені в Грамоті, буде видалено, і полиця спорожніє. Самі файли в інших місцях лишаться, як і закладки, нотатки та місця читання.</string>
+    <string name="delete_kept_go">Видалити</string>
     <string name="search_find">Знайти</string>
     <string name="search_list">Список знайденого</string>
     <string name="search_page">с. %1$d</string>
