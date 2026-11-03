@@ -483,10 +483,12 @@ private fun Cover(e: LibraryEntry, modifier: Modifier, bound: Boolean = false) {
             val density = LocalDensity.current
             val room = with(density) { (width - 26.dp).toPx() }
             val scale = density.fontScale
+            // Measured in the very style it is drawn in (letter spacing included)
+            val base = androidx.compose.material3.LocalTextStyle.current
             val size = remember(title, room, scale) {
                 fitCache.get("$title|$room|$scale") ?: run {
                     val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
-                    fun fits(sp: Float) = measurer.measure(word, TextStyle(fontSize = sp.sp, fontWeight = FontWeight.SemiBold)).size.width <= room
+                    fun fits(sp: Float) = measurer.measure(word, base.merge(TextStyle(fontSize = sp.sp, fontWeight = FontWeight.SemiBold))).size.width <= room
                     // Halving between 9 and 13 (in half steps): a few measurements, once per title
                     var lo = 0; var hi = 8
                     if (fits(13f)) lo = 8 else while (lo < hi) { val mid = (lo + hi + 1) / 2; if (fits(9f + mid * 0.5f)) lo = mid else hi = mid - 1 }
