@@ -22,7 +22,7 @@ jobs:
       - name: Read with each voice
         run: |
           sudo apt-get install -y -q ffmpeg >/dev/null
-          python3 -m pip install -q --user "piper-tts==1.3.0"
+          python3 -m pip install -q --user "piper-tts==1.3.0" onnx
           python3 tools/voices/samples.py
       - name: Push the samples
         env:

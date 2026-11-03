@@ -53,3 +53,23 @@ for key in sorted(wanted):
                    "phoneme_type": json.load(open(os.path.join("models", onnx + ".json"))).get("phoneme_type", "espeak")})
 json.dump(report, open("out/voices.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print(json.dumps(report, ensure_ascii=False, indent=1))
+
+# Smaller copies (weights in 8 bits): about a quarter of the size; heard side by side with the full ones
+from onnxruntime.quantization import quantize_dynamic, QuantType
+small = {"uk_UA-tetiana-high": None, "uk_UA-ukrainian_tts-medium": 2, "en_GB-cori-medium": None, "en_US-kristin-medium": None}
+for key, sid in small.items():
+    onnx = os.path.join("models", key + ".onnx")
+    q = os.path.join("models", key + ".int8.onnx")
+    quantize_dynamic(onnx, q, weight_type=QuantType.QUInt8)
+    os.link(onnx + ".json", q + ".json") if not os.path.exists(q + ".json") else None
+    text = UK if key.startswith("uk_") else EN
+    speeds = (("1.0", 1.0),) if key.startswith("uk_") else (("1.0", 1.0), ("0.8", 1.25))
+    for speed, scale in speeds:
+        name = f"{key}-int8-x{speed}"
+        cmd = [sys.executable, "-m", "piper", "-m", q, "-f", f"out/{name}.wav", "--length-scale", str(scale)]
+        if sid is not None:
+            cmd += ["-s", str(sid)]
+        subprocess.run(cmd + ["--", text], check=True)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"out/{name}.wav", "-c:a", "libopus", "-b:a", "48k", f"out/{name}.ogg"], check=True)
+        os.remove(f"out/{name}.wav")
+    print(key, "int8 MB", round(os.path.getsize(q) / 1e6, 1))
