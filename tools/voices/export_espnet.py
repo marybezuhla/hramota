@@ -48,7 +48,7 @@ class Wrap(torch.nn.Module):
                                        noise_scale=scales[0], alpha=scales[1], noise_scale_dur=scales[2])
         return wav.view(1, -1), dur
 w = Wrap(gen)
-args = (x, torch.tensor([x.shape[1]]), torch.tensor(spk)[None], torch.tensor([0.667, 1.0, 0.8]))
+args = (x, torch.tensor([x.shape[1]]), torch.tensor(spk), torch.tensor([0.667, 1.0, 0.8]))
 with torch.no_grad():
     torch.onnx.export(w, args, "out/uk.onnx", input_names=["text", "text_lengths", "spembs", "scales"],
                       output_names=["wav", "durations"], dynamic_axes={"text": {1: "T"}, "wav": {1: "N"}, "durations": {1: "T"}},
@@ -63,5 +63,5 @@ with torch.no_grad():
     t0 = time.time(); ref = w(*args)[0].numpy().squeeze()
 print("torch RTF", round((time.time() - t0) / (len(ref) / s2.fs), 3))
 save(ref, f"vits-{tag}-torch")
-np.save("out/feed.npy", {"text": x.numpy(), "text_lengths": np.array([x.shape[1]]), "spembs": spk[None], "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
+np.save("out/feed.npy", {"text": x.numpy(), "text_lengths": np.array([x.shape[1]]), "spembs": spk, "scales": np.array([0.667, 1.0, 0.8], dtype=np.float32)}, allow_pickle=True)
 open("out/tag.txt", "w").write(tag)
