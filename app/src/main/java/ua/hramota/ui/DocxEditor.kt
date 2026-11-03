@@ -482,7 +482,7 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
                 state.selection = TextRange(sel.start - 1, sel.end - 1)
                 if (textChanged) {
                     // Enter (a line end) splits the paragraph: this field shows its first part next
-                    if ('\n' in plain) stale[0] = true
+                    if ('\n' in plain || '\r' in plain) stale[0] = true
                     state.typed(p.key, plain, sel.end - 1)
                 }
             },
@@ -530,7 +530,7 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
 }
 
 @Composable
-internal fun Tool(label: String, description: String, enabled: Boolean = true, on: Boolean = false, style: TextStyle = TextStyle(), toggles: Boolean = false, onClick: () -> Unit) {
+internal fun Tool(label: String, description: String, enabled: Boolean = true, on: Boolean = false, style: TextStyle = TextStyle(), toggles: Boolean = false, state: String? = null, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val onText = stringResource(R.string.state_on)
     val offText = stringResource(R.string.state_off)
@@ -544,6 +544,7 @@ internal fun Tool(label: String, description: String, enabled: Boolean = true, o
                 contentDescription = description
                 role = androidx.compose.ui.semantics.Role.Button
                 if (toggles) stateDescription = if (on) onText else offText
+                state?.let { stateDescription = it }
                 if (!enabled) disabled()
             }
             .padding(horizontal = 11.dp, vertical = 10.dp),
@@ -559,7 +560,7 @@ private fun KindMenu(state: EditorState, enabled: Boolean, kind: Kind?) {
     val names = listOf(Kind.NORMAL to R.string.edit_kind_normal, Kind.H1 to R.string.edit_kind_h1, Kind.H2 to R.string.edit_kind_h2, Kind.H3 to R.string.edit_kind_h3)
     Box {
         val current = names.firstOrNull { it.first == kind }?.second ?: R.string.edit_kind_normal
-        Tool(stringResource(current) + " ▾", stringResource(R.string.edit_kind), enabled) { open = true }
+        Tool(stringResource(current) + " ▾", stringResource(R.string.edit_kind), enabled, state = stringResource(current)) { open = true }
         DropdownMenu(open, onDismissRequest = { open = false }) {
             for ((k, label) in names) DropdownMenuItem(
                 text = { Text(stringResource(label), style = textStyleFor(k, MaterialTheme.colorScheme.onSurface).copy(fontWeight = if (k == Kind.NORMAL) FontWeight.Normal else FontWeight.Bold)) },

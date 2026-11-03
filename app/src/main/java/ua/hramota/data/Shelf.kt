@@ -68,7 +68,11 @@ object Shelf {
         val part = File(target.path + ".part")
         return try {
             context.contentResolver.openInputStream(source)?.use { input ->
-                part.outputStream().buffered().use { out -> if (sealing) Sealed.seal(key!!, input.buffered(), out, "${e.id}.$ext") else input.copyTo(out) }
+                java.io.FileOutputStream(part).use { fos ->
+                    val out = fos.buffered()
+                    if (sealing) Sealed.seal(key!!, input.buffered(), out, "${e.id}.$ext") else input.copyTo(out)
+                    out.flush(); fos.fd.sync()
+                }
             } ?: return false
             if (!part.renameTo(target)) { part.delete(); return false }
             Library.get(context).update(e.id) { it?.copy(copy = target.path, onShelf = true) }

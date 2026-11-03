@@ -22,6 +22,7 @@ class Recents private constructor(private val context: Context) {
     val files: StateFlow<List<RecentFile>> = state.asStateFlow()
 
     /** Remembers [uri] as opened now, keeping read access when the file's app allows it. */
+    @Synchronized
     fun add(uri: Uri, name: String) {
         // The person chose not to keep a list
         if (!Settings.get(context).state.value.rememberRecent) return
@@ -46,11 +47,13 @@ class Recents private constructor(private val context: Context) {
     /** Reads the list again (after the locked storage is opened). */
     fun reload() { state.value = load() }
 
+    @Synchronized
     fun remove(uri: String) {
         release(uri)
         save(state.value.filter { it.uri != uri })
     }
 
+    @Synchronized
     fun clear() {
         state.value.forEach { release(it.uri) }
         save(emptyList())

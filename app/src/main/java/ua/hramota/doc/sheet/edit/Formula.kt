@@ -349,7 +349,7 @@ object Formula {
                         val top = g[2].toInt() - 1; val bottom = g[4].toInt() - 1
                         val moved = move.range(minOf(top, bottom), maxOf(top, bottom))
                         // What it refers to now holds less (rows deleted inside it): its value may differ
-                        if (moved == null || (move.n < 0 && moved.second - moved.first != maxOf(top, bottom) - minOf(top, bottom))) affected?.set(0, true)
+                        if (moved == null || moved.second - moved.first != maxOf(top, bottom) - minOf(top, bottom)) affected?.set(0, true)
                         if (moved == null) b.append("#REF!") else b.append(g[1]).append(moved.first + 1).append(':').append(g[3]).append(moved.second + 1)
                     }
                     i += rr.value.length
@@ -366,7 +366,8 @@ object Formula {
                     } else {
                         val r1 = g[4].toInt() - 1; val r2 = g[8].toInt() - 1
                         val moved = move.range(minOf(r1, r2), maxOf(r1, r2))
-                        if (moved == null || (move.n < 0 && moved.second - moved.first != maxOf(r1, r2) - minOf(r1, r2))) affected?.set(0, true)
+                        // (rows came in or went out inside it: blanks counted, say, may differ)
+                        if (moved == null || moved.second - moved.first != maxOf(r1, r2) - minOf(r1, r2)) affected?.set(0, true)
                         if (moved == null) b.append("#REF!")
                         else {
                             val (t, bt) = if (r1 <= r2) moved else moved.second to moved.first

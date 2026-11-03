@@ -342,7 +342,7 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
             if (!changed && sel != current.selection) state.pending = null
             value = TextFieldValue(text, sel, if (text == v.text) v.composition else null)
             state.selection = TextRange(sel.start - 1, sel.end - 1)
-            if (changed) { if ('\n' in plain) stale[0] = true; state.typed(p.key, plain, sel.end - 1) }
+            if (changed) { if ('\n' in plain || '\r' in plain) stale[0] = true; state.typed(p.key, plain, sel.end - 1) }
         },
         textStyle = style,
         readOnly = readOnly,

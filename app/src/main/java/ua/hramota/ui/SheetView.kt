@@ -474,6 +474,8 @@ class SheetEditing(
     val draft: ((sheet: Int, row: Int, col: Int, text: String) -> Unit)? = null,
     /** The person left the cell: what was typed goes in. */
     val leave: (() -> Unit)? = null,
+    /** ✕: what was typed is dropped. */
+    val discard: (() -> Unit)? = null,
     /** Changes with every change to the workbook: the field reads the cell again (after undo, say). */
     val version: Int = 0,
 )
@@ -497,7 +499,7 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
             Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 10.dp))
             androidx.compose.material3.OutlinedTextField(
                 value = value,
-                onValueChange = { value = it; refused = false; editing.draft?.invoke(sheet, row, col, it.text) },
+                onValueChange = { if (it.text != value.text) editing.draft?.invoke(sheet, row, col, it.text); value = it; refused = false },
                 singleLine = true,
                 enabled = editing.enabled,
                 isError = refused,
@@ -526,7 +528,7 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                     }
                 }
             }
-            TextButton(onClick = onClose) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
+            TextButton(onClick = { editing.discard?.invoke(); onClose() }) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
         }
     }
 }

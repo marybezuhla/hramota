@@ -86,7 +86,13 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     private var draft: Draft? = null
 
     /** What is being typed in a cell (not put in yet). */
-    fun draft(sheet: Int, row: Int, col: Int, text: String) { draft = Draft(sheet, row, col, text); typing = true }
+    fun draft(sheet: Int, row: Int, col: Int, text: String) {
+        draft = Draft(sheet, row, col, text)
+        typing = text != content(sheet, row, col)
+    }
+
+    /** ✕: what was typed is not put in. */
+    fun discard() { draft = null; typing = false }
 
     /** Something typed and not put in yet (saving is offered for it too). */
     var typing by mutableStateOf(false)
@@ -179,6 +185,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
                 catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
             if (refusal != null) { notice = refusalText(refusal); return@withContext }
             original = try { withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) sh.withRowsMoved(at, n) else sh }, original.inspection) } }
+                catch (e: kotlinx.coroutines.CancellationException) { edit.restore(before); throw e }
                 catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
             push(RowStep(before, edit.snapshot(), shownBefore, original))
             changed()
@@ -287,7 +294,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                 state.workbook, sheetIndex, onSheet = { sheetIndex = it }, state = view,
                 editing = SheetEditing(
                     content = state::content, commit = state::commit, enabled = !saving && !state.busy,
-                    draft = state::draft, leave = state::flush, version = state.version,
+                    draft = state::draft, leave = state::flush, discard = state::discard, version = state.version,
                     rows = { sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } },
                 ),
                 startCell = startCell,

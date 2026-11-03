@@ -156,8 +156,15 @@ object EditSaving {
     }
 
     /** True for a file with nothing in it (as a file picker makes a new one). */
-    fun isEmpty(context: Context, uri: Uri): Boolean =
-        try { context.contentResolver.openInputStream(uri)?.use { it.read() < 0 } == true } catch (e: Exception) { false }
+    fun isEmpty(context: Context, uri: Uri): Boolean {
+        try { context.contentResolver.openInputStream(uri)?.use { return it.read() < 0 } } catch (e: Exception) {}
+        // Some apps do not let a file just made be read yet: its size says it then
+        return try {
+            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+                c.moveToFirst() && !c.isNull(0) && c.getLong(0) == 0L
+            } == true
+        } catch (e: Exception) { false }
+    }
 
     /** Removes a file the picker made (only ever called for one that was empty when chosen). */
     fun remove(context: Context, uri: Uri) {

@@ -712,7 +712,8 @@ class DocxEdit private constructor(
             fun lockedControl(e: Elem): Boolean {
                 if (e.local != "sdt") return false
                 val pr = XmlScan.children(xml, e).firstOrNull { it.local == "sdtPr" } ?: return false
-                return XmlScan.children(xml, pr).any { it.local in setOf("dataBinding", "showingPlcHdr", "text", "date", "comboBox", "dropDownList", "picture", "docPartObj", "citation", "bibliography", "equation") }
+                return XmlScan.children(xml, pr).any { it.local in setOf("dataBinding", "showingPlcHdr", "text", "date", "comboBox", "dropDownList", "picture", "docPartObj", "citation", "bibliography", "equation") ||
+                    (it.local == "lock" && it.attrs.entries.any { a -> a.key.endsWith("val") && (a.value == "contentLocked" || a.value == "sdtContentLocked") }) }
             }
             fun collect(elems: List<Elem>, container: Int, row: Int, locked: Boolean = false) {
                 for (e in elems) {
@@ -743,7 +744,7 @@ class DocxEdit private constructor(
                 if (!c.name.startsWith("$w:")) { editable = false; continue }
                 when (c.local) {
                     // Tracked changes on the paragraph itself (its mark inserted, deleted or moved) are not changed here
-                    "pPr" -> { pPr = xml.substring(c.start, c.end); if ("PrChange" in pPr || Regex("<(?:[\\w.-]+:)?(?:ins|del|moveFrom|moveTo)\\b").containsMatchIn(pPr)) editable = false }
+                    "pPr" -> { pPr = xml.substring(c.start, c.end); if ("PrChange" in pPr || TRACKED_MARK.containsMatchIn(pPr)) editable = false }
                     "proofErr" -> {}
                     "bookmarkStart" -> head.append(xml, c.start, c.end)
                     "bookmarkEnd" -> tail.append(xml, c.start, c.end)
@@ -847,3 +848,6 @@ class DocxEdit private constructor(
         }
     }
 }
+
+/** A paragraph mark inserted, deleted or moved (tracked changes on the paragraph itself). */
+private val TRACKED_MARK = Regex("<(?:[\\w.-]+:)?(?:ins|del|moveFrom|moveTo)\\b")

@@ -41,19 +41,25 @@ private val TEXT_ELEMENTS = setOf("t", "instrText", "delText", "creator", "lastM
 
 object Xml {
     /** Office parts never declare a DOCTYPE; one is refused, so entity tricks cannot expand. */
-    fun checkNoDoctype(bytes: ByteArray) {
-        // A DOCTYPE can only come before the root element: look at everything up to it
+    fun checkNoDoctype(bytes: ByteArray, whole: Boolean = true) {
+        // A DOCTYPE can only come before the root element: everything up to it is looked at, past
+        // comments and processing instructions (a "<a" inside a comment is not the root)
+        fun at(i: Int, s: String) = i + s.length <= bytes.size && String(bytes, i, s.length, Charsets.ISO_8859_1).equals(s, ignoreCase = true)
+        fun find(from: Int, s: String): Int { var j = from; while (j <= bytes.size - s.length) { if (at(j, s)) return j; j++ }; return -1 }
         var i = 0
         while (i < bytes.size - 1) {
             if (bytes[i] == '<'.code.toByte()) {
-                val next = bytes[i + 1].toInt().toChar()
-                if (next.isLetter()) return
-                if (next == '!' && String(bytes, i, minOf(9, bytes.size - i), Charsets.ISO_8859_1).equals("<!DOCTYPE", ignoreCase = true)) {
-                    throw java.io.IOException("DOCTYPE is not allowed")
+                when {
+                    at(i, "<!--") -> { val e = find(i + 4, "-->"); if (e < 0) break; i = e + 3; continue }
+                    at(i, "<?") -> { val e = find(i + 2, "?>"); if (e < 0) break; i = e + 2; continue }
+                    at(i, "<!DOCTYPE") || at(i, "<!ENTITY") -> throw java.io.IOException("DOCTYPE is not allowed")
+                    bytes[i + 1].toInt().toChar().isLetter() -> return
                 }
             }
             i++
         }
+        // The root was not reached in what was looked at (a part streamed, with a long beginning): not read
+        if (!whole) throw java.io.IOException("No root element near the start")
     }
 
     /**
@@ -66,7 +72,7 @@ object Xml {
         val head = ByteArray(64 * 1024)
         var n = 0
         while (n < head.size) { val r = b.read(head, n, head.size - n); if (r < 0) break; n += r }
-        checkNoDoctype(head.copyOf(n))
+        checkNoDoctype(head.copyOf(n), whole = n < head.size)
         b.reset()
         return b
     }
