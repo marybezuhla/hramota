@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -79,6 +80,9 @@ fun HomeScreen(
     startShelf: String = ua.hramota.data.ShelfDef.ALL,
     startOnShelf: Boolean = false,
     now: Long = System.currentTimeMillis(),
+,
+    /** Recent files that cannot be opened again from here (shown quieter, with why). */
+    unreachable: Set<String> = emptySet(),
 ) {
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(Modifier.padding(start = 20.dp, end = 8.dp, top = 24.dp, bottom = 8.dp), verticalAlignment = Alignment.Top) {
@@ -117,7 +121,7 @@ fun HomeScreen(
             )
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                items(recents, key = { it.uri }) { file -> RecentRow(file, now, { onOpenRecent(file) }, { onRemove(file) }) }
+                items(recents, key = { it.uri }) { file -> RecentRow(file, now, file.uri in unreachable, { onOpenRecent(file) }, { onRemove(file) }) }
             }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -151,7 +155,7 @@ fun HomeScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecentRow(file: RecentFile, now: Long, onOpen: () -> Unit, onRemove: () -> Unit) {
+private fun RecentRow(file: RecentFile, now: Long, unreachable: Boolean, onOpen: () -> Unit, onRemove: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val format = Format.detect(file.name, null)
     Box {
@@ -161,10 +165,11 @@ private fun RecentRow(file: RecentFile, now: Long, onOpen: () -> Unit, onRemove:
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FormatBadge(format)
+            FormatBadge(format, Modifier.alpha(if (unreachable) 0.5f else 1f))
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                Text(file.name.substringBeforeLast('.', file.name), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(whenOpened(file.openedAt, now), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(file.name.substringBeforeLast('.', file.name), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    color = if (unreachable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                Text(if (unreachable) stringResource(R.string.recent_elsewhere) else whenOpened(file.openedAt, now), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

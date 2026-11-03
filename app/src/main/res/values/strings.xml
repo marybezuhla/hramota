@@ -132,6 +132,7 @@
     <string name="settings_docx_open_hint">Pages, like on paper, with the layout of the original. Text flows to the width of the screen, easier to read on a phone. You can switch at any time in the document.</string>
     <string name="settings_dynamic">Colours from the wallpaper</string>
     <string name="settings_dynamic_hint">Material You: the app takes its accent colours from your wallpaper</string>
+    <string name="recent_elsewhere">Opens again only from that app</string>
     <string name="recent_no_access">“%1$s” was opened from another app just once, so it can no longer be opened from the list. Open it again from that app or with “Open a file”.</string>
     <string name="shelf">Shelf (%1$d)</string>
     <string name="shelf_forget">Forget this document</string>

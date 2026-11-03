@@ -212,7 +212,7 @@ private class Page(val slices: List<Slice>, val firstBlock: Int, val firstChar: 
  */
 private suspend fun paginate(
     book: Book, look: BookLook, resolver: FontFamily.Resolver, density: Density, width: Int, height: Int,
-    startBlock: Int, publish: (List<Page>, Boolean) -> Unit,
+    startBlock: Int, publish: (List<Page>, Boolean, Boolean) -> Unit,
 ) = coroutineScope {
     val starts = ArrayList<Int>().apply {
         add(0)
@@ -236,8 +236,11 @@ private suspend fun paginate(
     val target = chapters.indexOfFirst { startBlock in it }.coerceAtLeast(0)
     val done = arrayOfNulls<List<Page>>(chapters.size)
     val threads = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 6)
-    val order = (0..target).toList() + (target + 1 until chapters.size)
+    // The chapter being read first: it is shown alone at once (the book opens without waiting for the
+    // chapters before it), then the book from its start as soon as those are laid out too
+    val order = listOf(target) + (0 until target) + (target + 1 until chapters.size)
     var published = -1
+    var alone = false
     fun prefix(): Int { var k = 0; while (k < done.size && done[k] != null) k++; return k }
     for (batch in order.chunked(threads * 2)) {
         batch.map { k ->
@@ -249,10 +252,13 @@ private suspend fun paginate(
         val have = prefix()
         if (have > target && have > published) {
             published = have
-            publish(done.take(have).flatMap { it!! }, have == done.size)
+            publish(done.take(have).flatMap { it!! }, have == done.size, false)
+        } else if (published < 0 && !alone && done[target] != null) {
+            alone = true
+            publish(done[target]!!, false, true)
         }
     }
-    if (published < done.size) publish(done.flatMap { it.orEmpty() }, true)
+    if (published < done.size) publish(done.flatMap { it.orEmpty() }, true, false)
 }
 
 private suspend fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int): List<Page> {
@@ -352,6 +358,8 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
         val textHeight = (constraints.maxHeight - header - footer).coerceAtLeast(1)
         var pages by remember { mutableStateOf<List<Page>>(emptyList()) }
         var complete by remember { mutableStateOf(false) }
+        // Only the chapter being read is laid out yet: its page numbers are not the book's
+        var partialShown by remember { mutableStateOf(false) }
         // What the pages were laid out for: pages of another size or type are not shown
         val layoutKey = listOf(book, textWidth, textHeight, look.settings.readSize, look.settings.readSpacing, look.settings.readMargin, look.settings.readFont, look.settings.readJustify)
         var laidFor by remember { mutableStateOf<List<Any>?>(null) }
@@ -368,7 +376,14 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
             shown = false
             // While a slider moves, wait until it rests
             if (again) kotlinx.coroutines.delay(250)
-            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all -> pages = laid; complete = all; laidFor = layoutKey }
+            var partial = false
+            paginate(book, look, resolver, density, textWidth, textHeight, anchor.value.block) { laid, all, alone ->
+                // From the chapter alone to the whole book: the place being read is found again in it
+                if (partial && !alone) shown = false
+                partial = alone
+                partialShown = alone
+                pages = laid; complete = all; laidFor = layoutKey
+            }
         }
         // Once the page being read is laid out, go there
         LaunchedEffect(pages) {
@@ -432,7 +447,7 @@ private fun BookPages(book: Book, list: LazyListState, v: BookView, target: Book
         }
         v.visible.blocks = { pages.getOrNull(pager.currentPage)?.slices?.map { Visible.Part(it.block, it.from, it.to) }.orEmpty() }
         val page: @Composable (Int) -> Unit = { p ->
-            pages.getOrNull(p)?.let { BookPage(book, v, it, p, pages.size, complete, bookmarks, pages.getOrNull(p + 1)?.firstBlock ?: Int.MAX_VALUE, textWidth, header, footer) }
+            pages.getOrNull(p)?.let { BookPage(book, v, it, p, if (partialShown) 0 else pages.size, complete, bookmarks, pages.getOrNull(p + 1)?.firstBlock ?: Int.MAX_VALUE, textWidth, header, footer) }
         }
         val taps = Modifier.pointerInput(Unit) {
             // The edges of the page turn it, as in a paper book
@@ -479,7 +494,7 @@ private fun BookPage(
                 }
             } }
             Box(Modifier.height(with(density) { footer.toDp() }).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(if (complete) "${index + 1} / $count" else "${index + 1}", style = MaterialTheme.typography.labelMedium, color = look.paper.muted)
+                Text(if (count == 0) "" else if (complete) "${index + 1} / $count" else "${index + 1}", style = MaterialTheme.typography.labelMedium, color = look.paper.muted)
             }
         }
         if (marked) Icon(AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.align(Alignment.TopEnd).padding(end = 12.dp).size(24.dp))

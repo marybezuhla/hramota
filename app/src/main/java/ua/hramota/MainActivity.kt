@@ -145,6 +145,15 @@ class MainActivity : ComponentActivity() {
                     val shelves by library.shelves.collectAsStateWithLifecycle()
                     // The shelf holds only documents kept inside Hramota
                     val shelf = known.values.filter { it.kept }.sortedByDescending { it.openedAt }
+                    // Recent files that open again: Hramota keeps lasting access to them, or a copy of them
+                    val copies = known.values.filter { it.copy != null && it.uri != null }.associateBy { it.uri!! }
+                    var granted by androidx.compose.runtime.remember { mutableStateOf<Set<String>?>(null) }
+                    androidx.compose.runtime.LaunchedEffect(files) {
+                        granted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try { contentResolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri.toString() }.toSet() } catch (e: Exception) { null }
+                        }
+                    }
+                    val unreachable = granted?.let { g -> files.filter { it.uri !in g && it.uri !in copies }.map { it.uri }.toSet() } ?: emptySet()
                     BackHandler(showSettings) { showSettings = false }
                     if (creating) androidx.compose.material3.AlertDialog(
                         onDismissRequest = { creating = false },
@@ -223,6 +232,7 @@ class MainActivity : ComponentActivity() {
                         onRestore = { openBackup.launch(arrayOf("*/*")) },
                     ) else HomeScreen(
                         recents = files,
+                        unreachable = unreachable,
                         comparePrompt = when {
                             !comparing -> null
                             compareFirst == null -> getString(R.string.compare_pick_first)
@@ -231,7 +241,13 @@ class MainActivity : ComponentActivity() {
                         onOpenFile = { pick.launch(arrayOf("*/*")) },
                         onCompare = { comparing = true; compareFirst = null; choosing = true },
                         onCreate = { creating = true },
-                        onOpenRecent = { openViewer(Uri.parse(it.uri), it.name) },
+                        // Where access was not kept (a file shared once by another app), its copy in Hramota opens instead
+                        onOpenRecent = { r ->
+                            val copy = copies[r.uri]
+                            if (copy != null && granted?.contains(r.uri) == false) openShelf(copy)
+                            else if (r.uri in unreachable) android.widget.Toast.makeText(this, getString(R.string.recent_no_access, r.name), android.widget.Toast.LENGTH_LONG).show()
+                            else openViewer(Uri.parse(r.uri), r.name)
+                        },
                         // The recent list only: bookmarks and the shelf stay with the documents
                         onRemove = { recents.remove(it.uri) },
                         onClear = { recents.clear() },
@@ -425,8 +441,7 @@ class MainActivity : ComponentActivity() {
             recents.add(uri, name)
         } catch (e: SecurityException) {
             // A file opened once from another app ("Open with") gives access only that time:
-            // from the list it cannot be opened again, so say so and take it off the list
-            recents.remove(uri.toString())
+            // from the list it cannot be opened again; it stays there, shown as such
             android.widget.Toast.makeText(this, getString(R.string.recent_no_access, name), android.widget.Toast.LENGTH_LONG).show()
         }
     }
