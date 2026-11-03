@@ -71,7 +71,8 @@ class PdfiumPages private constructor(
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
         lock.withLock {
-            if (closed || index !in 0 until pageCount || widthPx <= 0) return@withLock null
+            // (why, said on the page: a blank page with no reason helps nobody)
+            if (closed || index !in 0 until pageCount || widthPx <= 0) { problem = if (closed) "closed" else if (widthPx <= 0) "width $widthPx" else "page $index"; return@withLock null }
             if (engineDied || !binder.isBinderAlive) { engineDied = true; problem = "engine stopped"; return@withLock null }
             val w = widthPx.coerceAtMost(MAX_WIDTH)
             val key = index.toLong() shl 32 or w.toLong()
@@ -91,11 +92,13 @@ class PdfiumPages private constructor(
      * Search and text still come from the isolated engine.
      */
     private suspend fun viaSystem(index: Int, w: Int): ImageBitmap? {
-        if (systemFailed) return null
+        // (the engine's own reason first, then the phone's; never growing on each try)
+        fun base() = problem?.substringBefore(" · system") ?: ""
+        if (systemFailed) { problem = base() + " · system off"; return null }
         val s = system ?: try {
             reopen?.invoke()?.let { ua.hramota.doc.PdfSource.open(it) }?.also { system = it }
-        } catch (e: Exception) { null } ?: run { systemFailed = true; return null }
-        return try { s.render(index, w) } catch (e: Exception) { problem = "system: ${e.javaClass.simpleName}"; null }
+        } catch (e: Exception) { problem = base() + " · system open ${e.javaClass.simpleName}"; null } ?: run { systemFailed = true; return null }
+        return try { s.render(index, w) ?: run { problem = base() + " · system none"; null } } catch (e: Exception) { problem = base() + " · system ${e.javaClass.simpleName}"; null }
     }
 
     private fun viaSharedMemory(index: Int, w: Int, h: Int): Bitmap? {

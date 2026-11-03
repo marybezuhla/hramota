@@ -279,7 +279,8 @@ fun PageOverview(pages: Pages, bookmarks: Set<Int>, current: Int, onOpen: (Int) 
 private fun androidx.compose.foundation.layout.BoxScope.PageProblem(detail: String?) {
     Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(stringResource(R.string.page_failed), color = Color(0xFF555555), style = MaterialTheme.typography.bodyMedium)
-        if (detail != null) Text(detail.take(160), color = Color(0xFF888888), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+        // A short technical note (no file text): a screenshot of it says what went wrong
+        Text((detail ?: "no detail").take(160), color = Color(0xFF888888), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
     }
 }
 

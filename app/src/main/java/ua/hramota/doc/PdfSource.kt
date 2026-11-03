@@ -30,7 +30,15 @@ class PdfSource private constructor(
     override val pageCount: Int get() = aspects.size
     override fun aspect(index: Int): Float = aspects[index]
 
+    /** Why a page could not be drawn (shown on it). */
+    override var problem: String? by androidx.compose.runtime.mutableStateOf<String?>(null)
+        private set
+
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
+        try { draw(index, widthPx) } catch (e: Exception) { problem = "phone engine: ${e.javaClass.simpleName}"; null } catch (e: OutOfMemoryError) { problem = "memory"; null }
+    }
+
+    private suspend fun draw(index: Int, widthPx: Int): ImageBitmap? = run {
         lock.withLock {
             if (closed || index !in aspects.indices || widthPx <= 0) return@withLock null
             // Cap the size: very wide screens or tiny pages must not make huge bitmaps
