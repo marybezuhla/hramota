@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
                 // A file chosen from those already there is never written over with an empty document
                 if (!EditSaving.isEmpty(app, uri)) return@withContext R.string.create_exists
                 val ok = try {
-                    val bytes = if (kind == "docx") ua.hramota.doc.Templates.docx(java.util.Locale.getDefault().toLanguageTag())
+                    val bytes = if (kind == "docx") ua.hramota.doc.Templates.docx(java.util.Locale.getDefault().stripExtensions().toLanguageTag())
                         else ua.hramota.doc.Templates.xlsx(sheetName)
                     EditSaving.writeChecked(object : EditSaving.Io {
                         override fun read() = app.contentResolver.openInputStream(uri)

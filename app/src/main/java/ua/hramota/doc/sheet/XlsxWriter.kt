@@ -76,7 +76,7 @@ object XlsxWriter {
         val cols = sh.sizedCols.filter { it in 0 until SheetLimits.MAX_COLS && sh.width(it) != sh.defaultWidth }.sorted()
         if (cols.isNotEmpty()) {
             b.append("<cols>")
-            for (c in cols) b.append("<col min=\"${c + 1}\" max=\"${c + 1}\" width=\"${num(sh.width(c) / 5.25f)}\"${if (sh.width(c) == 0f) " hidden=\"1\"" else ""} customWidth=\"1\"/>")
+            for (c in cols) b.append("<col min=\"${c + 1}\" max=\"${c + 1}\" width=\"${num((sh.width(c) / 5.25f).coerceAtMost(255f))}\"${if (sh.width(c) == 0f) " hidden=\"1\"" else ""} customWidth=\"1\"/>")
             b.append("</cols>")
         }
         b.append("<sheetData>")

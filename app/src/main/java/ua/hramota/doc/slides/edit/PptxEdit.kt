@@ -241,7 +241,7 @@ class PptxEdit private constructor(
                 val xml = text(path) ?: continue
                 val root = XmlScan.children(xml, 0, xml.length).firstOrNull { it.local == "sld" } ?: continue
                 // Hidden slides are left out, as the viewer leaves them out
-                if (root.attrs["show"] == "0") continue
+                if (root.attrs["show"].let { it == "0" || it == "false" }) continue
                 val a = root.attrs.entries.firstOrNull { it.value == DML && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:") ?: "a"
                 val pi = parts.size
                 parts += path to xml

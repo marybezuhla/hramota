@@ -509,7 +509,7 @@ class ViewerActivity : ComponentActivity() {
                     val doc = WordBinaryReader.read(source)
                     // Part of the document was not read (too long): a new file without it would lose it
                     if (!doc.complete) { incomplete = true; throw java.io.IOException("Not read whole") }
-                    ua.hramota.doc.docx.DocxWriter.write(doc, out, java.util.Locale.getDefault().toLanguageTag())
+                    ua.hramota.doc.docx.DocxWriter.write(doc, out, java.util.Locale.getDefault().stripExtensions().toLanguageTag())
                 } else {
                     val wb = XlsReader.read(source, withHidden = true)
                     if (!wb.complete) { incomplete = true; throw java.io.IOException("Not read whole") }

@@ -177,7 +177,10 @@ class EditorState(val edit: DocxEdit) {
     }
 
     /** New text of paragraph [i] as typed: the formatting follows the text it was typed after. */
-    fun typed(key: Long, text: String, cursor: Int) {
+    fun typed(key: Long, typedText: String, typedCursor: Int) {
+        // Pasted text may carry "\r" line ends: they become ordinary ones (a bare "\r" in the file would lock the paragraph)
+        val text = if ('\r' in typedText) typedText.replace("\r\n", "\n").replace('\r', '\n') else typedText
+        val cursor = if ('\r' in typedText) typedCursor - Regex("\r\n").findAll(typedText.substring(0, typedCursor.coerceIn(0, typedText.length))).count() else typedCursor
         val i = indexOf(key); if (i < 0) return
         val p = paras[i]
         if (text == p.text) return

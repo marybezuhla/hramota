@@ -287,7 +287,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
             val path = presRels[id.attr("id")] ?: continue
             if (!seen.add(path)) continue
             val slide = part(path) ?: continue
-            if (slide.root.attr("show") == "0") continue
+            if (slide.root.attr("show").let { it == "0" || it == "false" }) continue
             val layout = slide.rels.values.firstOrNull { it.contains("slideLayout") }?.let { part(it) }
             val master = layout?.rels?.values?.firstOrNull { it.contains("slideMaster") }?.let { part(it) }
             if (master != null) loadTheme(master)

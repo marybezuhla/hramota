@@ -314,8 +314,8 @@
     <string name="convert_done">Saved as a new file; it opens now and can be edited. The old file stays as it was.</string>
     <string name="convert_failed">Couldn’t save in the new format.</string>
     <string name="convert_incomplete">Not saved: the file is too large to read in full, so the new file would be missing its end.</string>
-    <string name="convert_note_doc">A new DOCX file is made; the old one stays as it is. Text, formatting, tables, pictures in the text, headers, footers and page size carry over; list numbers become text. Footnotes, comments, link addresses, text boxes and floating shapes do not.</string>
-    <string name="convert_note_xls">A new XLSX file is made; the old one stays as it is. Values, the look of cells, column widths, merged cells and hidden sheets carry over. Formulas keep only their results; charts, pictures and cell comments do not carry over.</string>
+    <string name="convert_note_doc">A new DOCX file is made; the old one stays as it is. Text, formatting, tables, pictures in the text, headers, footers and page size carry over; list numbers become text. Footnotes, comments, link addresses, text boxes, floating shapes, pictures in headers and nested tables do not; tab stops become left ones, and all sections take one orientation.</string>
+    <string name="convert_note_xls">A new XLSX file is made; the old one stays as it is. Values, the look of cells, column widths, merged cells and hidden sheets carry over. Formulas keep only their results and the font becomes Calibri; charts, pictures and cell comments do not carry over.</string>
     <string name="convert_go">Choose where</string>
     <string name="state_on">on</string>
     <string name="state_off">off</string>

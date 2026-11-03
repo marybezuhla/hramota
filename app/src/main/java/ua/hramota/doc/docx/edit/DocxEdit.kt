@@ -679,11 +679,14 @@ class DocxEdit private constructor(
             val digests = HashMap<String, ByteArray>()
             val commentParts = HashMap<String, String>()
             fun small(zip: InputStream, name: String): String { val b = readAll(zip, MAX_SMALL); digests[name] = MessageDigest.getInstance("SHA-256").digest(b); return text(b) }
+            val names = HashSet<String>()
             ZipInputStream(input).use { zip ->
                 var count = 0
                 while (true) {
                     val e = zip.nextEntry ?: break
                     if (++count > MAX_ENTRIES) throw IOException("Too many entries")
+                    // A part listed twice: which one Word reads is not certain, so the file is not edited
+                    if (!names.add(e.name)) throw IOException("Duplicate entry")
                     when (e.name) {
                         DOCUMENT -> doc = readAll(zip, MAX_DOCUMENT)
                         "word/styles.xml" -> styles = small(zip, e.name)
@@ -705,14 +708,20 @@ class DocxEdit private constructor(
             var containers = 0
             var rows = 0
             val interned = HashMap<String, RunStyle>()
-            fun collect(elems: List<Elem>, container: Int, row: Int) {
+            // Content controls that hold data, a placeholder or one line of text: Word fills or limits them itself
+            fun lockedControl(e: Elem): Boolean {
+                if (e.local != "sdt") return false
+                val pr = XmlScan.children(xml, e).firstOrNull { it.local == "sdtPr" } ?: return false
+                return XmlScan.children(xml, pr).any { it.local in setOf("dataBinding", "showingPlcHdr", "text", "date", "comboBox", "dropDownList", "picture", "docPartObj", "citation", "bibliography", "equation") }
+            }
+            fun collect(elems: List<Elem>, container: Int, row: Int, locked: Boolean = false) {
                 for (e in elems) {
                     if (!e.name.startsWith("$w:")) continue
                     when (e.local) {
-                        "p" -> { slots += Slot(e.start, e.end, container, row); paras += paragraph(xml, w, e, slots.size - 1, interned) }
-                        "tbl" -> for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") { val r = ++rows; for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers, r) }
-                        "sdt", "customXml" -> XmlScan.children(xml, e).firstOrNull { it.local == "sdtContent" }?.let { collect(XmlScan.children(xml, it), ++containers, row) }
-                            ?: if (e.local == "customXml") collect(XmlScan.children(xml, e), ++containers, row) else Unit
+                        "p" -> { slots += Slot(e.start, e.end, container, row); paras += paragraph(xml, w, e, slots.size - 1, interned).let { if (locked && it.editable) EditPara(it.key, it.slot, it.text, it.marks, it.pPr, it.startTag, it.head, it.tail, false, it.original, it.typing, it.anchors) else it } }
+                        "tbl" -> for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") { val r = ++rows; for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers, r, locked) }
+                        "sdt", "customXml" -> XmlScan.children(xml, e).firstOrNull { it.local == "sdtContent" }?.let { collect(XmlScan.children(xml, it), ++containers, row, locked || lockedControl(e)) }
+                            ?: if (e.local == "customXml") collect(XmlScan.children(xml, e), ++containers, row, locked) else Unit
                     }
                 }
             }
@@ -733,7 +742,8 @@ class DocxEdit private constructor(
             for (c in XmlScan.children(xml, e)) {
                 if (!c.name.startsWith("$w:")) { editable = false; continue }
                 when (c.local) {
-                    "pPr" -> { pPr = xml.substring(c.start, c.end); if ("PrChange" in pPr) editable = false }
+                    // Tracked changes on the paragraph itself (its mark inserted, deleted or moved) are not changed here
+                    "pPr" -> { pPr = xml.substring(c.start, c.end); if ("PrChange" in pPr || Regex("<(?:[\\w.-]+:)?(?:ins|del|moveFrom|moveTo)\\b").containsMatchIn(pPr)) editable = false }
                     "proofErr" -> {}
                     "bookmarkStart" -> head.append(xml, c.start, c.end)
                     "bookmarkEnd" -> tail.append(xml, c.start, c.end)
