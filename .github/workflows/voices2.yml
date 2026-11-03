@@ -25,7 +25,8 @@ jobs:
         run: |
           apt-get update -q >/dev/null && apt-get install -y -q ffmpeg git >/dev/null
           python3 -m pip install -q torch torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
-          python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git" "onnx==1.14.1"
+          python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git"
+          python3 -m pip install -q --no-deps "onnx==1.14.1"
           mkdir -p out
           python3 -u tools/voices/export_espnet.py 2>&1 | tee out/export.txt
           # quantizing needs a newer onnx than ESPnet allows: a separate environment
