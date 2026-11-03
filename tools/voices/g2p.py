@@ -36,7 +36,10 @@ def fix(word_marked, word_ipa):
         out.append(c)
     return "".join(out) if n >= k else word_ipa
 
-def phonemes(sentence, use_dict):
+# Short words said with the next or the previous one, without a stress of their own (eSpeak stresses every one)
+CLITICS = set("а і й у в з зі із до на над під по при про за від без для через та чи не ні ж же б би би то що як".split())
+
+def phonemes(sentence, use_dict, clitics=False):
     """Words become sounds; commas, dashes and the end mark stay, so the voice pauses and rises as it learned to."""
     marked = stress(sentence)
     out = []
@@ -45,15 +48,19 @@ def phonemes(sentence, use_dict):
             mark = "," if tok in ";:—" else tok
             if out: out[-1] += mark
             continue
-        p = ipa(tok.replace("\u0301", ""))
-        out.append(fix(tok, p) if use_dict else p)
+        bare = tok.replace("\u0301", "")
+        p = ipa(bare)
+        p = fix(tok, p) if use_dict else p
+        if clitics and bare.lower() in CLITICS: p = p.replace("ˈ", "")
+        out.append(p)
     return " ".join(out)
 
 cfg = json.load(open("models/uk_UA-tetiana-high.onnx.json"))
 ids_map = cfg["phoneme_id_map"]
-sess = ort.InferenceSession("models/uk_UA-tetiana-high.int8.onnx")
+small = ort.InferenceSession("models/uk_UA-tetiana-high.int8.onnx")
+full = ort.InferenceSession("models/uk_UA-tetiana-high.onnx")
 
-def speak(ph):
+def speak(ph, sess):
     ids = list(ids_map["^"]) + list(ids_map["_"])
     for c in unicodedata.normalize("NFD", ph):
         if c in ids_map: ids += ids_map[c] + ids_map["_"]
@@ -64,12 +71,13 @@ def speak(ph):
     return audio
 
 sentences = re.split(r"(?<=[.?!])\s+", TEXT)
-for name, use in (("eSpeak", False), ("dictionary", True)):
+for name, use, cl, sess in (("eSpeak", False, False, small), ("dictionary", True, False, small),
+                             ("dictionary-clitics", True, True, small), ("dictionary-clitics-full", True, True, full)):
     chunks, log = [], []
     for s in sentences:
-        ph = phonemes(s, use)
+        ph = phonemes(s, use, cl)
         log.append(ph)
-        chunks.append(speak(ph)); chunks.append(np.zeros(int(0.35 * 22050), dtype=np.float32))
+        chunks.append(speak(ph, sess)); chunks.append(np.zeros(int(0.35 * 22050), dtype=np.float32))
     a = np.concatenate(chunks)
     a = (np.clip(a / max(1e-6, np.abs(a).max()) * 0.9, -1, 1) * 32767).astype(np.int16)
     import wave
