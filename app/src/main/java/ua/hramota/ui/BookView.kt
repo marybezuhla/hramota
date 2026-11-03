@@ -1,5 +1,14 @@
 package ua.hramota.ui
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.runtime.saveable.rememberSaveable
 import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
@@ -693,7 +702,10 @@ internal fun decodeFitting(bytes: ByteArray?, widthPx: Int): ImageBitmap? {
     } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
 }
 
-/** The contents: chapters and bookmarks; a tap goes there. */
+/**
+ * The book's own page: its cover and how far it is read; bookmarks and notes as cards under the
+ * chapter they are in; and the contents. A tap goes there.
+ */
 @Composable
 internal fun BookContents(
     book: Book, bookmarks: Set<Int>, current: Int, onGo: (Int) -> Unit,
@@ -708,55 +720,110 @@ internal fun BookContents(
                 .take(5000).map { (i, b) -> Triple(i, (b as BookBlock.Text).text.replace('\n', ' ').take(120), b.kind == BookBlock.Kind.HEADING2) }
         }
     }
-    val marks = remember(book, bookmarks) {
-        bookmarks.sorted().filter { it in book.blocks.indices }.map { i ->
+    val size = book.blocks.size.coerceAtLeast(1)
+    fun percent(block: Int) = (block * 100L / size).toInt()
+    // Bookmarks and notes together, in the order of the book, each under its chapter
+    class Item(val block: Int, val mark: String?, val note: Note?)
+    val items = remember(book, bookmarks, notes) {
+        val marks = bookmarks.filter { it in book.blocks.indices }.map { i ->
             // Shown by the first words where the bookmark is
             val t = (i until minOf(book.blocks.size, i + 20)).asSequence().map { blockText(book.blocks[it]) }.firstOrNull { it.isNotBlank() } ?: ""
-            i to t.replace('\n', ' ').take(80)
+            Item(i, t.replace('\n', ' ').take(160), null)
         }
+        (marks + notes.map { Item(it.block, null, it) }).sortedBy { it.block }
     }
     val chapterNow = heads.lastOrNull { it.first <= current }?.first
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        if (book.title.isNotEmpty() || book.author.isNotEmpty()) item {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                if (book.title.isNotEmpty()) Text(book.title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Literata))
-                if (book.author.isNotEmpty()) Text(book.author, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        if (marks.isNotEmpty()) {
-            item { Section(stringResource(R.string.book_bookmarks)) }
-            for ((i, t) in marks) item(key = "m$i") {
-                Row(Modifier.fillMaxWidth().clickable { onGo(i) }.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(AppIcons.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                    Text(t.ifEmpty { "…" }, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
+    var tab by rememberSaveable { mutableIntStateOf(if (items.isEmpty()) 1 else 0) }
+    val cover by produceState<ImageBitmap?>(null, book) { value = withContext(Dispatchers.Default) { book.cover?.let { decodeFitting(book.images[it], 200) } } }
+    val colors = MaterialTheme.colorScheme
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "head") {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                cover?.let { Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.size(width = 58.dp, height = 86.dp).clip(RoundedCornerShape(4.dp))) }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(book.title.ifEmpty { "…" }, style = MaterialTheme.typography.titleLarge.copy(fontFamily = Literata), fontWeight = FontWeight.SemiBold, maxLines = 3)
+                    if (book.author.isNotEmpty()) Text(book.author, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { (current.toFloat() / size).coerceIn(0f, 1f) }, color = colors.primary, trackColor = colors.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(5.dp).clip(RoundedCornerShape(3.dp)),
+                    )
+                    Text(stringResource(R.string.book_read_percent, percent(current)), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
             }
         }
-        if (notes.isNotEmpty()) {
-            item { Section(stringResource(R.string.book_notes)) }
-            for ((k, n) in notes.withIndex()) item(key = "n$k") {
-                Row(Modifier.fillMaxWidth().clickable { onGo(n.block) }.padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(width = 4.dp, height = 40.dp).background(NOTE_COLORS[n.color.coerceIn(0, NOTE_COLORS.size - 1)]))
-                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text(excerpt(book, n), maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = Literata))
-                        if (n.text.isNotEmpty()) Text(n.text, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
-                    }
-                    androidx.compose.material3.IconButton(onClick = { editing = n }) {
-                        Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = stringResource(R.string.note_edit))
-                    }
+        item(key = "tabs") {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((k, label) in listOf(stringResource(R.string.book_marks_notes) + " · " + items.size, stringResource(R.string.book_contents)).withIndex()) {
+                    val on = tab == k
+                    Text(
+                        label, style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                        color = if (on) colors.onPrimary else colors.onSurface,
+                        modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) colors.primary else Color.Transparent)
+                            .border(1.dp, if (on) colors.primary else colors.outlineVariant, RoundedCornerShape(20.dp))
+                            .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = k }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
                 }
             }
         }
-        if (heads.isNotEmpty()) {
-            item { Section(stringResource(R.string.book_contents)) }
+        if (tab == 0) {
+            if (items.isEmpty()) item(key = "none") {
+                Text(stringResource(R.string.book_marks_empty), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp))
+            }
+            var lastChapter = -2
+            for ((k, it) in items.withIndex()) {
+                val ch = heads.lastOrNull { h -> h.first <= it.block && !h.third } ?: heads.lastOrNull { h -> h.first <= it.block }
+                val chId = ch?.first ?: -1
+                if (chId != lastChapter) {
+                    lastChapter = chId
+                    if (ch != null) item(key = "c$k") {
+                        Text(ch.second.uppercase(), style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.8.sp), fontWeight = FontWeight.SemiBold,
+                            color = colors.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+                    }
+                }
+                item(key = "i$k") {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerLow)
+                            .clickable { onGo(it.block) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (it.note == null) Icon(AppIcons.Bookmark, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
+                            else Box(Modifier.size(12.dp).clip(CircleShape).background(NOTE_COLORS[it.note.color.coerceIn(0, NOTE_COLORS.size - 1)]))
+                            Text(
+                                stringResource(if (it.note == null) R.string.book_mark_label else R.string.book_note_label, percent(it.block)),
+                                style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f),
+                            )
+                            if (it.note != null) androidx.compose.material3.IconButton(onClick = { editing = it.note }, modifier = Modifier.size(40.dp)) {
+                                Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = stringResource(R.string.note_edit), modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        if (it.note == null) Text(it.mark.orEmpty().ifEmpty { "…" }, maxLines = 4, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge.copy(fontFamily = Literata, lineHeight = 24.sp))
+                        else {
+                            Text(excerpt(book, it.note), maxLines = 5, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = Literata, lineHeight = 24.sp),
+                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(NOTE_COLORS[it.note.color.coerceIn(0, NOTE_COLORS.size - 1)].copy(alpha = 0.30f)).padding(horizontal = 4.dp, vertical = 2.dp))
+                            if (it.note.text.isNotEmpty()) {
+                                androidx.compose.material3.HorizontalDivider(color = colors.outlineVariant)
+                                Text(it.note.text, maxLines = 6, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
             for ((i, t, sub) in heads) item(key = "h$i") {
-                Text(
-                    t, maxLines = 3,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (i == chapterNow) FontWeight.SemiBold else null,
-                    color = if (i == chapterNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().clickable { onGo(i) }.padding(start = if (sub) 40.dp else 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
-                )
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (i == chapterNow) colors.secondaryContainer else Color.Transparent)
+                        .clickable { onGo(i) }.padding(start = if (sub) 28.dp else 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(t, maxLines = 3, modifier = Modifier.weight(1f),
+                        style = if (sub) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge.copy(fontFamily = Literata),
+                        fontWeight = if (i == chapterNow) FontWeight.SemiBold else null,
+                        color = if (i == chapterNow) colors.onSecondaryContainer else colors.onSurface)
+                    Text("${percent(i)}%", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                }
             }
         }
     }
