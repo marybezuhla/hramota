@@ -37,16 +37,17 @@ def fix(word_marked, word_ipa):
     return "".join(out) if n >= k else word_ipa
 
 def phonemes(sentence, use_dict):
+    """Words become sounds; commas, dashes and the end mark stay, so the voice pauses and rises as it learned to."""
     marked = stress(sentence)
-    words = re.findall(r"[\w'’ʼ́-]+", marked)
-    result = []
-    for w in words:
-        bare = w.replace("́", "")
-        p = ipa(bare)
-        result.append(fix(w, p) if use_dict else p)
-    # punctuation from the sentence end keeps the voice's intonation
-    end = sentence.strip()[-1] if sentence.strip()[-1] in ".?!," else "."
-    return " ".join(result) + end
+    out = []
+    for tok in re.findall(r"[\w'’ʼ\u0301-]+|[,;:.?!—]", marked):
+        if tok in ",;:.?!—":
+            mark = "," if tok in ";:—" else tok
+            if out: out[-1] += mark
+            continue
+        p = ipa(tok.replace("\u0301", ""))
+        out.append(fix(tok, p) if use_dict else p)
+    return " ".join(out)
 
 cfg = json.load(open("models/uk_UA-tetiana-high.onnx.json"))
 ids_map = cfg["phoneme_id_map"]
