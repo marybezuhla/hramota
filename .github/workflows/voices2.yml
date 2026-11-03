@@ -13,6 +13,8 @@ jobs:
   samples:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The project's dependencies build on Python 3.10, not on the runner's newer one
+    container: python:3.10-bookworm
     permissions:
       contents: write
     steps:
@@ -21,9 +23,9 @@ jobs:
           persist-credentials: false
       - name: Read
         run: |
-          sudo apt-get install -y -q ffmpeg >/dev/null
-          python3 -m pip install -q --user torch --index-url https://download.pytorch.org/whl/cpu
-          python3 -m pip install -q --user "git+https://github.com/robinhad/ukrainian-tts.git"
+          apt-get update -q >/dev/null && apt-get install -y -q ffmpeg git >/dev/null
+          python3 -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install -q "git+https://github.com/robinhad/ukrainian-tts.git"
           mkdir -p out
           python3 tools/voices/robinhad.py
           rm -f out/*.wav
@@ -32,5 +34,6 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd out
+          git config --global --add safe.directory '*'
           git init -q && git checkout -q -b voice-samples-espnet && git add . && git -c user.name=ci -c user.email=ci@localhost commit -qm "voice samples ${{ github.run_number }}"
           git push -qf "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}" voice-samples-espnet
