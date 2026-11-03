@@ -1,5 +1,8 @@
 package ua.hramota.ui
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.heightIn
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -340,7 +343,18 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
             Text(e.format, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
         else Box(Modifier.fillMaxSize().background(coverColor(e.format)).padding(8.dp)) {
-            Text(e.title.substringBeforeLast('.', e.title), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 16.sp,
+            val title = e.title.substringBeforeLast('.', e.title)
+            // The longest word must fit on one line: never «Порівняльн-а» broken mid-word
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            val room = with(density) { (maxWidth - 26.dp).toPx() }
+            val size = remember(title, room) {
+                val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
+                var s = 13f
+                while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontWeight = FontWeight.SemiBold)).size.width > room) s -= 0.5f
+                s
+            }
+            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = size.sp, lineHeight = (size + 3).sp,
                 maxLines = 6, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start, modifier = Modifier.align(Alignment.TopStart).padding(end = 10.dp))
             Text(e.format, color = Color(0xCCFFFFFF), fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomStart))
         }

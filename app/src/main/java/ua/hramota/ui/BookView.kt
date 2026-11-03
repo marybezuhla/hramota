@@ -783,7 +783,8 @@ internal fun BookContents(
                 }
                 item(key = "i$k") {
                     Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerLow)
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceVariant)
+                            .border(1.dp, colors.outlineVariant, RoundedCornerShape(16.dp))
                             .clickable { onGo(it.block) }.padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
