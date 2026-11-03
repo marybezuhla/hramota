@@ -94,8 +94,10 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
                     Icon(AppIcons.Bookmark, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text(stringResource(R.string.read_bookmark), modifier = Modifier.padding(start = 6.dp), maxLines = 1)
                 }
-                TextButton(onClick = onSettings, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
-                    Text(stringResource(R.string.read_settings), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Short on the button (it fits with large type too); said in full to TalkBack
+                val settingsSays = stringResource(R.string.read_settings)
+                TextButton(onClick = onSettings, modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = settingsSays }) {
+                    Text(stringResource(R.string.read_voice), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = { ReadAloud.stop() }, modifier = Modifier.size(48.dp)) {
                     Icon(painterResource(R.drawable.ic_close), contentDescription = stringResource(R.string.read_stop))
