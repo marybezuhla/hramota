@@ -503,7 +503,7 @@ private fun BoundCover(e: LibraryEntry, width: androidx.compose.ui.unit.Dp) {
     val cloth = CLOTH[(title.hashCode() and 0x7fffffff) % CLOTH.size]
     val measurer = rememberTextMeasurer()
     val room = with(LocalDensity.current) { (width - 30.dp).toPx() }
-    val size = remember(title, room) {
+    val fs = remember(title, room) {
         val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
         var s = 14f
         while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontFamily = Literata, fontWeight = FontWeight.Bold)).size.width > room) s -= 0.5f
@@ -520,7 +520,7 @@ private fun BoundCover(e: LibraryEntry, width: androidx.compose.ui.unit.Dp) {
             }
             .padding(start = 12.dp, end = 8.dp, top = 20.dp, bottom = 18.dp),
     ) {
-        Text(title, color = Color(0xFFF6EBD6), fontFamily = Literata, fontWeight = FontWeight.Bold, fontSize = size.sp, lineHeight = (size + 3).sp,
+        Text(title, color = Color(0xFFF6EBD6), fontFamily = Literata, fontWeight = FontWeight.Bold, fontSize = fs.sp, lineHeight = (fs + 3).sp,
             maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.TopStart))
         Text(e.format, color = GILT, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp, modifier = Modifier.align(Alignment.BottomStart))
     }
