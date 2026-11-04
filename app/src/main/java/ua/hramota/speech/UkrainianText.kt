@@ -66,13 +66,17 @@ class UkrainianText(private val dictionary: StressDictionary?) {
     // dictionary has no genders; masculine nouns in -о/-а are listed)
     private val MASCULINE_O_A = setOf("батько", "дядько", "тато", "дідо", "петро", "дмитро", "павло", "суддя", "староста", "воєвода", "слуга", "голова", "колега", "сирота", "бідолаха", "владика")
     private val NEUTER_YA = listOf("ння", "ття", "ддя", "ззя", "лля", "сся", "ччя", "жжя", "шшя", "'я", "цтво", "ство")
+    // Counting words: «один два три» (a phone number read out) is not «одна два»
+    private val NUMERALS = setOf("нуль", "два", "дві", "три", "чотири", "п'ять", "шість", "сім", "вісім", "дев'ять", "десять", "сто", "двісті", "тисяча",
+        "тисячі", "тисяч", "мільйон", "мільйона", "мільйонів", "кома", "плюс", "мінус", "двадцять", "тридцять", "сорок", "п'ятдесят", "шістдесят",
+        "сімдесят", "вісімдесят", "дев'яносто", "триста", "чотириста", "п'ятсот", "шістсот", "сімсот", "вісімсот", "дев'ятсот")
     private val ONE_BEFORE = Regex("""(?<![\p{L}'])(один)(\s+)([\p{L}']{3,})""", RegexOption.IGNORE_CASE)
 
     private fun agree(text: String): String = ONE_BEFORE.replace(text) { m ->
         val noun = m.groupValues[3].lowercase()
         val one = m.groupValues[1]
         val form = when {
-            noun in MASCULINE_O_A -> null
+            noun in MASCULINE_O_A || noun in NUMERALS -> null
             NEUTER_YA.any { noun.endsWith(it) } || noun.endsWith("о") || noun.endsWith("е") -> "одне"
             noun.endsWith("а") || noun.endsWith("я") -> "одна"
             else -> null

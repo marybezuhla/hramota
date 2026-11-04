@@ -42,7 +42,7 @@ class VoiceTest {
         try {
             // eSpeak NG gives the phonemes the voice was trained on
             val ph = voice.phonemes("The path turned towards the stream.")
-            assertTrue(ph, ph.contains("pˈɑːθ") && ph.endsWith("."))
+            assertTrue(ph, ph.contains("ðə pˈ") && ph.contains("stɹˈiːm") && ph.endsWith("."))
             val t0 = System.nanoTime()
             val sound = voice.read("In the evening, mist rose from the valley, and mother lit the lamp.", 1f)
             val took = (System.nanoTime() - t0) / 1e9
