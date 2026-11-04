@@ -63,7 +63,7 @@ class ScreensTest {
         shadowOf(app.packageManager).addActivityIfNotPresent(ComponentName(app, ComponentActivity::class.java))
     }
 
-    private fun shot(name: String, settle: Int = 8, day: String = ua.hramota.ui.Schemes.DEFAULT, night: String = ua.hramota.ui.Schemes.DEFAULT, content: @Composable () -> Unit) = ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+    private fun shot(name: String, settle: Int = 8, day: String = "nebo", night: String = "zoriana_nich", content: @Composable () -> Unit) = ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
         scenario.onActivity { activity ->
             activity.setContent {
                 HramotaTheme(day = day, night = night) {
@@ -171,6 +171,13 @@ class ScreensTest {
     @Test fun homeKreyda() = shot("02-home-kreyda", day = "kreyda") { home(recentsUk) }
     @Test fun homeVisk() = shot("02-home-visk", day = "visk") { home(recentsUk) }
     @Test fun homeNebo() = shot("02-home-nebo", day = "nebo") { home(recentsUk) }
+    @Test fun homeGlyna() = shot("02-home-glyna", day = "glyna") { home(recentsUk) }
+    @Test fun homeKalyna() = shot("02-home-kalyna", day = "kalyna") { home(recentsUk) }
+    @Config(qualifiers = "+night")
+    @Test fun homeZhar() = shot("02-home-zhar", night = "zhar") { home(recentsUk) }
+    @Test fun settingsLook() = shot("09-settings-look") { SettingsScreen(AppSettings(dayScheme = "nebo", nightScheme = "zoriana_nich"), "0.10.0", onChange = {}, onClearRecent = {}, onBack = {}) }
+    @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
+    @Test fun settingsLookEnglish() = shot("09-settings-look-en") { SettingsScreen(AppSettings(dayScheme = "nebo", nightScheme = "zoriana_nich"), "0.10.0", onChange = {}, onClearRecent = {}, onBack = {}) }
     @Config(qualifiers = "+night")
     @Test fun homePodillia() = shot("02-home-podillia", night = "podillia") { home(recentsUk) }
     @Config(qualifiers = "+night")

@@ -51,11 +51,12 @@ fun ReadingSheet(settings: AppSettings, onChange: ((AppSettings) -> AppSettings)
 @Composable
 internal fun ReadingControls(settings: AppSettings, onChange: ((AppSettings) -> AppSettings) -> Unit) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // Paper: automatic (follows the app's theme), then the four papers
+        // Paper: the theme's own, then the four papers
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             val names = mapOf("auto" to R.string.paper_auto, "paper" to R.string.paper_paper, "sepia" to R.string.paper_sepia, "gray" to R.string.paper_gray, "night" to R.string.paper_night)
             for ((name, label) in names) {
-                val p = PAPERS.firstOrNull { it.name == name }
+                // «Тема»: the theme's own paper
+                val p = paperFor(name)
                 val selected = settings.readPaper == name
                 val text = stringResource(label)
                 Column(
@@ -65,10 +66,10 @@ internal fun ReadingControls(settings: AppSettings, onChange: ((AppSettings) -> 
                 ) {
                     Box(
                         Modifier.size(44.dp).clip(CircleShape)
-                            .background(p?.background ?: MaterialTheme.colorScheme.surfaceVariant)
+                            .background(p.background)
                             .border(BorderStroke(if (selected) 3.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline), CircleShape),
                         contentAlignment = Alignment.Center,
-                    ) { Text("Aa", color = p?.text ?: MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = Literata, fontSize = 16.sp) }
+                    ) { Text("Aa", color = p.text, fontFamily = Literata, fontSize = 16.sp) }
                     Text(text, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                 }
             }

@@ -45,15 +45,32 @@ val PAPERS = listOf(
     Paper("night", Color(0xFF1B1A19), Color(0xFFCCC6BA), Color(0xFF8F897E), true),
 )
 
+/**
+ * The paper of the theme («Тема», the default): the theme's card colour, so a book looks like the rest of the app in
+ * every theme, by day and at night. Its text is pushed to 7:1 and its quieter text to 4.5:1, so every theme reads well
+ * for hours; at night the raised card colour is used, never pure black.
+ */
+fun themePaper(scheme: androidx.compose.material3.ColorScheme): Paper {
+    val bg = scheme.surface
+    val dark = bg.luminance() < 0.5f
+    val text = Schemes.readable(scheme.onSurface, bg, if (dark) Color.White else Color.Black, 7.0)
+    val muted = Schemes.readable(scheme.onSurfaceVariant, bg, text, 4.5)
+    return Paper("auto", bg, text, muted, dark)
+}
+
+/** The theme's paper, as the app shows it outside the book (set where the book's own colours begin). */
+val LocalThemePaper = androidx.compose.runtime.staticCompositionLocalOf<Paper?> { null }
+
 @Composable
 fun paperFor(name: String): Paper = PAPERS.firstOrNull { it.name == name }
-    ?: if (MaterialTheme.colorScheme.background.luminance() < 0.5f) PAPERS[3] else PAPERS[0]
+    ?: LocalThemePaper.current ?: themePaper(MaterialTheme.colorScheme)
 
 /** The window in the colours of the book's paper, so bars and lists match the page. */
 @Composable
 fun BookTheme(on: Boolean, settings: AppSettings, content: @Composable () -> Unit) {
     if (!on) { content(); return }
-    val p = paperFor(settings.readPaper)
+    val themed = themePaper(MaterialTheme.colorScheme)
+    val p = PAPERS.firstOrNull { it.name == settings.readPaper } ?: themed
     // Status bar icons readable on the paper
     val view = androidx.compose.ui.platform.LocalView.current
     androidx.compose.runtime.DisposableEffect(p.dark) {
@@ -64,14 +81,14 @@ fun BookTheme(on: Boolean, settings: AppSettings, content: @Composable () -> Uni
         bars?.isAppearanceLightNavigationBars = !p.dark
         onDispose { if (before != null) { bars.isAppearanceLightStatusBars = before; bars.isAppearanceLightNavigationBars = before } }
     }
-    HramotaTheme(dark = p.dark, dynamic = settings.dynamicColor, day = settings.dayScheme, night = settings.nightScheme) {
+    HramotaTheme(dark = p.dark, day = settings.dayScheme, night = settings.nightScheme) {
         val cs = MaterialTheme.colorScheme.copy(
             background = p.background, surface = p.background, onBackground = p.text, onSurface = p.text, onSurfaceVariant = p.muted,
             surfaceContainer = p.background, surfaceContainerLow = p.background, surfaceContainerHigh = p.background,
         )
-        MaterialTheme(colorScheme = cs) {
+        MaterialTheme(colorScheme = cs) { androidx.compose.runtime.CompositionLocalProvider(LocalThemePaper provides themed) {
             androidx.compose.material3.Surface(androidx.compose.ui.Modifier.fillMaxSize(), color = p.background, contentColor = p.text) { content() }
-        }
+        } }
     }
 }
 

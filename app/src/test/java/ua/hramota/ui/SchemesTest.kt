@@ -5,42 +5,70 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ua.hramota.data.Settings
+import ua.hramota.ui.theme.Theme
+import ua.hramota.ui.theme.paletteScheme
+import ua.hramota.ui.theme.contrast
+import ua.hramota.ui.theme.mix
 
-/** Every colour scheme reads well: text, accents, buttons and highlighted things (WCAG AA, body text AAA). */
+/** The themes shared by all the apps read well (WCAG AA), and a book on a theme's paper reads at 7:1 (AAA). */
 class SchemesTest {
-    private fun check(errors: MutableList<String>, scheme: String, what: String, fg: Color, bg: Color, min: Double) {
-        val c = Schemes.contrast(fg, bg)
-        if (c < min) errors += "$scheme: $what %.2f < $min".format(c)
-    }
+    private val themes = Theme.entries.filter { it.palette != null }
 
-    @Test fun everySchemeReadsWell() {
+    @Test fun textIsReadable() {
         val errors = ArrayList<String>()
-        for (s in Schemes.day + Schemes.night) {
-            val c = s.colors
-            val n = s.id + if (s.dark) " (night)" else " (day)"
-            check(errors, n, "text", c.onBackground, c.background, 7.0)
-            check(errors, n, "text on surface", c.onSurface, c.surface, 7.0)
-            check(errors, n, "quiet text", c.onSurfaceVariant, c.surfaceVariant, 4.5)
-            check(errors, n, "quiet text on the page", c.onSurfaceVariant, c.background, 4.5)
-            check(errors, n, "accent text", c.primary, c.background, 4.5)
-            check(errors, n, "accent on cards", c.primary, c.surfaceVariant, 3.0)
-            check(errors, n, "button text", c.onPrimary, c.primary, 4.5)
-            check(errors, n, "second accent", c.secondary, c.background, 4.5)
-            check(errors, n, "on second accent", c.onSecondary, c.secondary, 4.5)
-            check(errors, n, "highlighted", c.onPrimaryContainer, c.primaryContainer, 4.5)
-            check(errors, n, "chips", c.onSecondaryContainer, c.secondaryContainer, 4.5)
-            check(errors, n, "lines", c.outline, c.background, 3.0)
-            check(errors, n, "errors", c.error, c.background, 4.5)
-            // Day schemes are light, night ones dark (the status bar icons follow)
-            if (s.dark != (c.background.red + c.background.green + c.background.blue < 1.5f)) errors += "$n: light or dark the wrong way"
+        for (t in themes) {
+            val p = t.palette!!
+            val pairs = mapOf(
+                "onSurface/surface" to (p.onSurface to p.surface),
+                "onSurface/background" to (p.onSurface to p.background),
+                "onSurfaceVariant/surface" to (p.onSurfaceVariant to p.surface),
+                "onSurfaceVariant/background" to (p.onSurfaceVariant to p.background),
+                "onSurfaceVariant/surfaceVariant" to (p.onSurfaceVariant to p.surfaceVariant),
+                "onPrimary/primary" to (p.onPrimary to p.primary),
+                "primary/surface" to (p.primary to p.surface),
+                "primary/background" to (p.primary to p.background),
+                "error/surface" to (p.error to p.surface),
+                "onSurface/primaryContainer" to (p.onSurface to mix(p.surface, p.primary, 0.2)),
+                "onSurface/secondaryContainer" to (p.onSurface to mix(p.surface, p.secondary, 0.25)),
+            )
+            for ((name, c) in pairs) contrast(c.first, c.second).let { if (it < 4.5) errors += "${t.key} $name %.2f".format(it) }
+            if (contrast(p.secondary, p.background) < 3.0) errors += "${t.key} secondary/background"
         }
         assertTrue(errors.joinToString("\n"), errors.isEmpty())
     }
 
-    @Test fun settingsKnowTheSameSchemes() {
-        assertEquals(Schemes.dayIds, Settings.DAY_SCHEMES)
-        assertEquals(Schemes.nightIds, Settings.NIGHT_SCHEMES)
-        assertEquals(Schemes.DEFAULT, Schemes.day.first().id)
-        assertEquals(Schemes.DEFAULT, Schemes.night.first().id)
+    @Test fun booksReadWellOnEveryThemesPaper() {
+        val errors = ArrayList<String>()
+        for (t in themes) {
+            val paper = themePaper(paletteScheme(t.palette!!, t.dark))
+            val body = Schemes.contrast(paper.text, paper.background)
+            val quiet = Schemes.contrast(paper.muted, paper.background)
+            if (body < 7.0) errors += "${t.key} body %.2f".format(body)
+            if (quiet < 4.5) errors += "${t.key} quiet %.2f".format(quiet)
+            if (paper.dark != t.dark) errors += "${t.key} light or dark the wrong way"
+            if (paper.background == Color.Black) errors += "${t.key} pure black paper"
+        }
+        assertTrue(errors.joinToString("\n"), errors.isEmpty())
+    }
+
+    @Test fun daysAndNightsInPairs() {
+        assertTrue(Theme.DAY.none { it.dark })
+        assertTrue(Theme.NIGHT.all { it.dark })
+        assertEquals(Theme.DAY.size, Theme.NIGHT.size)
+        assertEquals(Theme.ZORIANA_NICH, Theme.pairOf(Theme.NEBO))
+        assertEquals(Theme.SYSTEM, Theme.DAY.first())
+        assertEquals(Theme.SYSTEM_DARK, Theme.NIGHT.first())
+    }
+
+    @Test fun oldSettingsBecomeNewThemes() {
+        // Hramota's own «Льон» and the wallpaper switch were before 0.10: both are the phone's colours now
+        assertEquals("system", Settings.dayTheme("lon"))
+        assertEquals("system_dark", Settings.nightTheme("lon"))
+        assertEquals("system", Settings.dayTheme("kreyda", wallpaper = true))
+        assertEquals("kreyda", Settings.dayTheme("kreyda"))
+        assertEquals("podillia", Settings.nightTheme("podillia"))
+        assertEquals("system", Settings.dayTheme(null))
+        // A night theme is never used by day
+        assertEquals("system", Settings.dayTheme("zhar"))
     }
 }

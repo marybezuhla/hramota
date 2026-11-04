@@ -709,7 +709,8 @@ private fun TextDocument(
     note: Boolean = hasNote(state),
 ) {
     SelectionContainer {
-        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
+        // On the theme's paper (its card colour), as books are
+        LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
             if (note) item {
                 Text(
                     stringResource(R.string.simplified_note),

@@ -33,6 +33,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.hramota.R
 import ua.hramota.doc.Format
+import ua.hramota.ui.theme.SharedType
+import ua.hramota.ui.theme.Theme
+import ua.hramota.ui.theme.shownScheme
 
 /** Colours of the comparison: always shown with a word or a strike, never by colour alone. */
 @Immutable
@@ -42,20 +45,20 @@ val LocalDiffColors = staticCompositionLocalOf {
     DiffColors(Color(0xFFD7F0DC), Color(0xFF14532D), Color(0xFFFADBD6), Color(0xFF8A1C10))
 }
 
+/**
+ * The theme shared by all the apps: [day] and [night] are theme keys (ui/theme/Palettes.kt), «system» ones being the
+ * phone's own colours (Material You).
+ */
 @Composable
-fun HramotaTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, day: String = Schemes.DEFAULT, night: String = Schemes.DEFAULT, content: @Composable () -> Unit) {
+fun HramotaTheme(dark: Boolean = isSystemInDarkTheme(), day: String = Theme.SYSTEM.key, night: String = Theme.SYSTEM_DARK.key, content: @Composable () -> Unit) {
     val diff = if (dark) DiffColors(Color(0xFF173A24), Color(0xFFA6E3B5), Color(0xFF4A1E18), Color(0xFFF5B1A6))
     else DiffColors(Color(0xFFD7F0DC), Color(0xFF14532D), Color(0xFFFADBD6), Color(0xFF8A1C10))
     androidx.compose.runtime.CompositionLocalProvider(LocalDiffColors provides diff) {
-        // Colours from the wallpaper (Material You), or the day or night scheme chosen
         val context = androidx.compose.ui.platform.LocalContext.current
-        val scheme = when {
-            dynamic && dark -> androidx.compose.material3.dynamicDarkColorScheme(context)
-            dynamic -> androidx.compose.material3.dynamicLightColorScheme(context)
-            dark -> Schemes.nightScheme(night).colors
-            else -> Schemes.dayScheme(day).colors
-        }
-        MaterialTheme(colorScheme = scheme, content = content)
+        val theme = if (dark) Theme.of(night, Theme.SYSTEM_DARK).takeIf { it.dark } ?: Theme.SYSTEM_DARK
+            else Theme.of(day, Theme.SYSTEM).takeIf { !it.dark } ?: Theme.SYSTEM
+        val scheme = androidx.compose.runtime.remember(theme, context) { shownScheme(theme, context) }
+        MaterialTheme(colorScheme = scheme, typography = SharedType, content = content)
     }
 }
 
