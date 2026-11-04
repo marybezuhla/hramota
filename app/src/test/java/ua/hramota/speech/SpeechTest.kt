@@ -51,6 +51,9 @@ class SpeechTest {
         assertEquals("нуль шість сім один два три чотири п'ять шість сім", n.expand("0671234567"))
         assertEquals("нуль кома нуль нуль п'ять", n.expand("0,005"))
         assertEquals("сторінки десять – п'ятнадцять", n.expand("сторінки 10 – 15"))
+        assertEquals("до двох тисяч гривень", n.expand("до 2 тис. грн"))
+        assertEquals("понад сто кілометрів на годину", n.expand("понад 100 км/год"))
+        assertEquals("дев'яності роки", n.expand("90-ті роки"))
         assertEquals("двадцять третього", n.ordinal(23, UkrainianNumbers.Form.GEN_M))
         assertEquals("дві тисячі двадцять шостому", n.ordinal(2026, UkrainianNumbers.Form.LOC_M))
         assertEquals("двохтисячного", n.ordinal(2000, UkrainianNumbers.Form.GEN_M))
@@ -96,8 +99,8 @@ class SpeechTest {
     @Test fun marksAndShortFormsAreHandled() {
         // A stress already written in the text is kept; «+» is not taken for one
         assertTrue(text.prepare("за́мок").contains("з+амок"))
-        assertTrue(text.prepare("+380").startsWith(" плюс").not() || true)
-        assertTrue(text.prepare("США").contains("есше+а"))
+        assertTrue(text.prepare("+380 67 123 45 67").contains("плюс три вісім нуль шістдесят сім один два три"))
+        assertTrue(text.prepare("США").contains("есша+а"))
         assertTrue(text.prepare("у XX ст.").replace("+", "").contains("у двадцятому столітті"))
         // A soft hyphen does not cut a word
         assertEquals(text.prepare("бібліотеки"), text.prepare("біблі\u00ADотеки"))

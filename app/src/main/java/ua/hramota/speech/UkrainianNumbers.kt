@@ -23,7 +23,7 @@ object UkrainianNumbers {
     enum class Form(val hard: String, val soft: String) {
         NOM_M("ий", "ій"), GEN_M("ого", "ього"), LOC_M("ому", "ьому"),
         NOM_F("а", "я"), GEN_F("ої", "ьої"), LOC_F("ій", "ій"), ACC_F("у", "ю"),
-        NOM_N("е", "є"), PLURAL("их", "іх"),
+        NOM_N("е", "є"), PLURAL("их", "іх"), PLURAL_NOM("і", "і"),
     }
 
     private fun below1000(n: Int, feminine: Boolean, out: MutableList<String>) {
@@ -124,24 +124,25 @@ object UkrainianNumbers {
     private val DAY_MONTH = Regex("""\b(\d{1,2})\s+(${MONTHS.joinToString("|")})""", RegexOption.IGNORE_CASE)
     private val YEAR = Regex("""(?:\b(у|в)\s+)?\b(\d{3,4})\s*(?:-?(?:го|му|й))?\s+(році|року|рік|р\.)""", RegexOption.IGNORE_CASE)
     private val YEARS = Regex("""\b(\d{3,4})\s*[–—-]\s*(\d{3,4})\s*(рр\.|роки|років|роках)""", RegexOption.IGNORE_CASE)
-    private val DECADE = Regex("""\b(\d*0)-(?:х|их|ті|тих)\b""")
+    private val DECADE = Regex("""\b(\d*0)-(х|их|ті|тих)\b""")
     private val TIME = Regex("""(?:\b(о|об|до|після|з|від)\s+)?\b([01]?\d|2[0-3])([:.])([0-5]\d)\b""", RegexOption.IGNORE_CASE)
-    private val PHONE = Regex("""(?:\+\s?\d{1,3}[\s-]?)?(?:\(?0\d{2}\)?[\s-]?)\d{3}[\s-]?\d{2}[\s-]?\d{2}\b|\+\d{7,15}\b""")
+    private val PHONE = Regex("""(?<![\d+])(?:\+?\s?38\s?)?\(?0\s?\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}(?!\d)|(?<!\d)\+\d{7,15}(?!\d)""")
     // A minus at the start or after a space (not «10 - 15», a range)
     private val MINUS = Regex("""(^|(?<!\d)\s|\()[-−](\d)""")
     private val MONEY_UAH = Regex("""\b(\d+)[,.](\d{2})\s?(грн|₴)(?![\p{L}])""")
     private val MONEY_BEFORE = Regex("""([$€])\s?(\d+)(?:[,.](\d{2}))?""")
     private val MONEY_AFTER = Regex("""\b(\d+)(?:[,.](\d{2}))?\s?([$€₴])""")
     private val UNIT_NAMES = "%|км/год|км|мм|см|кг|грн|коп|год|хв|сек|тис|млн|млрд|°C|°|м|г|т|л|с"
-    private val WITH_UNIT = Regex("""(?:\b(\p{L}+)\s+)?\b(\d{1,12})\s?($UNIT_NAMES)(?![\p{L}])""")
+    // (a unit's full stop goes when the sentence goes on: «2 тис. грн» is not the end of a sentence)
+    private val WITH_UNIT = Regex("""(?:\b(\p{L}+)\s+)?\b(\d{1,12})\s?($UNIT_NAMES)(?![\p{L}])(?:\.(?=\s*[\p{Ll}₴$€]))?""")
     private val NUMBERED = Regex("""№\s?(\d+)""")
-    private val DECIMAL_UNIT = Regex("""\b(\d+)[,.](\d+)\s?($UNIT_NAMES)(?![\p{L}])""")
+    private val DECIMAL_UNIT = Regex("""\b(\d+)[,.](\d+)\s?($UNIT_NAMES)(?![\p{L}])(?:\.(?=\s*[\p{Ll}₴$€]))?""")
     private val DECIMAL = Regex("""\b(\d+)[,.](\d+)\b""")
     private val ORDINAL_SUFFIX = Regex("""\b(\d+)-(й|ий|ій|го|ого|му|ому|та|тя|ту|тю|ої|те|тє|ше|ге|ме|ке|ша|га|ма|ка|х)\b""")
     private val NUMBER = Regex("""(?:\b(\p{L}+)\s+)?\b(\d+)\b""")
     private val SPACED = Regex("""\b(\d{1,3})(?:[  ](\d{3}))+\b""")
     /** Words after which a count is in the genitive. */
-    private val GEN_WORDS = setOf("до", "від", "з", "із", "зі", "близько", "біля", "після", "без", "для", "понад", "кілька", "декілька", "більше", "менше", "протягом", "упродовж", "навколо", "щонайменше", "щонайбільше", "замість", "крім", "окрім", "серед")
+    private val GEN_WORDS = setOf("до", "від", "з", "із", "зі", "близько", "біля", "після", "без", "для", "кілька", "декілька", "більше", "менше", "протягом", "упродовж", "навколо", "щонайменше", "щонайбільше", "замість", "крім", "окрім", "серед")
 
     private class UnitName(val one: String, val few: String, val many: String, val feminine: Boolean = false, val gen: String = few)
     private val UNIT_FULL = mapOf(
@@ -173,14 +174,16 @@ object UkrainianNumbers {
         return (List(zeros.coerceAtMost(f.length - if (rest.isEmpty()) 1 else 0)) { "нуль" } + (if (rest.isEmpty()) emptyList() else listOf(cardinal(rest.toLongOrNull() ?: 0, feminine)))).joinToString(" ")
     }
 
-    /** [text] with its numbers written out. */
-    fun expand(text: String): String {
-        // Phone numbers digit group by group, before anything joins their groups into one big number
-        var t = PHONE.replace(text) { m ->
+    /** Phone numbers read digit by digit («+» as «плюс»), before anything joins their groups into one big number. */
+    fun phones(text: String): String = PHONE.replace(text) { m ->
             m.value.replace("+", " плюс ").split(Regex("""[\s()\-]+""")).filter { it.isNotBlank() }.joinToString(" ") { g ->
                 if (g.all { it.isDigit() }) (if (g.length > 2 || g.startsWith("0")) g.map { ONES_M[it - '0'] }.joinToString(" ") else cardinal(g.toLong())) else g
             }.trim()
         }
+
+    /** [text] with its numbers written out. */
+    fun expand(text: String): String {
+        var t = phones(text)
         t = SPACED.replace(t) { it.value.replace(" ", "").replace(" ", "") }
         t = MINUS.replace(t) { m -> m.groupValues[1] + "мінус " + m.groupValues[2] }
         t = DATE.replace(t) { m ->
@@ -203,7 +206,7 @@ object UkrainianNumbers {
             (if (prep.isNotEmpty()) "$prep " else "") + ordinal(y, form) + " " + noun
         }
         // «1990-х» — «дев'яностих» (the plural of the ordinal)
-        t = DECADE.replace(t) { m -> m.groupValues[1].toLongOrNull()?.takeIf { it >= 10 }?.let { ordinal(it, Form.PLURAL) } ?: m.value }
+        t = DECADE.replace(t) { m -> m.groupValues[1].toLongOrNull()?.takeIf { it >= 10 }?.let { ordinal(it, if (m.groupValues[2] == "ті") Form.PLURAL_NOM else Form.PLURAL) } ?: m.value }
         t = TIME.replace(t) { m ->
             val prep = m.groupValues[1].lowercase(); val h = m.groupValues[2].toLong(); val min = m.groupValues[4].toLong()
             // «9.30» is a time only after «о», «до»…; on its own it may be a number
@@ -244,7 +247,7 @@ object UkrainianNumbers {
             (if (before.isNotEmpty()) "$before " else "") + counted(n, u, before.lowercase() in GEN_WORDS)
         }
         // «5 млн грн», «2 тисячі грн»: the money after a big number is in the genitive plural
-        t = t.replace(Regex("""(тисяч\p{L}*|мільйон\p{L}*|мільярд\p{L}*)\s+(грн|₴|\$|€)""")) { m -> m.groupValues[1] + " " + UNIT_FULL[m.groupValues[2]]!!.many }
+        t = t.replace(Regex("""(тисяч\p{L}*|мільйон\p{L}*|мільярд\p{L}*)\s+(грн|₴|\$|€)(?![\p{L}])(?:\.(?=\s*\p{Ll}))?""")) { m -> m.groupValues[1] + " " + UNIT_FULL[m.groupValues[2]]!!.many }
         t = NUMBERED.replace(t) { m -> m.groupValues[1].toLongOrNull()?.let { "номер " + cardinal(it) } ?: m.value }
         t = ORDINAL_SUFFIX.replace(t) { m ->
             val n = m.groupValues[1].toLongOrNull() ?: return@replace m.value

@@ -7,6 +7,7 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
@@ -98,7 +99,11 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
                     }
                 }
             }
-        } finally { watcher.cancel(); options.close() }
+        } finally {
+            // The watcher is done before the options it touches are closed
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { watcher.cancelAndJoin() }
+            options.close()
+        }
     }
 
     override fun close() { try { session.close() } catch (_: Exception) {} }
@@ -161,9 +166,9 @@ class PhoneVoice private constructor(private val tts: TextToSpeech, private val 
         val locale = when (lang) { "uk" -> Locale.forLanguageTag("uk-UA"); "en" -> Locale.UK; else -> language }
         if (tts.isLanguageAvailable(locale) < TextToSpeech.LANG_AVAILABLE) return null
         if (text.length > TextToSpeech.getMaxSpeechInputLength()) return null
-        // Only a voice that works on the phone itself: the document's text is not sent over the network
-        val voice = try { tts.voices?.filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality } } catch (e: Exception) { null } ?: return null
-        tts.voice = voice
+        // Only a voice that works on the phone itself and is installed: the document's text is not sent anywhere
+        val voice = offlineVoice(locale)
+        if (voice != null) tts.voice = voice else tts.language = locale
         tts.setSpeechRate(speed)
         val id = "s" + System.nanoTime()
         // Each sentence its own file: a sentence stopped late can never delete the next one's
@@ -185,6 +190,18 @@ class PhoneVoice private constructor(private val tts: TextToSpeech, private val 
     }
 
     override fun close() { try { tts.shutdown() } catch (_: Exception) {} }
+
+    private fun offlineVoice(locale: Locale): android.speech.tts.Voice? = try {
+        val same = { v: android.speech.tts.Voice -> v.locale.language == locale.language || v.locale.isO3Language == locale.isO3Language }
+        val usable = { v: android.speech.tts.Voice -> !v.isNetworkConnectionRequired && android.speech.tts.TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in v.features.orEmpty() }
+        tts.defaultVoice?.takeIf { same(it) && usable(it) } ?: tts.voices?.filter { same(it) && usable(it) }?.maxByOrNull { it.quality }
+    } catch (e: Exception) { null }
+
+    /** Whether the phone has a voice for this sentence's language (else reading stops there, saying why). */
+    fun canSay(text: String): Boolean {
+        val locale = when (Sentences.language(text)) { "uk" -> Locale.forLanguageTag("uk-UA"); "en" -> Locale.UK; else -> language }
+        return try { tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE } catch (e: Exception) { false }
+    }
 
     companion object {
         /** Starts the phone's voice; null when the phone has none. */

@@ -70,6 +70,7 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         // Marks the text may already have: a stress written in it (kept, as the voice's «+»), soft hyphens and
         // invisible characters (gone, they would cut words), and «+» itself, which the voice takes for a stress
         var t = sentence.replace("\u00AD", "").replace("\u200B", "").replace("\u200C", "").replace("\u200D", "").replace("\u2060", "")
+        t = UkrainianNumbers.phones(t)
         t = Regex("""\+(?=\s?\d)""").replace(t, " плюс ").replace("+", " ")
         t = Regex("""([аеєиіїоуюяАЕЄИІЇОУЮЯ])\u0301""").replace(t) { "+" + it.groupValues[1] }.replace("\u0301", "")
         t = ROMAN_CENTURY.replace(t) { m ->

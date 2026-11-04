@@ -294,9 +294,14 @@ object ReadAloud {
                 phone = withContext(Dispatchers.Main) { withTimeoutOrNull(8000) { PhoneVoice.open(app) } }
                 if (phone == null) phoneFailed = true
             }
-            phone?.let { p -> try { p.read(text, speed) } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
+            val p = phone
+            when {
+                p == null || !p.canSay(text) -> NO_VOICE
+                // One sentence the engine failed on is skipped; reading goes on
+                else -> try { p.read(text, speed) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            }
         }
-        if (sound == null) { _state.update { it.copy(notice = if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }; return NO_VOICE }
+        if (sound === NO_VOICE) _state.update { it.copy(notice = if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }
         return sound
     }
 

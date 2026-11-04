@@ -22,7 +22,7 @@ val joinVoice by tasks.registering {
     outputs.dir(joinedVoice)
     doLast {
         val dir = voiceParts.asFile
-        val parts = dir.listFiles { f -> f.name.startsWith("uk-tetiana.onnx.part") }.orEmpty().sortedBy { it.name }
+        val parts = dir.listFiles { f -> f.name.startsWith("uk-tetiana.onnx.part") }.orEmpty().sortedBy { it.name.substringAfterLast("part").toIntOrNull() ?: 0 }
         check(parts.isNotEmpty()) { "voice parts missing in $dir" }
         val out = joinedVoice.get().file("voice/uk-tetiana.onnx").asFile
         out.parentFile.mkdirs()
