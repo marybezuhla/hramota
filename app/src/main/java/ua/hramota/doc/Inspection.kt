@@ -25,6 +25,8 @@ data class Inspection(
     val forms: Boolean = false,
     val author: String? = null,
     val lastModifiedBy: String? = null,
+    /** The title written in the file's properties (offered for the shelf cover, never shown as a warning). */
+    val title: String? = null,
 ) {
     /** Something that could do harm in another program. */
     val risky: Boolean get() = macros || embedded.isNotEmpty() || remoteResources > 0 || javascript > 0 || launchActions > 0 || dde

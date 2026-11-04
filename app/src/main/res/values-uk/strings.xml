@@ -397,4 +397,19 @@
     <string name="theme_chornozem">Чорнозем</string>
     <string name="theme_zhar">Жар</string>
     <string name="theme_zoriana_nich">Зоряна ніч</string>
+    <string name="cover_menu">Обкладинка…</string>
+    <string name="cover_title">Обкладинка на полиці</string>
+    <string name="cover_name">Назва на обкладинці</string>
+    <string name="cover_own">Своя назва</string>
+    <string name="cover_look">Вигляд</string>
+    <string name="cover_drawn">Намальована: колір формату й орнамент</string>
+    <string name="cover_page">Сторінка %1$d (та, яку ви читаєте)</string>
+    <string name="cover_book">Власна обкладинка книжки</string>
+    <string name="cover_rename">Перейменувати й файл</string>
+    <string name="cover_rename_hint">Грамота пропонує назви з самого документа. Файл в іншому застосунку перейменовується, лише якщо той застосунок це дозволяє.</string>
+    <string name="cover_apply">Зберегти</string>
+    <string name="cover_done">Обкладинку змінено.</string>
+    <string name="cover_renamed">Обкладинку змінено, файл тепер називається «%1$s».</string>
+    <string name="cover_renamed_copy">Обкладинку змінено, копія в Грамоті тепер називається «%1$s».</string>
+    <string name="cover_renamed_shelf">Обкладинку змінено. Застосунок, з якого відкрито файл, не дозволяє його перейменувати, тож «%1$s» — назва лише на полиці.</string>
 </resources>

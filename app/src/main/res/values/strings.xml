@@ -389,4 +389,19 @@
     <string name="theme_chornozem">Black earth</string>
     <string name="theme_zhar">Embers</string>
     <string name="theme_zoriana_nich">Starry night</string>
+    <string name="cover_menu">Cover…</string>
+    <string name="cover_title">Cover on the shelf</string>
+    <string name="cover_name">Title on the cover</string>
+    <string name="cover_own">My own title</string>
+    <string name="cover_look">Look</string>
+    <string name="cover_drawn">Drawn: the format’s colour and an ornament</string>
+    <string name="cover_page">Page %1$d (the one you are reading)</string>
+    <string name="cover_book">The book’s own cover</string>
+    <string name="cover_rename">Rename the file too</string>
+    <string name="cover_rename_hint">Hramota offers titles from the document itself. A file in another app is renamed only if that app allows it.</string>
+    <string name="cover_apply">Save</string>
+    <string name="cover_done">The cover is changed.</string>
+    <string name="cover_renamed">The cover is changed, and the file is now called «%1$s».</string>
+    <string name="cover_renamed_copy">The cover is changed, and the copy in Hramota is now called «%1$s».</string>
+    <string name="cover_renamed_shelf">The cover is changed. The app the file came from does not allow renaming it, so «%1$s» is its name only on the shelf.</string>
 </resources>
