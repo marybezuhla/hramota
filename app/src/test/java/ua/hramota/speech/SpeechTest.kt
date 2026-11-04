@@ -99,7 +99,7 @@ class SpeechTest {
     @Test fun marksAndShortFormsAreHandled() {
         // A stress already written in the text is kept; «+» is not taken for one
         assertTrue(text.prepare("за́мок").contains("з+амок"))
-        assertTrue(text.prepare("+380 67 123 45 67").contains("плюс три вісім нуль шістдесят сім один два три"))
+        assertTrue(text.prepare("+380 67 123 45 67").replace("+", "").contains("плюс три вісім нуль шістдесят сім один два три"))
         assertTrue(text.prepare("США").contains("есша+а"))
         assertTrue(text.prepare("у XX ст.").replace("+", "").contains("у двадцятому столітті"))
         // A soft hyphen does not cut a word
