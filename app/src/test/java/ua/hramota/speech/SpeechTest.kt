@@ -134,4 +134,15 @@ class SpeechTest {
         assertTrue(p, p.contains("листоп+ада"))
         assertTrue(p, p.contains("чотирн+адцять кілом+етрів"))
     }
+
+    @Test fun englishClauses() {
+        fun c(t: String) = EnglishVoice.clauses(t)
+        assertEquals(listOf("Well" to ',', "it costs 3.5 or 1,000" to '.'), c("Well, it costs 3.5 or 1,000."))
+        assertEquals(listOf("Ask Mr. Smith" to '?'), c("Ask Mr. Smith?"))
+        assertEquals(listOf("a" to '—', "b" to null), c("a — b"))
+        assertEquals(listOf("c" to '—', "d" to null), c("c—d"))
+        assertEquals(listOf("pages 1–2" to null), c("pages 1–2"))
+        assertEquals(listOf("\"Hi" to '.', "Then go" to null), c("\"Hi.\" Then go"))
+        assertEquals(listOf("Name Value" to null), c("Name\tValue"))
+    }
 }
