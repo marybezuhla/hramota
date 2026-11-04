@@ -80,7 +80,7 @@ jobs:
           curl -fsSL -o out/en-cori.onnx.json "$B/en_GB-cori-medium.onnx.json"
           curl -fsSL -o out/MODEL_CARD-cori.txt "$B/MODEL_CARD"
           (cd out && find lib data -type f -exec sha256sum {} \; && sha256sum en-cori.onnx en-cori.onnx.json) > out/SHA256SUMS
-          cat out/SHA256SUMS; grep -o '"espeak":[^}]*}' out/en-cori.onnx.json
+          cat out/SHA256SUMS; grep -o '"espeak"[^}]*}' out/en-cori.onnx.json || true
       - name: Push for review
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}

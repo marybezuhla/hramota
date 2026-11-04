@@ -143,6 +143,103 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
 }
 
 /**
+ * Hramota's English voice: Cori (Piper, trained from scratch on public-domain recordings), a VITS model run on the
+ * phone. English text becomes IPA phonemes with eSpeak NG, as the voice was trained; punctuation is kept for pauses.
+ */
+class EnglishVoice private constructor(
+    private val session: OrtSession, private val env: OrtEnvironment, private val ids: Map<String, LongArray>,
+    private val espeakVoice: String, private val noise: Float, private val length: Float, private val noiseW: Float, val rate: Int,
+) : Voice {
+    /** The phonemes of a sentence, clause by clause, with its commas and stops (the voice pauses and rises on them). */
+    fun phonemes(text: String): String {
+        val out = StringBuilder()
+        for (m in CLAUSE.findAll(text.replace('’', '\'').replace('“', '"').replace('”', '"'))) {
+            val words = m.groupValues[1].trim()
+            if (words.isEmpty()) continue
+            val ph = Espeak.phonemes(words, espeakVoice)?.trim().orEmpty()
+            if (ph.isEmpty()) continue
+            if (out.isNotEmpty()) out.append(' ')
+            out.append(ph)
+            out.append(when (m.groupValues[2].firstOrNull()) { ',', ';', ':', '—', '–' -> ","; '?' -> "?"; '!' -> "!"; '.', '…' -> "."; else -> "" })
+        }
+        return out.toString()
+    }
+
+    override suspend fun read(text: String, speed: Float): Sound? {
+        val ph = java.text.Normalizer.normalize(phonemes(text), java.text.Normalizer.Form.NFD)
+        if (ph.isBlank()) return null
+        val pad = ids["_"] ?: longArrayOf(0)
+        val seq = ArrayList<Long>(ph.length * 2 + 4)
+        ids["^"]?.forEach { seq += it }; pad.forEach { seq += it }
+        var i = 0
+        while (i < ph.length) {
+            val cp = ph.codePointAt(i); val c = String(Character.toChars(cp)); i += Character.charCount(cp)
+            val id = ids[c] ?: continue
+            id.forEach { seq += it }; pad.forEach { seq += it }
+        }
+        ids["$"]?.forEach { seq += it }
+        val input = seq.toLongArray()
+        return kotlinx.coroutines.coroutineScope {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val scales = floatArrayOf(noise, length / speed.coerceIn(0.5f, 2.5f), noiseW)
+            val options = OrtSession.RunOptions()
+            val watcher = launch(kotlinx.coroutines.Dispatchers.Default) { try { kotlinx.coroutines.awaitCancellation() } finally { try { options.setTerminate(true) } catch (_: Exception) {} } }
+            try {
+                OnnxTensor.createTensor(env, LongBuffer.wrap(input), longArrayOf(1, input.size.toLong())).use { t ->
+                    OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(input.size.toLong())), longArrayOf(1)).use { l ->
+                        OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(3)).use { sc ->
+                            session.run(mapOf("input" to t, "input_lengths" to l, "scales" to sc), options).use { r ->
+                                // [1, 1, samples] or [1, samples]: the samples, whichever
+                                val buf = (r[0] as OnnxTensor).floatBuffer
+                                Sound(FloatArray(buf.remaining()).also { buf.get(it) }, rate)
+                            }
+                        }
+                    }
+                }
+            } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { watcher.cancelAndJoin() }
+                options.close()
+            }
+        }
+    }
+
+    override fun close() { try { session.close() } catch (_: Exception) {} }
+
+    companion object {
+        const val MODEL = "voice/en-cori.onnx"
+        /** A clause and the mark that ends it. */
+        private val CLAUSE = Regex("""([^,;:.!?…—–]+)([,;:.!?…—–]*)""")
+
+        fun open(context: Context): EnglishVoice {
+            if (!Espeak.start(context)) throw IllegalStateException("espeak")
+            val cfg = org.json.JSONObject(context.assets.open("$MODEL.json").bufferedReader().readText())
+            val map = cfg.getJSONObject("phoneme_id_map")
+            val ids = HashMap<String, LongArray>()
+            for (k in map.keys()) { val a = map.getJSONArray(k); ids[k] = LongArray(a.length()) { a.getLong(it) } }
+            val inference = cfg.optJSONObject("inference")
+            val env = OrtEnvironment.getEnvironment()
+            val session = OrtSession.SessionOptions().use { options ->
+                options.setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
+                options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                options.setCPUArenaAllocator(false)
+                env.createSession(mapAsset(context, MODEL), options)
+            }
+            return EnglishVoice(
+                session, env, ids, cfg.optJSONObject("espeak")?.optString("voice")?.ifEmpty { null } ?: "en-gb-x-rp",
+                inference?.optDouble("noise_scale", 0.667)?.toFloat() ?: 0.667f,
+                // A calm narrator's pace: the voice reads a little fast on its own
+                (inference?.optDouble("length_scale", 1.0)?.toFloat() ?: 1f) * ENGLISH_PACE,
+                inference?.optDouble("noise_w", 0.8)?.toFloat() ?: 0.8f,
+                cfg.optJSONObject("audio")?.optInt("sample_rate", 22050) ?: 22050,
+            )
+        }
+
+        /** About four syllables a second at 1,0× (Cori reads near 4,1 on her own; a touch slower is easier to follow). */
+        private const val ENGLISH_PACE = 1.08f
+    }
+}
+
+/**
  * The phone's own voice (Android's text to speech, as set up on the phone): for English and other languages, and
  * for anyone who prefers it. It writes each sentence to a file in the cache, read back and played like the others.
  */

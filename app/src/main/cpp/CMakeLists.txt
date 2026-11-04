@@ -11,3 +11,13 @@ target_include_directories(hramota_pdf PRIVATE ${PDFIUM_DIR}/include)
 target_compile_options(hramota_pdf PRIVATE -Wall -Wextra -Werror -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2)
 target_link_options(hramota_pdf PRIVATE -Wl,-z,relro,-z,now -Wl,-z,max-page-size=16384)
 target_link_libraries(hramota_pdf pdfium log)
+
+# eSpeak NG for the English voice's phonemes: built from source at a fixed release (see /espeak/VERSION), static
+set(ESPEAK_DIR ${CMAKE_SOURCE_DIR}/../../../../espeak)
+file(GLOB ESPEAK_LIBS ${ESPEAK_DIR}/lib/${ANDROID_ABI}/*.a)
+add_library(hramota_speech SHARED espeak_jni.c)
+target_include_directories(hramota_speech PRIVATE ${ESPEAK_DIR}/include)
+target_compile_options(hramota_speech PRIVATE -Wall -Wextra -Werror -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2)
+target_link_options(hramota_speech PRIVATE -Wl,-z,relro,-z,now -Wl,-z,max-page-size=16384)
+# (the libraries in a group: eSpeak's own parts refer to each other)
+target_link_libraries(hramota_speech -Wl,--start-group ${ESPEAK_LIBS} -Wl,--end-group log)

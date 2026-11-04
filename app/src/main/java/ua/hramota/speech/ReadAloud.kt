@@ -96,6 +96,8 @@ object ReadAloud {
     private val synth = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "voice") }.asCoroutineDispatcher()
     private var tetiana: TetianaVoice? = null
     private var tetianaFailed = false
+    private var english: EnglishVoice? = null
+    private var englishFailed = false
     private var phone: PhoneVoice? = null
     private var phoneFailed = false
 
@@ -289,6 +291,19 @@ object ReadAloud {
             // Hramota's voice is there but could not say this one: skipped, never handed to another voice
             if (opened) return sound
         }
+        if (lang == "en" && _state.value.voice != PHONE) {
+            var opened = false
+            val sound = voices.withLock {
+                if (english == null && !englishFailed) {
+                    _state.update { it.copy(preparing = true) }
+                    english = withContext(synth) { try { EnglishVoice.open(app) } catch (e: Exception) { null } catch (e: UnsatisfiedLinkError) { null } catch (e: OutOfMemoryError) { null } }
+                    if (english == null) englishFailed = true
+                }
+                opened = english != null
+                english?.let { v -> try { withContext(synth) { v.read(text, speed) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
+            }
+            if (opened) return sound
+        }
         val sound = voices.withLock {
             if (phone == null && !phoneFailed) {
                 phone = withContext(Dispatchers.Main) { withTimeoutOrNull(8000) { PhoneVoice.open(app) } }
@@ -310,7 +325,7 @@ object ReadAloud {
         main.launch(Dispatchers.Default) {
             voices.withLock {
                 if (_state.value.active) return@withLock
-                tetiana?.close(); tetiana = null; tetianaFailed = false; phone?.close(); phone = null; phoneFailed = false
+                tetiana?.close(); tetiana = null; tetianaFailed = false; english?.close(); english = null; englishFailed = false; phone?.close(); phone = null; phoneFailed = false
             }
         }
     }
