@@ -105,11 +105,14 @@ private fun CoverTitle(title: String, width: Dp, modifier: Modifier) {
     val density = LocalDensity.current
     val room = with(density) { (width - 24.dp).toPx() }
     val scale = density.fontScale
+    // Measured once per title and size, not again on each scroll (kept for the shelf's lifetime)
     val size = remember(title, room, scale) {
-        val word = title.split(' ', '-', '_', '/').maxByOrNull { it.length } ?: ""
-        var s = 17f
-        while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontFamily = Literata, fontWeight = FontWeight.Bold)).size.width > room) s -= 0.5f
-        s
+        fitted.get("$title|$room|$scale") ?: run {
+            val word = title.split(' ', '-', '_', '/').maxByOrNull { it.length } ?: ""
+            var s = 17f
+            while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontFamily = Literata, fontWeight = FontWeight.Bold)).size.width > room) s -= 0.5f
+            s.also { fitted.put("$title|$room|$scale", it) }
+        }
     }
     Text(
         title, color = CREAM, fontFamily = Literata, fontWeight = FontWeight.Bold, fontSize = size.sp, lineHeight = (size + 3).sp,
@@ -117,6 +120,9 @@ private fun CoverTitle(title: String, width: Dp, modifier: Modifier) {
         style = TextStyle(hyphens = Hyphens.None, lineBreak = LineBreak.Heading), modifier = modifier,
     )
 }
+
+/** Title sizes already worked out (title, room, font scale). */
+private val fitted = android.util.LruCache<String, Float>(1024)
 
 /** A row of motifs between two thin lines. */
 private fun DrawScope.ornamentRow(p: Pattern, at: Offset, width: Float, cell: Float, base: Color) {
@@ -212,7 +218,8 @@ fun CoverDialog(
     var own by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(current?.coverTitle?.takeIf { it !in titles } ?: "") }
     var ownChosen by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(own.isNotEmpty()) }
     var look by androidx.compose.runtime.saveable.rememberSaveable {
-        androidx.compose.runtime.mutableStateOf(current?.cover?.takeIf { it.isNotEmpty() } ?: if (bookPicture) "picture" else "drawn")
+        // A picture already chosen for a document with pages is its page
+        androidx.compose.runtime.mutableStateOf(when (current?.cover) { "picture" -> if (bookPicture) "picture" else if (page != null) "page" else "drawn"; "drawn" -> "drawn"; else -> if (bookPicture) "picture" else "drawn" })
     }
     var rename by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val title = (if (ownChosen) own else chosen).let { ua.hramota.data.Library.cleanTitle(it) }.take(ua.hramota.data.Library.MAX_COVER_TITLE)

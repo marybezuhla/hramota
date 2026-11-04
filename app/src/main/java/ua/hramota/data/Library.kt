@@ -340,8 +340,9 @@ class Library private constructor(private val context: Context) {
         const val MAX_COVER_TITLE = 120
         val COVERS = setOf("", "drawn", "picture")
         /** A title as written by a person or a file: no control or direction marks (they could disguise it). */
-        fun cleanTitle(s: String): String = s.filterNot { it.isISOControl() || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' }
-            .replace(Regex("\\s+"), " ").trim()
+        fun cleanTitle(s: String): String = s.filterNot { it.isISOControl() || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' ||
+            it in '\u200B'..'\u200D' || it == '\u2060' || it == '\uFEFF' }
+            .replace('\u00A0', ' ').replace('\u2028', ' ').replace('\u2029', ' ').replace(Regex("\\s+"), " ").trim()
         const val MAX_BOOKMARKS = 1000
         const val MAX_NOTES = 5000
         val ID = Regex("[0-9a-f]{32}")

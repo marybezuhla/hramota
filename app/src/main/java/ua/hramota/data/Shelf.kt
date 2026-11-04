@@ -103,15 +103,18 @@ object Shelf {
     } catch (e: Exception) { null }
 
     /** Saves a small picture (of the first page, or a book's own) as the document's cover: once, unless [replace]. */
-    fun saveCover(context: Context, id: String, bitmap: Bitmap, replace: Boolean = false) {
-        if (!replace && hasCover(context, id)) return
-        try {
+    fun saveCover(context: Context, id: String, bitmap: Bitmap, replace: Boolean = false): Boolean {
+        if (!replace && hasCover(context, id)) return false
+        return try {
             val w = 240
             val scaled = Bitmap.createScaledBitmap(bitmap, w, (w.toFloat() * bitmap.height / bitmap.width).toInt().coerceIn(1, 600), true)
             val png = java.io.ByteArrayOutputStream().also { scaled.compress(Bitmap.CompressFormat.PNG, 90, it) }.toByteArray()
             putCover(context, id, png)
-        } catch (_: Exception) {}
+        } catch (_: Exception) { false }
     }
+
+    /** Counts cover changes, so the shelf shows a new picture at once. */
+    val coversChanged = kotlinx.coroutines.flow.MutableStateFlow(0)
 
     /**
      * Puts [png] in place as the cover (sealed while the storage is locked), or removes the cover when null: written
@@ -122,13 +125,14 @@ object Shelf {
         val key = Vault.key()
         if (png != null && sealing && key == null) return false
         val plain = coverFile(context, id, false); val sealed = coverFile(context, id, true)
-        if (png == null) { plain.delete(); sealed.delete(); return true }
+        if (png == null) { plain.delete(); sealed.delete(); coversChanged.value++; return true }
         val f = if (sealing) sealed else plain
         val tmp = File(f.parentFile, f.name + ".new")
         return try {
             tmp.writeBytes(if (sealing) Sealed.seal(key!!, png, "$id.png") else png)
             if (!tmp.renameTo(f)) { tmp.delete(); return false }
             (if (sealing) plain else sealed).delete()
+            coversChanged.value++
             true
         } catch (_: Exception) { tmp.delete(); false }
     }

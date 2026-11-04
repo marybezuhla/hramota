@@ -404,4 +404,5 @@
     <string name="cover_renamed">The cover is changed, and the file is now called «%1$s».</string>
     <string name="cover_renamed_copy">The cover is changed, and the copy in Hramota is now called «%1$s».</string>
     <string name="cover_renamed_shelf">The cover is changed. The app the file came from does not allow renaming it, so «%1$s» is its name only on the shelf.</string>
+    <string name="cover_renamed_once">The cover is changed, and the file is now called «%1$s». Its app did not let Hramota keep access to it: to see it again in the recent list, open it once more from that app.</string>
 </resources>

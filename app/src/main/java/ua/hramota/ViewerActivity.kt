@@ -98,15 +98,20 @@ open class ViewerActivity : ComponentActivity() {
         // The document as Hramota knows it (by content), found before it is shown
         var docId by mutableStateOf<String?>(null)
         var startPosition by mutableIntStateOf(0)
+        // Where the reader is now (a page, or a paragraph while reading as text) and of how many
+        var shown: Pair<Int, Int>? = null
+        /** The page being read, when pages are shown (in reading view there is no page: the first is offered). */
+        fun shownPage(st: ViewerState): Int? {
+            val pages = (st as? ViewerState.Paged)?.pages ?: return null
+            val (at, total) = shown ?: (startPosition to pages.pageCount)
+            return if (total == pages.pageCount) at.coerceIn(0, (pages.pageCount - 1).coerceAtLeast(0)) else 0
+        }
         // Taking the copy out of Hramota deletes it: asked first
         var confirmDrop by mutableStateOf<String?>(null)
         // A PDF whose notes are being written into a file: into this one, or a copy
         var savingNotes by mutableStateOf<PdfiumPages?>(null)
         // "docx" or "xlsx": what a conversion carries over is said before the place is chosen
         var convertAsk by mutableStateOf<String?>(null)
-        // The cover dialog, and what the last cover change replaced (to undo it)
-        var coverAsk by mutableStateOf(false)
-        var coverDone by mutableStateOf<CoverUndo?>(null)
         // A DOCX being edited lives through turning the phone
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
 
@@ -279,7 +284,7 @@ open class ViewerActivity : ComponentActivity() {
                             dismissButton = { androidx.compose.material3.TextButton(onClick = { convertAsk = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
                         )
                     }
-                    if (coverAsk) docId?.let { id ->
+                    if (held.coverAsk) docId?.let { id ->
                         val st = state
                         val titles = androidx.compose.runtime.remember(st) {
                             ua.hramota.ui.coverTitles(
@@ -292,18 +297,18 @@ open class ViewerActivity : ComponentActivity() {
                         val book = (st as? ViewerState.Reader)?.book
                         ua.hramota.ui.CoverDialog(
                             fileName = library.get(id)?.title ?: name, format = format.label, titles = titles, current = library.get(id),
-                            page = if (st is ViewerState.Paged) (library.get(id)?.position ?: 0).coerceIn(0, (st.pages.pageCount - 1).coerceAtLeast(0)) else null,
+                            page = shownPage(st),
                             bookPicture = book != null && (book.cover != null || book.blocks.any { it is ua.hramota.doc.book.BookBlock.Image }),
-                            onApply = { choice -> coverAsk = false; applyCover(id, choice, st, uri, ownCopy, name, format) { coverDone = it } },
-                            onDismiss = { coverAsk = false },
+                            onApply = { choice -> held.coverAsk = false; applyCover(id, choice, st, uri, ownCopy, name, format, shownPage(st) ?: 0) },
+                            onDismiss = { held.coverAsk = false },
                         )
                     }
-                    coverDone?.let { done ->
+                    held.coverDone?.let { done ->
                         androidx.compose.material3.AlertDialog(
-                            onDismissRequest = { coverDone = null },
+                            onDismissRequest = { held.coverDone = null },
                             text = { androidx.compose.material3.Text(done.message) },
-                            confirmButton = { androidx.compose.material3.TextButton(onClick = { coverDone = null }) { androidx.compose.material3.Text(getString(R.string.ok)) } },
-                            dismissButton = { androidx.compose.material3.TextButton(onClick = { coverDone = null; undoCover(done) }) { androidx.compose.material3.Text(getString(R.string.edit_undo)) } },
+                            confirmButton = { androidx.compose.material3.TextButton(onClick = { held.coverDone = null }) { androidx.compose.material3.Text(getString(R.string.ok)) } },
+                            dismissButton = { androidx.compose.material3.TextButton(onClick = { held.coverDone = null; undoCover(done) }) { androidx.compose.material3.Text(getString(R.string.edit_undo)) } },
                         )
                     }
                     confirmDrop?.let { id ->
@@ -350,7 +355,7 @@ open class ViewerActivity : ComponentActivity() {
                             }
                         },
                         startPosition = startPosition,
-                        onPosition = { position, total -> docId?.let { id -> library.setPosition(id, position, total) } },
+                        onPosition = { position, total -> shown = position to total; docId?.let { id -> library.setPosition(id, position, total) } },
                         menu = docId?.let { id ->
                             val e = entries[id]
                             listOfNotNull<Pair<String, () -> Unit>>(
@@ -368,7 +373,7 @@ open class ViewerActivity : ComponentActivity() {
                                     getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
                                 },
                                 // The cover on the shelf: its title and look (and, if wanted, the file's name)
-                                if (state !is ViewerState.Loading && state !is ViewerState.Failed && state !is ViewerState.Password) getString(R.string.cover_menu) to { coverAsk = true; Unit } else null,
+                                if (state !is ViewerState.Loading && state !is ViewerState.Failed && state !is ViewerState.Password) getString(R.string.cover_menu) to { held.coverAsk = true; Unit } else null,
                                 // On the shelf = kept inside Hramota; taking it off keeps bookmarks and notes
                                 if (e?.copy == null) getString(R.string.shelf_save) to {
                                     if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
@@ -490,25 +495,23 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
 
-    /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
-    /** What a cover change replaced: the entry as it was, its picture, and the file's former place if renamed. */
-    class CoverUndo(val id: String, val before: LibraryEntry, val picture: ByteArray?, val pictureChanged: Boolean, val renamed: android.net.Uri?, val formerName: String?, val message: String)
+    /** What a cover change replaced: the entry as it was (null: there was none), its picture, and the file's former place if renamed. */
+    class CoverUndo(val id: String, val before: LibraryEntry?, val picture: ByteArray?, val pictureChanged: Boolean, val renamed: android.net.Uri?, val formerName: String?, val message: String)
 
-    private fun applyCover(id: String, choice: ua.hramota.ui.CoverChoice, state: ViewerState, uri: android.net.Uri, ownCopy: Boolean, name: String, format: Format, done: (CoverUndo) -> Unit) {
+    private fun applyCover(id: String, choice: ua.hramota.ui.CoverChoice, state: ViewerState, uri: android.net.Uri, ownCopy: Boolean, name: String, format: Format, page: Int) {
         val library = Library.get(applicationContext)
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         lifecycleScope.launch {
-            val now = System.currentTimeMillis()
-            library.update(id) { it ?: LibraryEntry(id, name, format.label, uri.toString(), openedAt = now) }
+            val existed = library.get(id)
+            library.update(id) { it ?: LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
             val before = library.get(id) ?: return@launch
-            // The picture: the page being read, or a book's own; kept as it was, to undo
+            // The picture: the page chosen, or a book's own; the one it replaces is kept, to undo
             var cover = choice.cover
             var old: ByteArray? = null
             var changed = false
-            val picture: android.graphics.Bitmap? = when {
-                cover == "picture-page" -> (state as? ViewerState.Paged)?.pages?.let { p ->
-                    p.render(before.position.coerceIn(0, (p.pageCount - 1).coerceAtLeast(0)), 480)?.asAndroidBitmap()
-                }
-                cover == "picture" -> (state as? ViewerState.Reader)?.book?.let { book ->
+            val picture: android.graphics.Bitmap? = when (cover) {
+                "picture-page" -> (state as? ViewerState.Paged)?.pages?.let { p -> p.render(page.coerceIn(0, (p.pageCount - 1).coerceAtLeast(0)), 480)?.asAndroidBitmap() }
+                "picture" -> (state as? ViewerState.Reader)?.book?.let { book ->
                     val bytes = book.cover?.let { book.images[it] } ?: book.blocks.firstNotNullOfOrNull { (it as? ua.hramota.doc.book.BookBlock.Image)?.key?.let(book.images::get) }
                     bytes?.let { b -> withContext(Dispatchers.Default) { ua.hramota.ui.decodeFitting(b, 480)?.asAndroidBitmap() } }
                 }
@@ -516,29 +519,57 @@ open class ViewerActivity : ComponentActivity() {
             }
             if (cover == "picture-page") cover = "picture"
             if (picture != null) withContext(Dispatchers.IO) {
-                old = ua.hramota.data.Shelf.loadCoverBytes(applicationContext, id)
-                ua.hramota.data.Shelf.saveCover(applicationContext, id, picture, replace = true)
-                changed = true
+                val had = ua.hramota.data.Shelf.hasCover(applicationContext, id)
+                old = if (had) ua.hramota.data.Shelf.loadCoverBytes(applicationContext, id) else null
+                // A cover that is there but cannot be read now (the storage locked) is never replaced: it could not be put back
+                if (!had || old != null) changed = ua.hramota.data.Shelf.saveCover(applicationContext, id, picture, replace = true)
             }
             library.update(id) { it?.copy(coverTitle = choice.title, cover = cover) }
             // The file's name: the copy in Hramota always; a file in another app only if that app allows it
-            var renamed: android.net.Uri? = null
-            var formerName: String? = null
             var message = getString(R.string.cover_done)
+            var renamed: android.net.Uri? = null
             if (choice.rename) {
-                val ext = before.title.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
-                val newName = fileNameOf(choice.title ?: before.title.substringBeforeLast('.', before.title)) + ext
-                formerName = before.title
-                val moved = if (ownCopy) null else withContext(Dispatchers.IO) {
-                    try {
-                        if (android.provider.DocumentsContract.isDocumentUri(this@ViewerActivity, uri)) android.provider.DocumentsContract.renameDocument(contentResolver, uri, newName) else null
-                    } catch (_: Exception) { null }
+                val ext = name.substringAfterLast('.', "").takeIf { it.isNotEmpty() && it.length <= 5 } ?: format.label.lowercase()
+                val newName = fileNameOf(choice.title ?: before.title.substringBeforeLast('.', before.title)) + "." + ext
+                if (ownCopy) {
+                    library.update(id) { it?.copy(title = newName) }
+                    message = getString(R.string.cover_renamed_copy, newName)
+                } else {
+                    renamed = withContext(Dispatchers.IO) { renameFile(uri, newName) }
+                    if (renamed != null) {
+                        // The name the file's app actually gave (it may add « (1)» when the name is taken)
+                        val given = Recents.displayName(this@ViewerActivity, renamed)
+                        val kept = moveAccess(uri, renamed, given)
+                        library.update(id) { it?.copy(title = given, uri = renamed.toString()) }
+                        message = getString(if (kept) R.string.cover_renamed else R.string.cover_renamed_once, given)
+                    } else message = getString(R.string.cover_renamed_shelf, choice.title ?: newName)
                 }
-                if (moved != null) { renamed = moved; library.update(id) { it?.copy(title = newName, uri = moved.toString()) }; message = getString(R.string.cover_renamed, newName) }
-                else { library.update(id) { it?.copy(title = newName) }; message = getString(if (ownCopy) R.string.cover_renamed_copy else R.string.cover_renamed_shelf, newName) }
             }
-            done(CoverUndo(id, before, old, changed, renamed, formerName, message))
+            held.coverDone = CoverUndo(id, existed, old, changed, renamed, if (renamed != null) name else null, message)
+            // The window goes on with the file at its new place (a save then goes into the renamed file)
+            if (renamed != null) reopenAt(renamed)
         }
+    }
+
+    /** Renames a file in another app, if that app allows it; its new address, or null. */
+    private fun renameFile(uri: android.net.Uri, newName: String): android.net.Uri? = try {
+        if (android.provider.DocumentsContract.isDocumentUri(this, uri)) android.provider.DocumentsContract.renameDocument(contentResolver, uri, newName) else null
+    } catch (_: Exception) { null }
+
+    /** Keeps lasting access to a renamed file and puts it in the recent list in place of the old address. */
+    private fun moveAccess(old: android.net.Uri, new: android.net.Uri, name: String): Boolean {
+        val kept = try {
+            contentResolver.takePersistableUriPermission(new, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION); true
+        } catch (_: SecurityException) { false }
+        val recents = Recents.get(applicationContext)
+        if (recents.files.value.any { it.uri == old.toString() }) { recents.remove(old.toString()); recents.add(new, name) }
+        return kept
+    }
+
+    /** This window again, showing the file at [uri] (after a rename). */
+    private fun reopenAt(uri: android.net.Uri) {
+        intent = android.content.Intent(intent).setData(uri)
+        recreate()
     }
 
     /** Puts everything back as it was before the cover change: the entry, the picture and the file's name. */
@@ -546,13 +577,17 @@ open class ViewerActivity : ComponentActivity() {
         val library = Library.get(applicationContext)
         lifecycleScope.launch {
             if (u.pictureChanged) withContext(Dispatchers.IO) { ua.hramota.data.Shelf.putCover(applicationContext, u.id, u.picture) }
-            val back = u.renamed?.let { r -> withContext(Dispatchers.IO) {
-                try { android.provider.DocumentsContract.renameDocument(contentResolver, r, u.formerName ?: return@withContext null) } catch (_: Exception) { null }
-            } }
-            library.update(u.id) { e -> e?.copy(title = u.before.title, uri = back?.toString() ?: if (u.renamed != null) e.uri else u.before.uri, coverTitle = u.before.coverTitle, cover = u.before.cover) }
+            val back = if (u.renamed != null && u.formerName != null) withContext(Dispatchers.IO) { renameFile(u.renamed, u.formerName) } else null
+            if (back != null) moveAccess(u.renamed!!, back, Recents.displayName(this@ViewerActivity, back))
+            library.update(u.id) { e ->
+                val was = u.before ?: return@update null
+                e?.copy(title = was.title, uri = back?.toString() ?: e.uri, coverTitle = was.coverTitle, cover = was.cover) ?: was
+            }
+            if (back != null) reopenAt(back)
         }
     }
 
+    /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
     private fun startEditing(uri: android.net.Uri, withComments: Boolean = false) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         held.withComments = withComments
@@ -886,6 +921,9 @@ open class ViewerActivity : ComponentActivity() {
     /** What is being edited, kept while the window is made again (the phone turned). */
     class EditHolder : androidx.lifecycle.ViewModel() {
         var pendingNotes: String? = null
+        /** The cover dialog, and what the last cover change replaced (to undo it): kept when the window is made again. */
+        var coverAsk by mutableStateOf(false)
+        var coverDone by mutableStateOf<CoverUndo?>(null)
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
         var sheet by mutableStateOf<ua.hramota.ui.SheetEditorState?>(null)
         var slides by mutableStateOf<ua.hramota.ui.SlideEditorState?>(null)
@@ -936,9 +974,15 @@ open class ViewerActivity : ComponentActivity() {
         fun viewerClass(context: android.content.Context): Class<out ViewerActivity> =
             if (ua.hramota.data.Settings.get(context).state.value.separateWindows) ViewerActivity::class.java else ViewerInlineActivity::class.java
 
-        /** A name that is only a code (a UUID or a long run of digits and letters), not words. */
         /** A name a file can carry anywhere: no path or reserved marks, not too long. */
-        fun fileNameOf(title: String): String = Library.cleanTitle(title).replace(Regex("[\\\\/:*?\"<>|]"), " ").replace(Regex("\\s+"), " ").trim().trim('.').take(100).ifEmpty { "document" }
+        fun fileNameOf(title: String): String {
+            val clean = Library.cleanTitle(title).replace(Regex("[\\\\/:*?\"<>|]"), " ").replace(Regex("\\s+"), " ").trim().trim('.')
+            // At most 100 characters, never cutting a character made of two halves (an emoji) in two
+            val end = if (clean.length > 100 && Character.isHighSurrogate(clean[99])) 99 else minOf(clean.length, 100)
+            return clean.substring(0, end).trim().ifEmpty { "document" }
+        }
+
+        /** A name that is only a code (a UUID or a long run of digits and letters), not words. */
 
         private val CODE_NAME = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F_-]{24,}")
 

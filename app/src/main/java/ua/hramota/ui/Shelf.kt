@@ -64,6 +64,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -247,7 +248,7 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
         items(entries, key = { it.id }) { e ->
             Column {
                 Book(e, onOpen, menu, Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp)), spine = true)
-                Text(e.title.substringBeforeLast('.', e.title), style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                Text(shownTitle(e), style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
                 Progress(e)
             }
         }
@@ -433,7 +434,7 @@ private fun ListShelf(entries: List<LibraryEntry>, color: Color, onOpen: (Librar
                     Box(Modifier.width(4.dp).height(64.dp).clip(RoundedCornerShape(2.dp)).background(color))
                     Box(Modifier.padding(start = 10.dp).width(46.dp)) { Cover(e, Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))) }
                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text(e.title.substringBeforeLast('.', e.title), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(shownTitle(e), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(e.format, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Progress(e)
                     }
@@ -473,7 +474,8 @@ internal fun usesPicture(e: LibraryEntry): Boolean = when (e.cover) {
 private fun Cover(e: LibraryEntry, modifier: Modifier, bound: Boolean = false) {
     val context = LocalContext.current
     val picture = usesPicture(e)
-    val cover by produceState<ImageBitmap?>(null, e.id, picture, e.cover) {
+    val changes by ua.hramota.data.Shelf.coversChanged.collectAsState()
+    val cover by produceState<ImageBitmap?>(null, e.id, picture, e.cover, changes) {
         value = if (!picture) null else withContext(Dispatchers.IO) {
             ua.hramota.data.Shelf.loadCover(context, e.id)?.asImageBitmap()
         }
