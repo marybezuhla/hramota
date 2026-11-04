@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import ua.hramota.R
 import ua.hramota.doc.CsvTable
 
@@ -95,7 +96,8 @@ private fun Cell(text: String, width: Dp, header: Boolean, grid: Color, hits: Li
     Text(
         // A match past the shown part is not drawn over the "…"
         highlighted(if (text.length > SHOWN) text.take(SHOWN) + "…" else text, hits?.map { if (it.end > offset + SHOWN) it.copy(end = offset + SHOWN) else it }, current?.let { if (it.end > offset + SHOWN) it.copy(end = offset + SHOWN) else it }, offset),
-        style = MaterialTheme.typography.bodyMedium,
+        // Table text keeps its compact size (the column widths are worked out for it)
+        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
         fontWeight = if (header) FontWeight.SemiBold else null,
         maxLines = if (header) 2 else 4,
         overflow = TextOverflow.Ellipsis,

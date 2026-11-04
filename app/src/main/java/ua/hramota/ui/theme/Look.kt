@@ -220,8 +220,19 @@ fun ThemeRow(themes: List<Theme>, chosen: Theme, onChoose: (Theme) -> Unit) {
                 val selected = theme == chosen
                 Column(Modifier.width(width).selectable(selected, role = Role.RadioButton) { onChoose(theme) }, horizontalAlignment = Alignment.CenterHorizontally) {
                     Sample(theme, selected)
+                    // A long name with a large font gets smaller rather than broken inside a word («Гуцульщина»)
+                    val name = themeName(theme)
+                    val base = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+                    val room = with(androidx.compose.ui.platform.LocalDensity.current) { width.toPx() }
+                    val fitted = remember(name, room, base) {
+                        val word = name.split(' ').maxByOrNull { it.length } ?: name
+                        var size = base.fontSize.value
+                        while (size > 11f && measurer.measure(word, base.copy(fontSize = size.sp)).size.width > room) size -= 0.5f
+                        size.sp
+                    }
                     Text(
-                        themeName(theme), style = MaterialTheme.typography.bodyMedium,
+                        name, style = MaterialTheme.typography.bodyMedium.copy(fontSize = fitted, lineHeight = fitted * 1.35f),
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 6.dp),
