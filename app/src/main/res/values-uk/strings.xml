@@ -134,7 +134,7 @@
     <string name="settings_version">Грамота %1$s</string>
     <string name="settings_privacy_statement">Грамота не має доступу до інтернету й не просить жодних дозволів. Вона бачить лише файли, які ви відкрили, і нічого не зберігає поза цим телефоном.</string>
     <string name="settings_licenses">Ліцензії</string>
-    <string name="licenses_text">Грамота — GNU GPL-3.0 або новіша, без жодних гарантій. Сирцевий код: github.com/Marybezu/hramota\n\nPDFium — BSD 3-Clause (Google, автори PDFium).\npdfium-binaries — MIT (Benoît Blanchon).\n\nШрифти Literata, Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX і Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.\n\nГолос «Тетяна» — robinhad/ukrainian-tts, MIT; записи голосу — ukrainian-tts-datasets, Apache 2.0.\nСловник наголосів — ukrainian-word-stress (lang-uk), MIT.\nONNX Runtime — MIT (Microsoft).</string>
+    <string name="licenses_text">Грамота — GNU GPL-3.0 або новіша, без жодних гарантій. Сирцевий код: github.com/Marybezu/hramota\n\nPDFium — BSD 3-Clause (Google, автори PDFium).\npdfium-binaries — MIT (Benoît Blanchon).\n\nШрифти Literata, Carlito, Caladea, Arimo, Tinos, Cousine — SIL Open Font License 1.1.\n\nAndroidX і Jetpack Compose — Apache 2.0.\nKotlin — Apache 2.0.\n\nГолос «Тетяна» — robinhad/ukrainian-tts, MIT; записи голосу — ukrainian-tts-datasets, Apache 2.0.\nСловник наголосів — ukrainian-word-stress (lang-uk), MIT.\nАнглійський голос «Cori» — Piper (rhasspy), записи LibriVox — суспільне надбання.\neSpeak NG — GPL-3.0 або новіша.\nONNX Runtime — MIT (Microsoft).</string>
     <string name="pages_cut">не всі сторінки: забракло пам\'яті</string>
     <string name="slide_n">Слайд %1$d</string>
     <string name="settings_docx_open_hint">Сторінки, як на папері, з розташуванням оригіналу. Текст суцільний, під ширину екрана, зручніше читати на телефоні. Перемкнути можна будь-коли в самому документі.</string>
@@ -381,7 +381,7 @@
     <string name="read_settings">Голос і налаштування</string>
     <string name="read_voice">Голос</string>
     <string name="read_voice_hramota">Голос Грамоти</string>
-    <string name="read_voice_hramota_hint">Український жіночий голос, працює без інтернету. Англійську та інші мови читає голос телефона.</string>
+    <string name="read_voice_hramota_hint">Українська й англійська — жіночі голоси Грамоти, без інтернету. Інші мови читає голос телефона.</string>
     <string name="read_voice_phone">Голос телефона</string>
     <string name="read_voice_phone_hint">Як налаштовано в Android; для будь-якої мови, яку знає телефон.</string>
     <string name="read_speed">Швидкість · %1$s×</string>

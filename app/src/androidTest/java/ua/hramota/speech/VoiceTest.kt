@@ -36,4 +36,21 @@ class VoiceTest {
             assertTrue("loudness", sound.samples.map { abs(it) }.average() > 0.01)
         } finally { voice.close() }
     }
+
+    @Test fun coriReadsEnglish() = runBlocking {
+        val voice = EnglishVoice.open(context)
+        try {
+            // eSpeak NG gives the phonemes the voice was trained on
+            val ph = voice.phonemes("The path turned towards the stream.")
+            assertTrue(ph, ph.contains("pˈɑːθ") && ph.endsWith("."))
+            val t0 = System.nanoTime()
+            val sound = voice.read("In the evening, mist rose from the valley, and mother lit the lamp.", 1f)
+            val took = (System.nanoTime() - t0) / 1e9
+            assertNotNull(sound)
+            val seconds = sound!!.samples.size / sound.rate.toDouble()
+            Log.i("HramotaVoice", "English sentence %.1f s of sound in %.2f s (RTF %.2f)".format(seconds, took, took / seconds))
+            assertTrue("length $seconds", seconds in 2.0..12.0)
+            assertTrue("loudness", sound.samples.map { abs(it) }.average() > 0.01)
+        } finally { voice.close() }
+    }
 }
