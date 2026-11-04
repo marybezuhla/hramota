@@ -1,0 +1,110 @@
+[
+ {
+  "voice": "en_GB-cori-high",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 114.2,
+  "quality": "high",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "en_GB-cori-medium",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 63.5,
+  "quality": "medium",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "en_US-kristin-medium",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 63.5,
+  "quality": "medium",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "en_US-ljspeech-high",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 114.2,
+  "quality": "high",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "en_US-ljspeech-medium",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 63.5,
+  "quality": "medium",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "uk_UA-lada-x_low",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 20.6,
+  "quality": "x_low",
+  "sample_rate": 16000,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "uk_UA-mykyta-high",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 114.2,
+  "quality": "high",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "uk_UA-oleksa-high",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 114.2,
+  "quality": "high",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "uk_UA-tetiana-high",
+  "speakers": [
+   ""
+  ],
+  "onnx_mb": 114.2,
+  "quality": "high",
+  "sample_rate": 22050,
+  "phoneme_type": "espeak"
+ },
+ {
+  "voice": "uk_UA-ukrainian_tts-medium",
+  "speakers": [
+   "lada",
+   "mykyta",
+   "tetiana"
+  ],
+  "onnx_mb": 76.7,
+  "quality": "medium",
+  "sample_rate": 22050,
+  "phoneme_type": "text"
+ }
+]
+uk_UA-tetiana-high int8 MB 38.1
+uk_UA-ukrainian_tts-medium int8 MB 22.1
+en_GB-cori-medium int8 MB 19.3
+en_US-kristin-medium int8 MB 19.3
+uk_UA-ukrainian_tts-medium phonemes:  !$',-.:;?^_́̆̈абвгдежзийклмнопрстуфхцчшщьюяєіїґ— espeak voice: {'voice': 'uk'}
+uk_UA-tetiana-high phonemes:  !"#$'(),-.0123456789:;?^_abcdefhijklmnopqrstuvwxyzæçðøħŋœǀǁǂǃɐɑɒɓɔɕɖɗɘəɚɛɜɞɟɠɡɢɣɤɥɦɧɨɪɫɬɭɮɯɰɱɲɳɴɵɶɸɹɺɻɽɾʀʁʂʃʄʈʉʊʋʌʍʎʏʐʑʒʔʕʘʙʛʜʝʟʡʢʰʲˈˌːˑ˞ˤ̧̩̪̯̺̻̃βεθχᵻ↑↓ⱱ espeak voice: {'voice': 'uk'}

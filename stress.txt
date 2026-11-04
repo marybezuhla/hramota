@@ -1,0 +1,17 @@
+eSpeak NG text-to-speech: 1.52.0  Data at: /usr/lib/x86_64-linux-gnu/espeak-ng-data
+замок     zamˈok
+за́мок   zamˈok
+замо́к   zamˈok
+дорога   dorˈoha
+доро́га dorˈoha
+до́рога dorˈoha
+кілометрів kiːlomˈɛt̪riːβ
+кіломе́трів kiːlomˈɛt̪riːβ
+черговий tʃɛrhˈoβɪj
+чергови́й tʃɛrhˈoβɪj
+черго́вий tʃɛrhˈoβɪj
+листопада lɪst̪ˈopada
+листопа́да lɪst̪ˈopada
+--- sentence
+mˈɪ prˈojʃlɪ tʃot̪ɪrnˈattsjat kiːlomˈɛt̪riːβ dorˈohoju dˈo zˈamku
+mˈɪ prˈojʃlɪ tʃot̪ɪrnˈattsjat kiːlomˈɛt̪riːβ dorˈohoju dˈo zˈamku
