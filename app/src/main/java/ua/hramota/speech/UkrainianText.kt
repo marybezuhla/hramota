@@ -62,6 +62,32 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         put("понад", listOf(T.ACC, T.INS)); put("завдяки", listOf(T.DAT)); put("всупереч", listOf(T.DAT)); put("назустріч", listOf(T.DAT))
     }
 
+    // «один» before a noun takes the noun's gender: «одна книга», «одне місто» (told by the noun's ending, as the
+    // dictionary has no genders; masculine nouns in -о/-а are listed)
+    private val MASCULINE_O_A = setOf("батько", "дядько", "тато", "дідо", "петро", "дмитро", "павло", "суддя", "староста", "воєвода", "слуга", "голова", "колега", "сирота", "бідолаха", "владика")
+    private val NEUTER_YA = listOf("ння", "ття", "ддя", "ззя", "лля", "сся", "ччя", "жжя", "шшя", "'я", "цтво", "ство")
+    private val ONE_BEFORE = Regex("""(?<![\p{L}'])(один)(\s+)([\p{L}']{3,})""", RegexOption.IGNORE_CASE)
+
+    private fun agree(text: String): String = ONE_BEFORE.replace(text) { m ->
+        val noun = m.groupValues[3].lowercase()
+        val one = m.groupValues[1]
+        val form = when {
+            noun in MASCULINE_O_A -> null
+            NEUTER_YA.any { noun.endsWith(it) } || noun.endsWith("о") || noun.endsWith("е") -> "одне"
+            noun.endsWith("а") || noun.endsWith("я") -> "одна"
+            else -> null
+        } ?: return@replace m.value
+        // (only before a word the dictionary knows as a noun-like word: «один з них» stays)
+        if (dictionary != null && dictionary.lookup(noun).isEmpty()) return@replace m.value
+        (if (one[0].isUpperCase()) form.replaceFirstChar { it.uppercase() } else form) + m.groupValues[2] + m.groupValues[3]
+    }
+
+    /** Words whose stress depends on the next one: «черго́вий лікар» (next in turn, on duty for the owner), «чергови́й» alone (the one on duty). */
+    private fun byContext(lower: String, next: String?): String? = when (lower) {
+        "черговий" -> if (next != null && next.length > 2 && !next.endsWith("в") && !next.endsWith("ла") && !next.endsWith("ли") && !next.endsWith("ло")) "черг+овий" else "чергов+ий"
+        else -> null
+    }
+
     /** Words where the dictionary has one stress but the usual reading is another (heard and corrected). */
     private val CORRECTIONS = mapOf<String, String>()
 
@@ -82,6 +108,7 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         for ((r, w) in ABBREVIATIONS) t = r.replace(t, w)
         t = Regex("""\b\p{Lu}{2,6}\b""").replace(t) { m -> if (m.value in SPELLED) spell(m.value) else m.value }
         t = UkrainianNumbers.expand(t)
+        t = agree(t)
         t = t.replace('’', '\'').replace('ʼ', '\'').replace('`', '\'').replace('‘', '\'')
         val words = WORD.findAll(t).toList()
         val sb = StringBuilder()
@@ -106,6 +133,7 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         val vowels = lower.count { it in VOWELS }
         if (vowels == 0) return word
         CORRECTIONS[lower]?.let { return keepCase(word, it) }
+        byContext(lower, next)?.let { return keepCase(word, it) }
         // One vowel: marked too, as the voice was trained («д+о», «м+и»)
         if (vowels == 1) return mark(word, intArrayOf(lower.indexOfFirst { it in VOWELS } + 1))
         val options = dictionary?.lookup(lower).orEmpty()

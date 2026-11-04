@@ -106,6 +106,18 @@ class SpeechTest {
         assertEquals(text.prepare("бібліотеки"), text.prepare("біблі\u00ADотеки"))
     }
 
+    @Test fun numbersAgreeWithNouns() {
+        fun said(t: String) = text.prepare(t).replace("+", "")
+        assertTrue(said("1 книга"), said("1 книга").startsWith("одна книга"))
+        assertTrue(said("21 дитина"), said("21 дитина").startsWith("двадцять одна дитина"))
+        assertTrue(said("1 місто"), said("1 місто").startsWith("одне місто"))
+        assertTrue(said("1 стіл"), said("1 стіл").startsWith("один стіл"))
+        assertTrue(said("1 батько"), said("1 батько").startsWith("один батько"))
+        // «черговий»: before a noun, as the owner hears it; on its own, the one on duty
+        assertTrue(text.prepare("Черговий лікар прийшов.").contains("Черг+овий"))
+        assertTrue(text.prepare("Покликали, і черговий прийшов.").contains("чергов+ий"))
+    }
+
     @Test fun dialogueAndListsStayTogether() {
         fun cut(t: String) = Sentences.split(t).map { t.substring(it.start, it.end) }
         assertEquals(1, cut("— Ти прийдеш? — спитала мама.").size)
