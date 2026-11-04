@@ -152,15 +152,21 @@ class EnglishVoice private constructor(
 ) : Voice {
     /** The phonemes of a sentence, clause by clause, with its commas and stops (the voice pauses and rises on them). */
     fun phonemes(text: String): String {
+        // Control characters out: eSpeak takes some of them for commands that change how it reads from then on
+        val clean = text.filter { it == ' ' || !(it.isISOControl() || it == '\u007f') }.replace('’', '\'').replace('“', '"').replace('”', '"')
         val out = StringBuilder()
-        for (m in CLAUSE.findAll(text.replace('’', '\'').replace('“', '"').replace('”', '"'))) {
-            val words = m.groupValues[1].trim()
+        // A clause ends at a mark followed by a space (or the end): «3.5», «1,000», «e.g.» stay whole
+        for (chunk in clean.split(CLAUSE_END)) {
+            val c = chunk.trim()
+            if (c.isEmpty()) continue
+            val mark = c.takeLastWhile { it in MARKS }
+            val words = c.dropLast(mark.length).trim()
             if (words.isEmpty()) continue
             val ph = Espeak.phonemes(words, espeakVoice)?.trim().orEmpty()
             if (ph.isEmpty()) continue
             if (out.isNotEmpty()) out.append(' ')
             out.append(ph)
-            out.append(when (m.groupValues[2].firstOrNull()) { ',', ';', ':', '—', '–' -> ","; '?' -> "?"; '!' -> "!"; '.', '…' -> "."; else -> "" })
+            out.append(when (mark.firstOrNull()) { ',', ';', ':', '—', '–' -> ","; '?' -> "?"; '!' -> "!"; '.', '…' -> "."; else -> "" })
         }
         return out.toString()
     }
@@ -207,8 +213,9 @@ class EnglishVoice private constructor(
 
     companion object {
         const val MODEL = "voice/en-cori.onnx"
-        /** A clause and the mark that ends it. */
-        private val CLAUSE = Regex("""([^,;:.!?…—–]+)([,;:.!?…—–]*)""")
+        private const val MARKS = ",;:.!?…—–"
+        /** Where a clause ends: after a mark and a space, or at a dash between spaces. */
+        private val CLAUSE_END = Regex("""(?<=[,;:.!?…])\s+|\s+[—–]\s+""")
 
         fun open(context: Context): EnglishVoice {
             if (!Espeak.start(context)) throw IllegalStateException("espeak")

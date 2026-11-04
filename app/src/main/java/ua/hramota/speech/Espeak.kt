@@ -17,12 +17,15 @@ internal object Espeak {
         if (started) return true
         System.loadLibrary("hramota_speech")
         val root = File(context.filesDir, "espeak")
-        val data = File(root, "espeak-ng-data")
         val mark = File(root, "version")
         if (!mark.exists() || mark.readText() != VERSION) {
+            // Copied beside, written to the disk, then put in place whole: a copy cut short is never used
+            val fresh = File(context.filesDir, "espeak.new")
+            fresh.deleteRecursively()
+            copy(context, DATA, File(fresh, "espeak-ng-data"))
+            java.io.FileOutputStream(File(fresh, "version")).use { it.write(VERSION.toByteArray()); it.fd.sync() }
             root.deleteRecursively()
-            copy(context, DATA, data)
-            mark.writeText(VERSION)
+            if (!fresh.renameTo(root)) return false
         }
         started = nativeInit(root.absolutePath) > 0
         return started
@@ -32,7 +35,7 @@ internal object Espeak {
         val names = context.assets.list(from).orEmpty()
         if (names.isEmpty()) {
             to.parentFile?.mkdirs()
-            context.assets.open(from).use { i -> to.outputStream().use { i.copyTo(it) } }
+            context.assets.open(from).use { i -> java.io.FileOutputStream(to).use { o -> i.copyTo(o); o.fd.sync() } }
             return
         }
         to.mkdirs()

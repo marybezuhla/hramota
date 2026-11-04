@@ -19,6 +19,7 @@ val voiceParts = layout.projectDirectory.dir("src/main/voice")
 val joinedVoice = layout.buildDirectory.dir("generated/voice")
 val joinVoice by tasks.registering {
     inputs.dir(voiceParts)
+    inputs.file(layout.projectDirectory.file("src/main/assets/voice/en-cori.onnx"))
     outputs.dir(joinedVoice)
     doLast {
         val dir = voiceParts.asFile
@@ -31,6 +32,10 @@ val joinVoice by tasks.registering {
         val got = md.digest().joinToString("") { b -> "%02x".format(b) }
         val want = File(dir, "uk-tetiana.onnx.sha256").readText().trim()
         check(got == want) { "voice model sum $got, expected $want" }
+        // The English voice, as it came from piper-voices (en_GB-cori-medium)
+        val cori = layout.projectDirectory.file("src/main/assets/voice/en-cori.onnx").asFile
+        val coriSum = MessageDigest.getInstance("SHA-256").let { d -> cori.inputStream().use { i -> val b = ByteArray(1 shl 20); while (true) { val n = i.read(b); if (n < 0) break; d.update(b, 0, n) } }; d.digest().joinToString("") { b -> "%02x".format(b) } }
+        check(coriSum == "1899f98e5fb8310154f3c2973f4b8a929ba7245e722b3d3a85680b833d95f10d") { "English voice sum $coriSum" }
     }
 }
 tasks.named("preBuild") { dependsOn(joinVoice) }

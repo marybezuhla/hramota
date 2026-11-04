@@ -79,6 +79,8 @@ jobs:
           curl -fsSL -o out/en-cori.onnx "$B/en_GB-cori-medium.onnx"
           curl -fsSL -o out/en-cori.onnx.json "$B/en_GB-cori-medium.onnx.json"
           curl -fsSL -o out/MODEL_CARD-cori.txt "$B/MODEL_CARD"
+          # The model the app was checked with: a changed file upstream stops here
+          echo "1899f98e5fb8310154f3c2973f4b8a929ba7245e722b3d3a85680b833d95f10d  out/en-cori.onnx" | sha256sum -c -
           (cd out && find lib data -type f -exec sha256sum {} \; && sha256sum en-cori.onnx en-cori.onnx.json) > out/SHA256SUMS
           cat out/SHA256SUMS; grep -o '"espeak"[^}]*}' out/en-cori.onnx.json || true
       - name: Push for review

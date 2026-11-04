@@ -6,6 +6,8 @@
 #include <espeak-ng/speak_lib.h>
 
 static int ready = 0;
+// The voice set last: set again only when another is asked for (setting one reloads its dictionary)
+static char current[64] = "";
 
 JNIEXPORT jint JNICALL Java_ua_hramota_speech_Espeak_nativeInit(JNIEnv *env, jclass cls, jstring path) {
     (void) cls;
@@ -23,9 +25,13 @@ JNIEXPORT jstring JNICALL Java_ua_hramota_speech_Espeak_nativePhonemes(JNIEnv *e
     if (!ready) return NULL;
     const char *v = (*env)->GetStringUTFChars(env, voice, NULL);
     if (v == NULL) return NULL;
-    espeak_ERROR set = espeak_SetVoiceByName(v);
+    if (strncmp(current, v, sizeof(current)) != 0) {
+        espeak_ERROR set = espeak_SetVoiceByName(v);
+        if (set != EE_OK) { (*env)->ReleaseStringUTFChars(env, voice, v); current[0] = 0; return NULL; }
+        strncpy(current, v, sizeof(current) - 1);
+        current[sizeof(current) - 1] = 0;
+    }
     (*env)->ReleaseStringUTFChars(env, voice, v);
-    if (set != EE_OK) return NULL;
     const char *t = (*env)->GetStringUTFChars(env, text, NULL);
     if (t == NULL) return NULL;
     size_t cap = 256, len = 0;

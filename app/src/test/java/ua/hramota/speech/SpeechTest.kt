@@ -113,6 +113,10 @@ class SpeechTest {
         assertTrue(said("1 місто"), said("1 місто").startsWith("одне місто"))
         assertTrue(said("1 стіл"), said("1 стіл").startsWith("один стіл"))
         assertTrue(said("1 батько"), said("1 батько").startsWith("один батько"))
+        assertTrue(said("1 стаття"), said("1 стаття").startsWith("одна стаття"))
+        assertTrue(said("1 Микола"), said("1 Микола").startsWith("один Микола"))
+        assertTrue(said("один одного"), said("один одного").startsWith("один одного"))
+        assertTrue(said("Один удома"), said("Один удома").startsWith("Один удома"))
         // «черговий»: before a noun, as the owner hears it; on its own, the one on duty
         assertTrue(text.prepare("Черговий лікар прийшов.").contains("Черг+овий"))
         assertTrue(text.prepare("Покликали, і черговий прийшов.").contains("чергов+ий"))

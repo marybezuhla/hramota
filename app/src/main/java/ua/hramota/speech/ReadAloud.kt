@@ -286,7 +286,7 @@ object ReadAloud {
                 }
                 opened = tetiana != null
                 // The model runs under the lock: it is never closed while a sentence is being made
-                tetiana?.let { v -> try { withContext(synth) { v.read(text, speed) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
+                tetiana?.let { v -> try { withContext(synth) { v.read(text, speed) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null } }
             }
             // Hramota's voice is there but could not say this one: skipped, never handed to another voice
             if (opened) return sound
@@ -300,7 +300,7 @@ object ReadAloud {
                     if (english == null) englishFailed = true
                 }
                 opened = english != null
-                english?.let { v -> try { withContext(synth) { v.read(text, speed) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null } }
+                english?.let { v -> try { withContext(synth) { v.read(text, speed) } } catch (e: CancellationException) { throw e } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null } }
             }
             if (opened) return sound
         }

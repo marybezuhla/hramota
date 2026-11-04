@@ -64,12 +64,17 @@ class UkrainianText(private val dictionary: StressDictionary?) {
 
     // «один» before a noun takes the noun's gender: «одна книга», «одне місто» (told by the noun's ending, as the
     // dictionary has no genders; masculine nouns in -о/-а are listed)
-    private val MASCULINE_O_A = setOf("батько", "дядько", "тато", "дідо", "петро", "дмитро", "павло", "суддя", "староста", "воєвода", "слуга", "голова", "колега", "сирота", "бідолаха", "владика")
+    private val MASCULINE_O_A = setOf("батько", "дядько", "тато", "дідо", "петро", "дмитро", "павло", "суддя", "староста", "воєвода", "слуга", "голова", "колега", "сирота", "бідолаха", "владика",
+        "микола", "лука", "кузьма", "микита", "михайло", "данило", "марко", "дніпро", "ілля", "хома", "фома", "сава", "яким")
+    // Feminine although they end like neuter words: «одна стаття»
+    private val FEMININE_YA = setOf("стаття", "сім'я", "рілля", "кутя", "попадя")
     private val NEUTER_YA = listOf("ння", "ття", "ддя", "ззя", "лля", "сся", "ччя", "жжя", "шшя", "'я", "цтво", "ство")
     // Counting words: «один два три» (a phone number read out) is not «одна два»
     private val NUMERALS = setOf("нуль", "два", "дві", "три", "чотири", "п'ять", "шість", "сім", "вісім", "дев'ять", "десять", "сто", "двісті", "тисяча",
         "тисячі", "тисяч", "мільйон", "мільйона", "мільйонів", "кома", "плюс", "мінус", "двадцять", "тридцять", "сорок", "п'ятдесят", "шістдесят",
         "сімдесят", "вісімдесят", "дев'яносто", "триста", "чотириста", "п'ятсот", "шістсот", "сімсот", "вісімсот", "дев'ятсот")
+    private val KEEP = '\uE000'
+    private val WORD_ONE = Regex("""(?<![\p{L}'])один(?![\p{L}'])""", RegexOption.IGNORE_CASE)
     private val ONE_BEFORE = Regex("""(?<![\p{L}'])(один)(\s+)([\p{L}']{3,})""", RegexOption.IGNORE_CASE)
 
     private fun agree(text: String): String = ONE_BEFORE.replace(text) { m ->
@@ -77,6 +82,7 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         val one = m.groupValues[1]
         val form = when {
             noun in MASCULINE_O_A || noun in NUMERALS -> null
+            noun in FEMININE_YA -> "одна"
             NEUTER_YA.any { noun.endsWith(it) } || noun.endsWith("о") || noun.endsWith("е") -> "одне"
             noun.endsWith("а") || noun.endsWith("я") -> "одна"
             else -> null
@@ -111,8 +117,10 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         }
         for ((r, w) in ABBREVIATIONS) t = r.replace(t, w)
         t = Regex("""\b\p{Lu}{2,6}\b""").replace(t) { m -> if (m.value in SPELLED) spell(m.value) else m.value }
+        // «один» written as a word stays as written («один одного», «один удома»): only a number agrees with its noun
+        t = WORD_ONE.replace(t) { it.value.dropLast(1) + KEEP + it.value.last() }
         t = UkrainianNumbers.expand(t)
-        t = agree(t)
+        t = agree(t).replace(KEEP.toString(), "")
         t = t.replace('’', '\'').replace('ʼ', '\'').replace('`', '\'').replace('‘', '\'')
         val words = WORD.findAll(t).toList()
         val sb = StringBuilder()
