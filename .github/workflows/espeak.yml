@@ -1,0 +1,90 @@
+name: Prepare eSpeak NG
+
+# Run by pushing the espeak-prepare branch. Builds eSpeak NG 1.52.0 (GPL-3.0-or-later) from its source, at a fixed
+# commit, for the English reading voice: a static library for Android (arm64-v8a, and x86_64 for the emulator tests)
+# with its headers, and the English language data compiled by the same version on the build machine. Pushed to the
+# espeak branch for review; copied into /espeak by hand (like PDFium). Also fetches the English voice (Cori, Piper,
+# public-domain recordings) and its model card, checked by SHA-256 once reviewed.
+on:
+  push:
+    branches: [espeak-prepare]
+
+permissions:
+  contents: read
+
+env:
+  TAG: 1.52.0
+  COMMIT: 4870adfa25b1a32b4361592f1be8a40337c58d6c
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - name: Source at the fixed commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --branch "$TAG" --depth 1 https://github.com/espeak-ng/espeak-ng.git src
+          test "$(git -C src rev-parse HEAD)" = "$COMMIT" || { echo "::error::tag $TAG is not $COMMIT"; exit 1; }
+      - name: Build on the build machine (for the language data)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -q cmake ninja-build >/dev/null
+          cmake -S src -B host -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_ASYNC=OFF -DUSE_MBROLA=OFF -DUSE_LIBSONIC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_KLATT=OFF -DUSE_SPEECHPLAYER=OFF -DCOMPILE_INTONATIONS=ON
+          cmake --build host
+          ls host; find host -maxdepth 2 -name 'espeak-ng-data' -type d
+      - name: Build for Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_NDK_LATEST_HOME"
+          for abi in arm64-v8a x86_64; do
+            cmake -S src -B "android-$abi" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=$abi -DANDROID_PLATFORM=android-31 \
+              -DBUILD_SHARED_LIBS=OFF -DUSE_ASYNC=OFF -DUSE_MBROLA=OFF -DUSE_LIBSONIC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_KLATT=OFF -DUSE_SPEECHPLAYER=OFF \
+              -DESPEAKNG_BUILD_TESTS=OFF -DCMAKE_C_FLAGS="-fPIC -ffile-prefix-map=$PWD=." -DCMAKE_CXX_FLAGS="-fPIC -ffile-prefix-map=$PWD=."
+            cmake --build "android-$abi" --target espeak-ng
+            find "android-$abi" -name '*.a'
+          done
+      - name: Collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/include out/data
+          for abi in arm64-v8a x86_64; do
+            mkdir -p "out/lib/$abi"
+            find "android-$abi" -name '*.a' -exec cp {} "out/lib/$abi/" \;
+          done
+          cp -R src/src/include/espeak-ng out/include/
+          cp src/src/include/espeak/speak_lib.h out/include/ 2>/dev/null || true
+          D=$(find host -maxdepth 3 -name 'espeak-ng-data' -type d | head -1)
+          # English only: the phoneme tables, intonation, the English dictionary and language file
+          cp "$D"/phontab "$D"/phonindex "$D"/phondata "$D"/intonations out/data/
+          cp "$D"/en_dict out/data/
+          mkdir -p out/data/lang/gmw && cp "$D"/lang/gmw/en* out/data/lang/gmw/ 2>/dev/null || cp -R "$D"/lang out/data/
+          cp src/COPYING out/LICENSE-espeak-ng
+          echo "$TAG $COMMIT" > out/VERSION
+          # Check: the build machine's eSpeak says what the voice was trained on
+          LD_LIBRARY_PATH=host/src host/src/espeak-ng --path="$D/.." -q -v en-gb-x-rp --ipa "The path turned towards the stream." | tee out/check.txt || true
+          ls -laR out | head -60
+      - name: The English voice (Cori)
+        shell: bash
+        run: |
+          set -euo pipefail
+          B=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/cori/medium
+          curl -fsSL -o out/en-cori.onnx "$B/en_GB-cori-medium.onnx"
+          curl -fsSL -o out/en-cori.onnx.json "$B/en_GB-cori-medium.onnx.json"
+          curl -fsSL -o out/MODEL_CARD-cori.txt "$B/MODEL_CARD"
+          (cd out && find lib data -type f -exec sha256sum {} \; && sha256sum en-cori.onnx en-cori.onnx.json) > out/SHA256SUMS
+          cat out/SHA256SUMS; grep -o '"espeak":[^}]*}' out/en-cori.onnx.json
+      - name: Push for review
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git init -q && git checkout -q -b espeak && git add . && git -c user.name=ci -c user.email=ci@localhost commit -qm "eSpeak NG $TAG, Cori"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}" espeak
