@@ -182,6 +182,16 @@ fun SettingsScreen(
             Row(Modifier.fillMaxWidth().clickable { licenses = true }.padding(horizontal = 20.dp, vertical = 14.dp)) {
                 Text(stringResource(R.string.settings_licenses), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
             }
+            // The author's letter and how to support Ukraine, as in the author's other apps
+            val context = androidx.compose.ui.platform.LocalContext.current
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                AuthorLetter()
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 24.dp))
+                SupportUkraine(open = { url ->
+                    // In the browser; a phone without one simply opens nothing
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+                })
+            }
         }
     }
     if (licenses) AlertDialog(
