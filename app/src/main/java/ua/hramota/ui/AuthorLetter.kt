@@ -30,7 +30,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -74,7 +73,7 @@ fun AuthorLetter(modifier: Modifier = Modifier) {
                 Text(stringResource(p), style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface,
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
-            Text(stringResource(ua.hramota.R.string.about_letter_signature), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic,
+            Text(stringResource(ua.hramota.R.string.about_letter_signature), style = MaterialTheme.typography.bodyLarge,
                 color = scheme.primary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             Image(
                 painterResource(ua.hramota.R.drawable.author_photo),
