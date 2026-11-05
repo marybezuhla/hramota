@@ -168,7 +168,7 @@ class ScreensTest {
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun homeEnglish() = shot("02-home-en") { home(recentsEn) }
     // The colours of pysanky: each day scheme by day, each night scheme at night
-    @Test fun homeKreyda() = shot("02-home-kreyda", day = "kreyda") { home(recentsUk) }
+    @Test fun homeLinen() = shot("02-home-linen", day = "linen") { home(recentsUk) }
     @Test fun homeVisk() = shot("02-home-visk", day = "visk") { home(recentsUk) }
     @Test fun homeNebo() = shot("02-home-nebo", day = "nebo") { home(recentsUk) }
     @Test fun homeGlyna() = shot("02-home-glyna", day = "glyna") { home(recentsUk) }
@@ -179,13 +179,13 @@ class ScreensTest {
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun settingsLookEnglish() = shot("09-settings-look-en") { SettingsScreen(AppSettings(dayScheme = "nebo", nightScheme = "zoriana_nich"), "0.10.0", onChange = {}, onClearRecent = {}, onBack = {}) }
     @Config(qualifiers = "+night")
-    @Test fun homePodillia() = shot("02-home-podillia", night = "podillia") { home(recentsUk) }
+    @Test fun homeMak() = shot("02-home-mak", night = "mak") { home(recentsUk) }
     @Config(qualifiers = "+night")
-    @Test fun homeHutsulshchyna() = shot("02-home-hutsulshchyna", night = "hutsulshchyna") { home(recentsUk) }
+    @Test fun homeSmereka() = shot("02-home-smereka", night = "smereka") { home(recentsUk) }
     @Config(qualifiers = "+night")
     @Test fun homeChornozem() = shot("02-home-chornozem", night = "chornozem") { home(recentsUk) }
     @Config(qualifiers = "+night")
-    @Test fun settingsHutsulshchyna() = shot("09-settings-hutsulshchyna", night = "hutsulshchyna") { SettingsScreen(AppSettings(nightScheme = "hutsulshchyna"), "0.4.0", onChange = {}, onClearRecent = {}, onBack = {}) }
+    @Test fun settingsSmereka() = shot("09-settings-smereka", night = "smereka") { SettingsScreen(AppSettings(nightScheme = "smereka"), "0.4.0", onChange = {}, onClearRecent = {}, onBack = {}) }
 
     @Test fun viewerText() = shot("04-viewer-reading") { ViewerScreen("Протокол зустрічі.docx", ViewerState.Text(document, Format.DOCX), onBack = {}) }
     @Config(qualifiers = "+night")

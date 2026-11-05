@@ -160,15 +160,15 @@ fun Ornament(modifier: Modifier = Modifier) {
 @Composable
 fun themeName(theme: Theme): String = stringResource(
     when (theme) {
-        Theme.KREYDA -> R.string.theme_kreyda
+        Theme.LINEN -> R.string.theme_linen
         Theme.VISK -> R.string.theme_visk
         Theme.NEBO -> R.string.theme_nebo
         Theme.GLYNA -> R.string.theme_glyna
         Theme.KALYNA -> R.string.theme_kalyna
         Theme.ZORIANA_NICH -> R.string.theme_zoriana_nich
         Theme.SYSTEM -> R.string.theme_phone
-        Theme.PODILLIA -> R.string.theme_podillia
-        Theme.HUTSULSHCHYNA -> R.string.theme_hutsulshchyna
+        Theme.MAK -> R.string.theme_mak
+        Theme.SMEREKA -> R.string.theme_smereka
         Theme.CHORNOZEM -> R.string.theme_chornozem
         Theme.ZHAR -> R.string.theme_zhar
         Theme.SYSTEM_DARK -> R.string.theme_phone
@@ -220,7 +220,7 @@ fun ThemeRow(themes: List<Theme>, chosen: Theme, onChoose: (Theme) -> Unit) {
                 val selected = theme == chosen
                 Column(Modifier.width(width).selectable(selected, role = Role.RadioButton) { onChoose(theme) }, horizontalAlignment = Alignment.CenterHorizontally) {
                     Sample(theme, selected)
-                    // A long name with a large font gets smaller rather than broken inside a word («Гуцульщина»)
+                    // A long name with a large font gets smaller rather than broken inside a word («Зоряна ніч»)
                     val name = themeName(theme)
                     val base = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                     val measurer = androidx.compose.ui.text.rememberTextMeasurer()

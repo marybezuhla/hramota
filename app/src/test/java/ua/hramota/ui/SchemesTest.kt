@@ -64,9 +64,9 @@ class SchemesTest {
         // Hramota's own «Льон» and the wallpaper switch were before 0.10: both are the phone's colours now
         assertEquals("system", Settings.dayTheme("lon"))
         assertEquals("system_dark", Settings.nightTheme("lon"))
-        assertEquals("system", Settings.dayTheme("kreyda", wallpaper = true))
-        assertEquals("kreyda", Settings.dayTheme("kreyda"))
-        assertEquals("podillia", Settings.nightTheme("podillia"))
+        assertEquals("system", Settings.dayTheme("linen", wallpaper = true))
+        assertEquals("linen", Settings.dayTheme("linen"))
+        assertEquals("mak", Settings.nightTheme("mak"))
         assertEquals("system", Settings.dayTheme(null))
         // A night theme is never used by day
         assertEquals("system", Settings.dayTheme("zhar"))

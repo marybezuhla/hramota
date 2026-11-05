@@ -379,13 +379,13 @@
     <string name="night_theme">Theme by night</string>
     <string name="look_hint">The same themes as in the other apps: the phone’s own colours or the colours of Ukrainian pysanky. Books take their paper from the theme unless you choose another one while reading.</string>
     <string name="theme_phone">Phone colours</string>
-    <string name="theme_kreyda">Chalk</string>
+    <string name="theme_linen">Linen</string>
     <string name="theme_visk">Beeswax</string>
     <string name="theme_nebo">Sky</string>
     <string name="theme_glyna">Clay</string>
     <string name="theme_kalyna">Viburnum</string>
-    <string name="theme_podillia">Podillia</string>
-    <string name="theme_hutsulshchyna">Hutsul</string>
+    <string name="theme_mak">Poppy</string>
+    <string name="theme_smereka">Spruce</string>
     <string name="theme_chornozem">Black earth</string>
     <string name="theme_zhar">Embers</string>
     <string name="theme_zoriana_nich">Starry night</string>
