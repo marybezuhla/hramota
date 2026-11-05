@@ -17,11 +17,9 @@ data class AppSettings(
     val rememberRecent: Boolean = true,
     /** Hide the app's content from screenshots and the recent-apps preview. */
     val secureScreen: Boolean = false,
-    /** Colours from the wallpaper (Material You) instead of Hramota's own. */
-    val dynamicColor: Boolean = false,
-    /** The colour schemes by day and at night (see ui/Schemes.kt). */
-    val dayScheme: String = "lon",
-    val nightScheme: String = "lon",
+    /** The themes by day and at night (ui/theme/Palettes.kt): the phone's own colours unless one is chosen. */
+    val dayScheme: String = "system",
+    val nightScheme: String = "system_dark",
     /** The old wooden bookshelf instead of the modern one. */
     val woodShelf: Boolean = false,
     /** Books: paper colour ("auto" follows the app's theme: paper by day, night in the dark). */
@@ -68,7 +66,7 @@ class Settings private constructor(context: Context) {
             .putBoolean("inspector", s.inspector)
             .putBoolean("rememberRecent", s.rememberRecent)
             .putBoolean("secureScreen", s.secureScreen)
-            .putBoolean("dynamicColor", s.dynamicColor)
+            .remove("dynamicColor")
             .putString("dayScheme", s.dayScheme).putString("nightScheme", s.nightScheme)
             .putBoolean("woodShelf", s.woodShelf)
             .putString("readPaper", s.readPaper).putString("readFont", s.readFont)
@@ -88,7 +86,7 @@ class Settings private constructor(context: Context) {
         val s = flow.value
         return org.json.JSONObject().apply {
             put("theme", s.theme); put("docxReading", s.docxReading); put("inspector", s.inspector); put("rememberRecent", s.rememberRecent)
-            put("secureScreen", s.secureScreen); put("dynamicColor", s.dynamicColor)
+            put("secureScreen", s.secureScreen)
             put("dayScheme", s.dayScheme); put("nightScheme", s.nightScheme)
             put("readPaper", s.readPaper); put("readFont", s.readFont); put("readSize", s.readSize.toDouble()); put("readSpacing", s.readSpacing.toDouble())
             put("readMargin", s.readMargin.toDouble()); put("readJustify", s.readJustify); put("readPaged", s.readPaged); put("readTurn", s.readTurn); put("readVolumeKeys", s.readVolumeKeys)
@@ -106,9 +104,8 @@ class Settings private constructor(context: Context) {
             theme = o.optString("theme", s.theme).takeIf { it in setOf("system", "light", "dark") } ?: s.theme,
             docxReading = o.optBoolean("docxReading", s.docxReading), inspector = o.optBoolean("inspector", s.inspector),
             rememberRecent = o.optBoolean("rememberRecent", s.rememberRecent), secureScreen = o.optBoolean("secureScreen", s.secureScreen),
-            dynamicColor = o.optBoolean("dynamicColor", s.dynamicColor),
-            dayScheme = o.optString("dayScheme", s.dayScheme).takeIf { it in DAY_SCHEMES } ?: s.dayScheme,
-            nightScheme = o.optString("nightScheme", s.nightScheme).takeIf { it in NIGHT_SCHEMES } ?: s.nightScheme,
+            dayScheme = dayTheme(o.optString("dayScheme", s.dayScheme), o.optBoolean("dynamicColor", false)),
+            nightScheme = nightTheme(o.optString("nightScheme", s.nightScheme), o.optBoolean("dynamicColor", false)),
             readPaper = o.optString("readPaper", s.readPaper).takeIf { it in PAPERS } ?: s.readPaper,
             readFont = if (o.optString("readFont", s.readFont) == "sans") "sans" else "serif",
             readSize = f("readSize", s.readSize, 12f..40f), readSpacing = f("readSpacing", s.readSpacing, 1.1f..2.2f), readMargin = f("readMargin", s.readMargin, 8f..64f),
@@ -129,9 +126,8 @@ class Settings private constructor(context: Context) {
         inspector = prefs.getBoolean("inspector", true),
         rememberRecent = prefs.getBoolean("rememberRecent", true),
         secureScreen = prefs.getBoolean("secureScreen", false),
-        dynamicColor = prefs.getBoolean("dynamicColor", false),
-        dayScheme = prefs.getString("dayScheme", "lon").takeIf { it in DAY_SCHEMES } ?: "lon",
-        nightScheme = prefs.getString("nightScheme", "lon").takeIf { it in NIGHT_SCHEMES } ?: "lon",
+        dayScheme = dayTheme(prefs.getString("dayScheme", null), prefs.getBoolean("dynamicColor", false)),
+        nightScheme = nightTheme(prefs.getString("nightScheme", null), prefs.getBoolean("dynamicColor", false)),
         woodShelf = prefs.getBoolean("woodShelf", false),
         readPaper = prefs.getString("readPaper", "auto").takeIf { it in PAPERS } ?: "auto",
         readFont = if (prefs.getString("readFont", "serif") == "sans") "sans" else "serif",
@@ -151,9 +147,17 @@ class Settings private constructor(context: Context) {
 
     companion object {
         val PAPERS = setOf("auto", "paper", "sepia", "gray", "night")
-        // The same lists as ui/Schemes.kt (checked by a test)
-        val DAY_SCHEMES = setOf("lon", "kreyda", "visk", "nebo")
-        val NIGHT_SCHEMES = setOf("lon", "podillia", "hutsulshchyna", "chornozem")
+        val DAY_SCHEMES: Set<String> = ua.hramota.ui.theme.Theme.DAY.map { it.key }.toSet()
+        val NIGHT_SCHEMES: Set<String> = ua.hramota.ui.theme.Theme.NIGHT.map { it.key }.toSet()
+
+        /**
+         * The day theme from what was saved. Before 0.10 there was Hramota's own «Льон» (the default) and a separate
+         * switch for the wallpaper's colours: both become the phone's colours, the default of all the apps now.
+         */
+        fun dayTheme(saved: String?, wallpaper: Boolean = false): String =
+            if (wallpaper) "system" else saved?.takeIf { it in DAY_SCHEMES } ?: "system"
+        fun nightTheme(saved: String?, wallpaper: Boolean = false): String =
+            if (wallpaper) "system_dark" else saved?.takeIf { it in NIGHT_SCHEMES } ?: "system_dark"
         @Volatile private var instance: Settings? = null
         fun get(context: Context): Settings = instance ?: synchronized(this) { instance ?: Settings(context).also { instance = it } }
     }

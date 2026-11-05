@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -81,7 +82,9 @@ fun CompareScreen(olderName: String, newerName: String, state: CompareState, onB
 @Composable
 private fun NameLine(label: String, name: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(88.dp))
+        // At least as wide as the label needs on one line (never «Попере-дня» with a large font)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false,
+            modifier = Modifier.widthIn(min = 88.dp).padding(end = 8.dp))
         Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
@@ -100,7 +103,9 @@ private fun Result(c: Comparison, modifier: Modifier) {
     }
 
     Column(modifier) {
-        Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // On more lines when they do not fit on one (each label stays whole)
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val edited = c.blocks.count { it is Block.Changed }
             val added = c.blocks.count { it is Block.Added }
             val removed = c.blocks.count { it is Block.Removed }
@@ -155,6 +160,7 @@ private fun Legend(label: String, bg: androidx.compose.ui.graphics.Color, fg: an
         style = MaterialTheme.typography.labelMedium,
         color = fg,
         textDecoration = if (strike) TextDecoration.LineThrough else null,
+        maxLines = 1, softWrap = false,
         modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(bg).padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }

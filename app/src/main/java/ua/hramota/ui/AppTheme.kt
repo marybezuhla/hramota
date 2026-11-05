@@ -34,5 +34,5 @@ fun ComponentActivity.AppTheme(content: @Composable (AppSettings) -> Unit) {
             isAppearanceLightNavigationBars = !dark
         }
     }
-    HramotaTheme(dark = dark, dynamic = settings.dynamicColor, day = settings.dayScheme, night = settings.nightScheme) { content(settings) }
+    HramotaTheme(dark = dark, day = settings.dayScheme, night = settings.nightScheme) { content(settings) }
 }

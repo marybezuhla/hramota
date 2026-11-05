@@ -64,6 +64,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -247,7 +248,7 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
         items(entries, key = { it.id }) { e ->
             Column {
                 Book(e, onOpen, menu, Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp)), spine = true)
-                Text(e.title.substringBeforeLast('.', e.title), style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                Text(shownTitle(e), style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
                 Progress(e)
             }
         }
@@ -433,7 +434,7 @@ private fun ListShelf(entries: List<LibraryEntry>, color: Color, onOpen: (Librar
                     Box(Modifier.width(4.dp).height(64.dp).clip(RoundedCornerShape(2.dp)).background(color))
                     Box(Modifier.padding(start = 10.dp).width(46.dp)) { Cover(e, Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))) }
                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text(e.title.substringBeforeLast('.', e.title), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(shownTitle(e), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(e.format, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Progress(e)
                     }
@@ -459,46 +460,33 @@ private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: @Composa
     }
 }
 
+/** The title a document shows on the shelf: the one chosen for its cover, else its name without the extension. */
+internal fun shownTitle(e: LibraryEntry): String = e.coverTitle ?: e.title.substringBeforeLast('.', e.title)
+
+/** Whether a picture is its cover: one chosen, or as usual a book's own and a presentation's first slide. */
+internal fun usesPicture(e: LibraryEntry): Boolean = when (e.cover) {
+    "picture" -> true
+    "drawn" -> false
+    else -> e.format.uppercase() in setOf("EPUB", "FB2", "PPTX", "PPT", "ODP")
+}
+
 @Composable
 private fun Cover(e: LibraryEntry, modifier: Modifier, bound: Boolean = false) {
     val context = LocalContext.current
-    val cover by produceState<ImageBitmap?>(null, e.id) {
-        value = withContext(Dispatchers.IO) {
+    val picture = usesPicture(e)
+    val changes by ua.hramota.data.Shelf.coversChanged.collectAsState()
+    val cover by produceState<ImageBitmap?>(null, e.id, picture, e.cover, changes) {
+        value = if (!picture) null else withContext(Dispatchers.IO) {
             ua.hramota.data.Shelf.loadCover(context, e.id)?.asImageBitmap()
         }
     }
     BoxWithConstraints(modifier.aspectRatio(0.72f)) {
         val width = maxWidth
         val c = cover
-        if (c != null) Image(c, contentDescription = e.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
-        // A small cover has no room for the title: only the format
-        else if (maxWidth < 72.dp) Box(Modifier.fillMaxSize().background(coverColor(e.format)), contentAlignment = Alignment.Center) {
-            Text(e.format, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        }
-        else if (bound) BoundCover(e, width)
-        else Box(Modifier.fillMaxSize().background(coverColor(e.format)).padding(8.dp)) {
-            val title = e.title.substringBeforeLast('.', e.title)
-            // The longest word must fit on one line: never «Порівняльн-а» broken mid-word
-            val measurer = rememberTextMeasurer()
-            val density = LocalDensity.current
-            val room = with(density) { (width - 26.dp).toPx() }
-            val scale = density.fontScale
-            // Measured in the very style it is drawn in (letter spacing included)
-            val base = androidx.compose.material3.LocalTextStyle.current
-            val size = remember(title, room, scale) {
-                fitCache.get("$title|$room|$scale") ?: run {
-                    val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
-                    fun fits(sp: Float) = measurer.measure(word, base.merge(TextStyle(fontSize = sp.sp, fontWeight = FontWeight.SemiBold))).size.width <= room
-                    // Halving between 9 and 13 (in half steps): a few measurements, once per title
-                    var lo = 0; var hi = 8
-                    if (fits(13f)) lo = 8 else while (lo < hi) { val mid = (lo + hi + 1) / 2; if (fits(9f + mid * 0.5f)) lo = mid else hi = mid - 1 }
-                    (9f + lo * 0.5f).also { fitCache.put("$title|$room|$scale", it) }
-                }
-            }
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = size.sp, lineHeight = (size + 3).sp,
-                maxLines = 6, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start, modifier = Modifier.align(Alignment.TopStart).padding(end = 10.dp))
-            Text(e.format, color = Color(0xCCFFFFFF), fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomStart))
-        }
+        val title = shownTitle(e)
+        if (c != null) Image(c, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
+        else if (bound && width >= 72.dp) BoundCover(e, title, width)
+        else DrawnCover(title, e.format)
     }
 }
 
@@ -521,8 +509,7 @@ private val GILT = Color(0xFFE2C27A)
 
 /** A cloth-bound cover: gilt rules, the title in the book face, the format in small letters at the foot. */
 @Composable
-private fun BoundCover(e: LibraryEntry, width: androidx.compose.ui.unit.Dp) {
-    val title = e.title.substringBeforeLast('.', e.title)
+private fun BoundCover(e: LibraryEntry, title: String, width: androidx.compose.ui.unit.Dp) {
     val cloth = CLOTH[(title.hashCode() and 0x7fffffff) % CLOTH.size]
     val measurer = rememberTextMeasurer()
     val room = with(LocalDensity.current) { (width - 30.dp).toPx() }
@@ -547,14 +534,6 @@ private fun BoundCover(e: LibraryEntry, width: androidx.compose.ui.unit.Dp) {
             maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.TopStart))
         Text(e.format, color = GILT, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp, modifier = Modifier.align(Alignment.BottomStart))
     }
-}
-
-/** Title sizes already worked out (title, room, font scale): measured once, not again on each scroll. */
-private val fitCache = android.util.LruCache<String, Float>(1024)
-
-private fun coverColor(format: String): Color = when (format) {
-    "PDF" -> Color(0xFF9C2F2F); "DOCX", "DOC", "ODT" -> Color(0xFF1F4E79); "XLSX", "XLS", "CSV" -> Color(0xFF2E6B3A)
-    "PPTX", "PPT" -> Color(0xFFB2541A); "EPUB", "FB2" -> Color(0xFF5B3F8C); else -> Color(0xFF4A4A4A)
 }
 
 /** A shelf's name, look and colour; a slider picks the colour, or the natural one. */

@@ -133,11 +133,13 @@ fun HomeScreen(
                 Text(stringResource(R.string.open_file))
             }
             if (comparePrompt == null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Side by side while both fit on one line; one under the other with a large font (a word is never broken)
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 2) {
                     OutlinedButton(onClick = onCreate, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
                         Text(stringResource(R.string.create_new), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
-                    OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1.4f).heightIn(min = 52.dp)) {
+                    OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
                         Text(stringResource(R.string.compare_versions), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                 }

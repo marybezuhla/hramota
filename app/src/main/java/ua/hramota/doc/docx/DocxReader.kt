@@ -242,6 +242,7 @@ object DocxReader {
             hiddenText = has("<w:vanish/>", "<w:vanish "),
             author = core?.find("creator")?.let { textOf(it) },
             lastModifiedBy = core?.find("lastModifiedBy")?.let { textOf(it) },
+            title = core?.find("title")?.let { textOf(it) }?.trim()?.takeIf { it.isNotEmpty() }?.take(200),
         )
     }
 

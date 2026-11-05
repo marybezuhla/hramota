@@ -46,6 +46,10 @@ data class LibraryEntry(
     val notes: List<Note> = emptyList(),
     /** Shelves of one's own the document stands on (it is on the shelf "All" while its copy is kept). */
     val shelves: Set<String> = emptySet(),
+    /** The title on its shelf cover, if chosen (else the file's name). */
+    val coverTitle: String? = null,
+    /** Its cover: "" as usual (a book's own picture, a presentation's first slide, else drawn), "drawn" or "picture". */
+    val cover: String = "",
 ) {
     /** On the shelf: kept inside Hramota. */
     val kept: Boolean get() = copy != null
@@ -234,6 +238,8 @@ class Library private constructor(private val context: Context) {
         put("position", e.position); put("total", e.total)
         put("bookmarks", JSONArray(e.bookmarks.sorted())); put("shelf", e.onShelf); put("opened", e.openedAt)
         if (e.shelves.isNotEmpty()) put("shelves", JSONArray(e.shelves.toList()))
+        e.coverTitle?.let { put("coverTitle", it) }
+        if (e.cover.isNotEmpty()) put("cover", e.cover)
         if (e.notes.isNotEmpty()) put("notes", JSONArray().apply {
             for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
         })
@@ -255,6 +261,8 @@ class Library private constructor(private val context: Context) {
             position = o.optInt("position").coerceAtLeast(0), total = o.optInt("total").coerceAtLeast(0),
             bookmarks = o.optJSONArray("bookmarks")?.let { a -> (0 until minOf(a.length(), MAX_BOOKMARKS)).map { a.optInt(it) }.filter { it >= 0 }.toSet() } ?: emptySet(),
             onShelf = o.optBoolean("shelf"), openedAt = o.optLong("opened"),
+            coverTitle = o.optString("coverTitle").let { cleanTitle(it) }.take(MAX_COVER_TITLE).ifBlank { null },
+            cover = o.optString("cover").takeIf { it in COVERS } ?: "",
             notes = o.optJSONArray("notes")?.let { a ->
                 (0 until minOf(a.length(), MAX_NOTES)).mapNotNull { k ->
                     val n = a.optJSONObject(k) ?: return@mapNotNull null
@@ -329,6 +337,12 @@ class Library private constructor(private val context: Context) {
     }
 
     companion object {
+        const val MAX_COVER_TITLE = 120
+        val COVERS = setOf("", "drawn", "picture")
+        /** A title as written by a person or a file: no control or direction marks (they could disguise it). */
+        fun cleanTitle(s: String): String = s.filterNot { it.isISOControl() || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' || it == '\u200E' || it == '\u200F' || it == '\u061C' ||
+            it in '\u200B'..'\u200D' || it == '\u2060' || it == '\uFEFF' }
+            .replace('\u00A0', ' ').replace('\u2028', ' ').replace('\u2029', ' ').replace(Regex("\\s+"), " ").trim()
         const val MAX_BOOKMARKS = 1000
         const val MAX_NOTES = 5000
         val ID = Regex("[0-9a-f]{32}")

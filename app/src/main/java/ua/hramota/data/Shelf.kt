@@ -102,19 +102,39 @@ object Shelf {
         else coverFile(context, id, false).takeIf { it.exists() }?.readBytes()
     } catch (e: Exception) { null }
 
-    /** Saves a small picture of the first page as the document's cover (once). */
-    fun saveCover(context: Context, id: String, bitmap: Bitmap) {
-        if (hasCover(context, id)) return
-        val sealing = Vault.sealing(context)
-        val key = Vault.key()
-        if (sealing && key == null) return
-        val f = coverFile(context, id, sealing)
-        try {
+    /** Saves a small picture (of the first page, or a book's own) as the document's cover: once, unless [replace]. */
+    fun saveCover(context: Context, id: String, bitmap: Bitmap, replace: Boolean = false): Boolean {
+        if (!replace && hasCover(context, id)) return false
+        return try {
             val w = 240
             val scaled = Bitmap.createScaledBitmap(bitmap, w, (w.toFloat() * bitmap.height / bitmap.width).toInt().coerceIn(1, 600), true)
             val png = java.io.ByteArrayOutputStream().also { scaled.compress(Bitmap.CompressFormat.PNG, 90, it) }.toByteArray()
-            f.writeBytes(if (sealing) Sealed.seal(key!!, png, "$id.png") else png)
-        } catch (e: Exception) { f.delete() }
+            putCover(context, id, png)
+        } catch (_: Exception) { false }
+    }
+
+    /** Counts cover changes, so the shelf shows a new picture at once. */
+    val coversChanged = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /**
+     * Puts [png] in place as the cover (sealed while the storage is locked), or removes the cover when null: written
+     * beside first, then moved over the old one, so a cut-off write never leaves half a picture. Used to undo a change.
+     */
+    fun putCover(context: Context, id: String, png: ByteArray?): Boolean {
+        val sealing = Vault.sealing(context)
+        val key = Vault.key()
+        if (png != null && sealing && key == null) return false
+        val plain = coverFile(context, id, false); val sealed = coverFile(context, id, true)
+        if (png == null) { plain.delete(); sealed.delete(); coversChanged.value++; return true }
+        val f = if (sealing) sealed else plain
+        val tmp = File(f.parentFile, f.name + ".new")
+        return try {
+            tmp.writeBytes(if (sealing) Sealed.seal(key!!, png, "$id.png") else png)
+            if (!tmp.renameTo(f)) { tmp.delete(); return false }
+            (if (sealing) plain else sealed).delete()
+            coversChanged.value++
+            true
+        } catch (_: Exception) { tmp.delete(); false }
     }
 
     /**

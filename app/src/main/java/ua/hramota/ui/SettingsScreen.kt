@@ -50,6 +50,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ua.hramota.R
+import ua.hramota.ui.theme.Segments
+import ua.hramota.ui.theme.Theme
+import ua.hramota.ui.theme.ThemeRow
 import ua.hramota.data.AppSettings
 
 /** Settings: look, documents, privacy, and what the app is made of. */
@@ -98,30 +101,19 @@ fun SettingsScreen(
         TopBar(title = stringResource(R.string.settings), onBack = onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             Section(stringResource(R.string.settings_look))
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.bodyLarge)
-                val themes = listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark)
-                Column(Modifier.padding(top = 4.dp).selectableGroup()) {
-                    themes.forEach { (key, label) ->
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                .selectable(selected = settings.theme == key, role = Role.RadioButton) { onChange { it.copy(theme = key) } }
-                                .heightIn(min = 48.dp).padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = settings.theme == key, onClick = null, modifier = Modifier.padding(8.dp))
-                            Text(stringResource(label), style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                }
-            }
-
-            Toggle(stringResource(R.string.settings_dynamic), stringResource(R.string.settings_dynamic_hint), settings.dynamicColor) { v -> onChange { it.copy(dynamicColor = v) } }
-            // The schemes (not with the wallpaper's colours, which take their place)
-            if (!settings.dynamicColor) {
-                Text(stringResource(R.string.settings_scheme_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp))
-                SchemeRow(stringResource(R.string.settings_scheme_day), Schemes.day, settings.dayScheme) { id -> onChange { it.copy(dayScheme = id) } }
-                SchemeRow(stringResource(R.string.settings_scheme_night), Schemes.night, settings.nightScheme) { id -> onChange { it.copy(nightScheme = id) } }
+            // The same as in all the apps: light or dark, then the day and the night theme as small pictures
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.look_mode), style = MaterialTheme.typography.bodyLarge)
+                Segments(
+                    listOf("system" to stringResource(R.string.mode_auto), "light" to stringResource(R.string.mode_light), "dark" to stringResource(R.string.mode_dark)),
+                    settings.theme,
+                ) { key -> onChange { it.copy(theme = key) } }
+                Text(stringResource(R.string.day_theme), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+                // Choosing either brings its pair along (Starry night with Sky, and so on); the other can still be changed after
+                ThemeRow(Theme.DAY, Theme.of(settings.dayScheme, Theme.SYSTEM)) { t -> onChange { it.copy(dayScheme = t.key, nightScheme = Theme.pairOf(t).key) } }
+                Text(stringResource(R.string.night_theme), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+                ThemeRow(Theme.NIGHT, Theme.of(settings.nightScheme, Theme.SYSTEM_DARK)) { t -> onChange { it.copy(nightScheme = t.key, dayScheme = Theme.pairOf(t).key) } }
+                Text(stringResource(R.string.look_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Section(stringResource(R.string.settings_documents))
@@ -219,47 +211,5 @@ private fun Toggle(title: String, hint: String, checked: Boolean, enabled: Boole
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
-    }
-}
-
-/** A row of small pictures of the schemes, each in its own colours; a tap chooses one. */
-@Composable
-private fun SchemeRow(title: String, schemes: List<Scheme>, chosen: String, onChoose: (String) -> Unit) {
-    Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp))
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        for (sc in schemes) {
-            val selected = sc.id == chosen || (schemes.none { it.id == chosen } && sc == schemes.first())
-            val c = sc.colors
-            Column(
-                // As wide as the name needs with a large font (a name is never broken mid-word)
-                Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max).widthIn(min = 104.dp).clip(RoundedCornerShape(14.dp)).selectable(selected, role = Role.RadioButton) { onChoose(sc.id) }.padding(2.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                val frame = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                // A picture only: the name below is what is read aloud
-                Surface(shape = RoundedCornerShape(12.dp), border = frame, color = c.background, modifier = Modifier.fillMaxWidth().height(76.dp).clearAndSetSemantics { }) {
-                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        // A title, two lines of text on a card, and a button in the accent
-                        Box(Modifier.fillMaxWidth(0.7f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.onBackground))
-                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(c.surfaceVariant).padding(5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurfaceVariant))
-                            Box(Modifier.fillMaxWidth(0.6f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.onSurfaceVariant))
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            Box(Modifier.width(34.dp).height(12.dp).clip(RoundedCornerShape(6.dp)).background(c.primary))
-                        }
-                    }
-                }
-                Text(
-                    stringResource(sc.name), style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, softWrap = false,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-        }
     }
 }
