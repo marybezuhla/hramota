@@ -405,4 +405,33 @@
     <string name="cover_renamed_copy">The cover is changed, and the copy in Hramota is now called «%1$s».</string>
     <string name="cover_renamed_shelf">The cover is changed. The app the file came from does not allow renaming it, so «%1$s» is its name only on the shelf.</string>
     <string name="cover_renamed_once">The cover is changed, and the file is now called «%1$s». Its app did not let Hramota keep access to it: to see it again in the recent list, open it once more from that app.</string>
+    <!-- The author's letter and Support Ukraine (About) -->
+    <string name="about_letter_1">The idea of making handy Ukrainian apps that ask for as few permissions as possible and work well offline came while I was working at my laptop in near darkness: after yet another Russian drone attack, the power was gone again. That is how Hramota began: your documents and books should open anywhere, with no cloud and no one else\'s servers.</string>
+    <string name="about_letter_2">Hramota is free software: its code is open, and anyone can check what it does. No ads, no tracking, no accounts. Freedom in software is not a small thing. It is the right to know what happens on your phone, and not to hand your life to anyone.</string>
+    <string name="about_letter_3">Hramota was made in Ukraine 🇺🇦. The occupiers destroy Ukrainian libraries and books. Let us read our own: the classics, today\'s writers, our history. This is who we are, and it is alive. We are alive.</string>
+    <string name="about_letter_4">Yet since 2014, and since 24 February 2022 at full force, Russia has been waging war against my country. Every day, missiles and drones strike cities, homes, hospitals and power plants. The occupiers kill, abduct Ukrainian children, destroy museums, churches and libraries, and ban our language in the lands they hold. Their aim is for Ukrainians to cease to exist as a people.</string>
+    <string name="about_letter_5">We are fighting for the right to be: to live on our own land, speak our own language, create our own things. The freedom you value in software is, for us today, a matter of life.</string>
+    <string name="about_letter_6">If Hramota is useful to you, please support Ukraine. I receive none of this money: the links go straight to the organisations\' official sites.</string>
+    <string name="about_letter_7">If you are from Ukraine: thank you for being here. We hold on. We defend, we donate, we look after one another and we choose Ukrainian: together, this brings victory closer.</string>
+    <string name="about_letter_signature">The author of Hramota 💙💛</string>
+    <string name="about_author_name">Mariana Bezuhla</string>
+    <string name="about_support_note">The links open in your browser, on the organisations\' own sites. The app knows nothing about it and receives nothing.</string>
+    <string name="about_open_site">Open the site</string>
+    <string name="about_org_united24">UNITED24</string>
+    <string name="about_org_united24_url">https://u24.gov.ua/</string>
+    <string name="about_org_redcross">Ukrainian Red Cross Society</string>
+    <string name="about_org_redcross_what">The national Red Cross society: help for people hurt by the war</string>
+    <string name="about_org_redcross_url">https://redcross.org.ua/en/donate</string>
+    <string name="about_org_brave1">Brave1</string>
+    <string name="about_org_brave1_what">Ukraine\'s state defence technology cluster: learn how Ukraine builds them</string>
+    <string name="about_org_brave1_url">https://brave1.gov.ua/en/</string>
+    <string name="about_org_united24_defence">Ukraine\'s official fundraising platform: Defence</string>
+    <string name="about_org_united24_humanitarian">The same platform: medical aid, humanitarian demining, rebuilding</string>
+    <string name="about_org_nbu">National Bank of Ukraine special account</string>
+    <string name="about_org_nbu_what">An account for the needs of the army, opened on 24 February 2022; the National Bank reports on it every month</string>
+    <string name="about_org_nbu_url">https://bank.gov.ua/en/news/all/natsionalniy-bank-vidkriv-spetsrahunok-dlya-zboru-koshtiv-na-potrebi-armiyi</string>
+    <string name="about_support_title">Support Ukraine 💙💛</string>
+    <string name="about_support_defence">Defence</string>
+    <string name="about_support_humanitarian">Humanitarian aid</string>
+    <string name="about_support_any">You can also support any trusted foundation, volunteers or unit you know. Check fundraisers: official details and reports.</string>
 </resources>
