@@ -9,8 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -203,40 +202,45 @@ fun <T> Segments(options: List<Pair<T, String>>, chosen: T, modifier: Modifier =
     }
 }
 
-/** All themes at once, three in a row: none hides behind the edge of the screen. */
-@OptIn(ExperimentalLayoutApi::class)
+/** All themes at once, in rows across the whole width: none hides behind the edge of the screen. */
 @Composable
 fun ThemeRow(themes: List<Theme>, chosen: Theme, onChoose: (Theme) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val gap = 10.dp
-        // Rounded down to whole dp, so three always fit in a row on any screen
+        // One theme's share of the row, to fit its name
         val width = ((maxWidth - gap * 2) / 3).value.toInt().dp
-        FlowRow(
+        // Rows of exactly three, each across the whole width: a flowing row could push the third onto the next line
+        Column(
             Modifier.fillMaxWidth().selectableGroup().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(gap),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            for (theme in themes) {
-                val selected = theme == chosen
-                Column(Modifier.width(width).selectable(selected, role = Role.RadioButton) { onChoose(theme) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Sample(theme, selected)
-                    // A long name with a large font gets smaller rather than broken inside a word («Зоряна ніч»)
-                    val name = themeName(theme)
-                    val base = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-                    val room = with(androidx.compose.ui.platform.LocalDensity.current) { width.toPx() }
-                    val fitted = remember(name, room, base) {
-                        val word = name.split(' ').maxByOrNull { it.length } ?: name
-                        var size = base.fontSize.value
-                        while (size > 11f && measurer.measure(word, base.copy(fontSize = size.sp)).size.width > room) size -= 0.5f
-                        size.sp
+            for (row in themes.chunked(3)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    for (theme in row) {
+                        val selected = theme == chosen
+                        Column(Modifier.weight(1f).selectable(selected, role = Role.RadioButton) { onChoose(theme) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                            Sample(theme, selected)
+                            // A long name with a large font gets smaller rather than broken inside a word («Зоряна ніч»)
+                            val name = themeName(theme)
+                            val base = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                            val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+                            val room = with(androidx.compose.ui.platform.LocalDensity.current) { width.toPx() }
+                            val fitted = remember(name, room, base) {
+                                val word = name.split(' ').maxByOrNull { it.length } ?: name
+                                var size = base.fontSize.value
+                                while (size > 11f && measurer.measure(word, base.copy(fontSize = size.sp)).size.width > room) size -= 0.5f
+                                size.sp
+                            }
+                            Text(
+                                name, style = MaterialTheme.typography.bodyMedium.copy(fontSize = fitted, lineHeight = fitted * 1.35f),
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
                     }
-                    Text(
-                        name, style = MaterialTheme.typography.bodyMedium.copy(fontSize = fitted, lineHeight = fitted * 1.35f),
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
+                    // A short last row keeps the same sizes
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
