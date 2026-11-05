@@ -109,10 +109,10 @@ fun SettingsScreen(
                     settings.theme,
                 ) { key -> onChange { it.copy(theme = key) } }
                 Text(stringResource(R.string.day_theme), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
-                // A day theme brings its night pair along; the night can still be chosen on its own below
+                // Choosing either brings its pair along (Starry night with Sky, and so on); the other can still be changed after
                 ThemeRow(Theme.DAY, Theme.of(settings.dayScheme, Theme.SYSTEM)) { t -> onChange { it.copy(dayScheme = t.key, nightScheme = Theme.pairOf(t).key) } }
                 Text(stringResource(R.string.night_theme), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
-                ThemeRow(Theme.NIGHT, Theme.of(settings.nightScheme, Theme.SYSTEM_DARK)) { t -> onChange { it.copy(nightScheme = t.key) } }
+                ThemeRow(Theme.NIGHT, Theme.of(settings.nightScheme, Theme.SYSTEM_DARK)) { t -> onChange { it.copy(nightScheme = t.key, dayScheme = Theme.pairOf(t).key) } }
                 Text(stringResource(R.string.look_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
