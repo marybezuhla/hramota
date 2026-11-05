@@ -387,13 +387,13 @@
     <string name="night_theme">Тема вночі</string>
     <string name="look_hint">Ті самі теми, що й в інших застосунках: кольори телефона або кольори українських писанок. Книжки беруть папір із теми, якщо під час читання не вибрати інший.</string>
     <string name="theme_phone">Кольори телефона</string>
-    <string name="theme_kreyda">Крейда</string>
+    <string name="theme_linen">Льон</string>
     <string name="theme_visk">Віск</string>
     <string name="theme_nebo">Небо</string>
     <string name="theme_glyna">Глина</string>
     <string name="theme_kalyna">Калина</string>
-    <string name="theme_podillia">Поділля</string>
-    <string name="theme_hutsulshchyna">Гуцульщина</string>
+    <string name="theme_mak">Мак</string>
+    <string name="theme_smereka">Смерека</string>
     <string name="theme_chornozem">Чорнозем</string>
     <string name="theme_zhar">Жар</string>
     <string name="theme_zoriana_nich">Зоряна ніч</string>

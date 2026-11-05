@@ -23,7 +23,8 @@ class Palette(
 
 enum class Theme(val key: String, val dark: Boolean, val palette: Palette?) {
     // By day
-    KREYDA("kreyda", false, Palette(
+    // Not "lon": that key was Hramota's own linen theme before 0.10, which now becomes the phone's colours
+    LINEN("linen", false, Palette(
         primary = 0xFFA3392C, onPrimary = 0xFFFFF8F0, secondary = 0xFF7D5A12,
         background = 0xFFE6DFD5, surface = 0xFFF8F3EB, surfaceVariant = 0xFFEBE3D8,
         onSurface = 0xFF2B2420, onSurfaceVariant = 0xFF5A5048, error = 0xFF8C1D18,
@@ -54,13 +55,13 @@ enum class Theme(val key: String, val dark: Boolean, val palette: Palette?) {
     SYSTEM("system", false, null),
 
     // By night
-    PODILLIA("podillia", true, Palette(
+    MAK("mak", true, Palette(
         // Lighter than Pysanka's red, so that red text on a dark card stays readable
         primary = 0xFFE0786B, onPrimary = 0xFF2A0D09, secondary = 0xFFC99A3A,
         background = 0xFF15110F, surface = 0xFF2A2320, surfaceVariant = 0xFF3A312C,
         onSurface = 0xFFF1E6D2, onSurfaceVariant = 0xFFC2B5A3, error = 0xFFFFB4A9,
     )),
-    HUTSULSHCHYNA("hutsulshchyna", true, Palette(
+    SMEREKA("smereka", true, Palette(
         primary = 0xFFC98F3A, onPrimary = 0xFF1A1208, secondary = 0xFFD6A64E,
         background = 0xFF101A15, surface = 0xFF1E2E25, surfaceVariant = 0xFF2A3D32,
         onSurface = 0xFFECE6D6, onSurfaceVariant = 0xFFB9BBA8, error = 0xFFFFB4A9,
@@ -87,9 +88,9 @@ enum class Theme(val key: String, val dark: Boolean, val palette: Palette?) {
     companion object {
         // The phone's own colours come first: they are the default
         // In pairs: each day theme stands right above its night theme
-        val DAY = listOf(SYSTEM, NEBO, KALYNA, KREYDA, VISK, GLYNA)
-        val NIGHT = listOf(SYSTEM_DARK, ZORIANA_NICH, PODILLIA, CHORNOZEM, HUTSULSHCHYNA, ZHAR)
-        /** A day theme's night pair (and the other way round): sky and starry night, chalk and black earth... */
+        val DAY = listOf(SYSTEM, NEBO, KALYNA, LINEN, VISK, GLYNA)
+        val NIGHT = listOf(SYSTEM_DARK, ZORIANA_NICH, MAK, CHORNOZEM, SMEREKA, ZHAR)
+        /** A day theme's night pair (and the other way round): sky and starry night, linen and black earth... */
         fun pairOf(t: Theme): Theme = DAY.indexOf(t).takeIf { it >= 0 }?.let { NIGHT[it] } ?: DAY[NIGHT.indexOf(t).coerceAtLeast(0)]
 
         fun of(key: String?, fallback: Theme) = entries.firstOrNull { it.key == key } ?: fallback
