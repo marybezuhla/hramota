@@ -22,6 +22,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -335,7 +339,7 @@ fun SlideEditorScreen(
                     onClick = { if (!state.addSlide(null, lang)) noLayout = true }, enabled = !saving,
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
                 ) {
-                    Icon(androidx.compose.material.icons.Icons.Filled.Add, contentDescription = null)
+                    Icon(Icons.Filled.Add, contentDescription = null)
                     Text(stringResource(R.string.slide_add), modifier = Modifier.padding(start = 8.dp))
                 }
             }
@@ -364,10 +368,10 @@ private fun SlideHeading(
     Column(Modifier.padding(top = if (first) 0.dp else 20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.slide_n, number), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-            IconButton(onClick = onUp, enabled = enabled && !first) { Icon(androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.slide_up)) }
-            IconButton(onClick = onDown, enabled = enabled && !last) { Icon(androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.slide_down)) }
+            IconButton(onClick = onUp, enabled = enabled && !first) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.slide_up)) }
+            IconButton(onClick = onDown, enabled = enabled && !last) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.slide_down)) }
             androidx.compose.foundation.layout.Box {
-                IconButton(onClick = { menu = true }, enabled = enabled) { Icon(androidx.compose.material.icons.Icons.Filled.MoreVert, contentDescription = stringResource(R.string.slide_more)) }
+                IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.slide_more)) }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; onAddAfter() })
                     androidx.compose.material3.DropdownMenuItem(
