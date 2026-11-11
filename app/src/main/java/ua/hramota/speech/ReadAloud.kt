@@ -71,6 +71,10 @@ object ReadAloud {
     const val NOTICE_NO_VOICE = 1
     const val NOTICE_NO_LANGUAGE = 2
     const val NOTICE_NO_SOUND = 3
+    /** Hramota's voice is chosen but not downloaded: the phone's voice reads meanwhile. */
+    const val NOTICE_NOT_DOWNLOADED = 4
+    /** Hramota's voice not downloaded, and the phone has no voice for it either: reading stops. */
+    const val NOTICE_NOT_DOWNLOADED_NO_PHONE = 5
     /** Paused this long, reading ends (the controls go and the voice's memory is freed). */
     private const val PAUSED_LIMIT = 30 * 60_000L
 
@@ -99,6 +103,8 @@ object ReadAloud {
     private var english: EnglishVoice? = null
     private var englishFailed = false
     private var phone: PhoneVoice? = null
+    /** "Not downloaded" said once per reading. */
+    @Volatile private var toldNotDownloaded = false
     private var phoneFailed = false
 
     /** A sentence and where it is. */
@@ -109,6 +115,7 @@ object ReadAloud {
         app = context.applicationContext
         job?.cancel()
         doc = document
+        toldNotDownloaded = false
         _state.value = State(document.id, document.title, playing = true, unit = unit, start = from, end = from, speed = speed, voice = voice, sleepAt = _state.value.sleepAt)
         ReadAloudService.show(app)
         run(unit, from, 0)
@@ -276,7 +283,12 @@ object ReadAloud {
     private suspend fun make(text: String): Sound? {
         val lang = Sentences.language(text) ?: return null
         val speed = _state.value.speed
-        if (lang == "uk" && _state.value.voice != PHONE) {
+        // Hramota's voice for this language not downloaded yet: the phone's voice reads, saying so once
+        if (_state.value.voice != PHONE && (lang == "uk" || lang == "en") &&
+            !VoiceFiles.has(app, if (lang == "uk") VoiceFiles.Voice.TETIANA else VoiceFiles.Voice.CORI)
+        ) {
+            if (!toldNotDownloaded) { toldNotDownloaded = true; _state.update { it.copy(notice = NOTICE_NOT_DOWNLOADED) } }
+        } else if (lang == "uk" && _state.value.voice != PHONE) {
             var opened = false
             val sound = voices.withLock {
                 if (tetiana == null && !tetianaFailed) {
@@ -291,7 +303,7 @@ object ReadAloud {
             // Hramota's voice is there but could not say this one: skipped, never handed to another voice
             if (opened) return sound
         }
-        if (lang == "en" && _state.value.voice != PHONE) {
+        if (lang == "en" && _state.value.voice != PHONE && VoiceFiles.has(app, VoiceFiles.Voice.CORI)) {
             var opened = false
             val sound = voices.withLock {
                 if (english == null && !englishFailed) {
@@ -316,7 +328,11 @@ object ReadAloud {
                 else -> try { p.read(text, speed) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
             }
         }
-        if (sound === NO_VOICE) _state.update { it.copy(notice = if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }
+        if (sound === NO_VOICE) {
+            val notDownloaded = _state.value.voice != PHONE && (lang == "uk" || lang == "en") &&
+                !VoiceFiles.has(app, if (lang == "uk") VoiceFiles.Voice.TETIANA else VoiceFiles.Voice.CORI)
+            _state.update { it.copy(notice = if (notDownloaded) NOTICE_NOT_DOWNLOADED_NO_PHONE else if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }
+        }
         return sound
     }
 
