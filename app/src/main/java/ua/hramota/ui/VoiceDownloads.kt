@@ -56,7 +56,7 @@ private fun VoiceRow(voice: VoiceFiles.Voice, title: Int) {
     val present = remember(status.done) { VoiceFiles.file(context, voice) != null }
     var askDelete by remember { mutableStateOf(false) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) VoiceFiles.import(context, voice) { ReadAloud.release() }
+        if (uri != null) VoiceFiles.import(context, voice, uri) { ReadAloud.release() }
     }
     val name = stringResource(title)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
