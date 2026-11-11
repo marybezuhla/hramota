@@ -62,7 +62,7 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            val notice = when { state.notice == ReadAloud.NOTICE_NO_VOICE -> R.string.read_no_voice; state.notice == ReadAloud.NOTICE_NO_LANGUAGE -> R.string.read_no_language; state.notice == ReadAloud.NOTICE_NOT_DOWNLOADED -> R.string.read_not_downloaded; state.preparing -> R.string.read_preparing; else -> null }
+            val notice = when { state.notice == ReadAloud.NOTICE_NO_VOICE -> R.string.read_no_voice; state.notice == ReadAloud.NOTICE_NO_LANGUAGE -> R.string.read_no_language; state.notice == ReadAloud.NOTICE_NOT_DOWNLOADED -> R.string.read_not_downloaded; state.notice == ReadAloud.NOTICE_NOT_DOWNLOADED_NO_PHONE -> R.string.read_not_downloaded_no_phone; state.preparing -> R.string.read_preparing; else -> null }
             if (notice != null) Text(
                 stringResource(notice), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },

@@ -22,7 +22,7 @@
 
 - **«Тетяна»** — модель [robinhad/ukrainian-tts](https://github.com/robinhad/ukrainian-tts) v5.0.0 (MIT; записи — ukrainian-tts-datasets, Apache 2.0), перетворена в ONNX (`tools/voices/export_espnet.py`, джерела перевіряються за SHA-256).
 - **Словник наголосів** — [ukrainian-word-stress](https://github.com/lang-uk/ukrainian-word-stress) 2.1.0 (MIT), перетворений `tools/voices/build_stress.py`.
-- **Cori** — `en_GB-cori-medium` з [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (MIT; записи LibriVox — суспільне надбання); SHA-256 перевіряє збірка й Грамота при завантаженні.
+- **Cori** — `en_GB-cori-medium` з [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (MIT; записи LibriVox — суспільне надбання); SHA-256 перевіряє збірка й Грамота під час копіювання вибраного файлу.
 - **eSpeak NG** 1.52.0 (GPL-3.0 або новіша), зібраний із сирцевого коду [espeak-ng/espeak-ng](https://github.com/espeak-ng/espeak-ng/tree/4870adfa25b1a32b4361592f1be8a40337c58d6c) у `.github/workflows/espeak.yml`; готові бібліотеки й дані — у `espeak/` із сумами `SHA256SUMS`.
 - **ONNX Runtime** 1.22.0 (MIT, Microsoft).
 

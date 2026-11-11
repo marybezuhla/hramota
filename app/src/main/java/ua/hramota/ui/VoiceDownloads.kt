@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ua.hramota.R
 import ua.hramota.speech.ReadAloud
@@ -37,6 +39,8 @@ import ua.hramota.speech.VoiceFiles
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun VoiceDownloads() {
+    val context = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { VoiceFiles.cleanUp(context) }
     Text(stringResource(R.string.read_voices).uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
     Text(stringResource(R.string.read_voices_how), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     VoiceRow(VoiceFiles.Voice.TETIANA, R.string.read_voice_uk)
@@ -54,8 +58,9 @@ private fun VoiceRow(voice: VoiceFiles.Voice, title: Int) {
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) VoiceFiles.import(context, voice) { ReadAloud.release() }
     }
+    val name = stringResource(title)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(title), style = MaterialTheme.typography.bodyLarge)
+        Text(name, style = MaterialTheme.typography.bodyLarge)
         val progress = status.progress
         when {
             progress != null -> {
@@ -63,7 +68,7 @@ private fun VoiceRow(voice: VoiceFiles.Voice, title: Int) {
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
             }
             present -> Text(stringResource(R.string.read_voice_ready), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            else -> Text(stringResource(R.string.read_voice_missing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> Text(stringResource(R.string.read_voice_missing, voice.downloadName), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         status.error?.let {
             Text(
@@ -80,12 +85,15 @@ private fun VoiceRow(voice: VoiceFiles.Voice, title: Int) {
         if (progress == null) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (present) {
-                    TextButton(onClick = { askDelete = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.read_voice_delete)) }
+                    val del = stringResource(R.string.read_voice_delete)
+                    TextButton(onClick = { askDelete = true }, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "$del: $name" }) { Text(stringResource(R.string.read_voice_delete)) }
                 } else {
+                    val download = stringResource(R.string.read_voice_download)
+                    val pickLabel = stringResource(R.string.read_voice_pick)
                     OutlinedButton(onClick = {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(voice.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.read_voice_download)) }
-                    OutlinedButton(onClick = { runCatching { pick.launch(arrayOf("*/*")) } }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    }, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "$download: $name" }) { Text(download) }
+                    OutlinedButton(onClick = { runCatching { pick.launch(arrayOf("*/*")) } }, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "$pickLabel: $name" }) {
                         Text(stringResource(R.string.read_voice_pick))
                     }
                 }

@@ -152,6 +152,10 @@ fun SettingsScreen(
                 )
             }
 
+            // Hramota's voices, also here (not only in the reading sheet): downloaded at leisure
+            Section(stringResource(R.string.read_aloud))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { VoiceDownloads() }
+
             Section(stringResource(R.string.dict_section))
             Text(stringResource(R.string.dict_section_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             for (d in dictionaries) Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {

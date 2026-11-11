@@ -40,7 +40,8 @@ val joinVoice by tasks.registering {
         check(coriSum == "1899f98e5fb8310154f3c2973f4b8a929ba7245e722b3d3a85680b833d95f10d") { "English voice sum $coriSum" }
     }
 }
-tasks.named("preBuild") { dependsOn(joinVoice) }
+// Only debug builds carry the voices (the device tests)
+tasks.matching { it.name == "preDebugBuild" }.configureEach { dependsOn(joinVoice) }
 
 android {
     namespace = "ua.hramota"

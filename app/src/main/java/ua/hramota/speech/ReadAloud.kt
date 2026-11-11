@@ -73,6 +73,8 @@ object ReadAloud {
     const val NOTICE_NO_SOUND = 3
     /** Hramota's voice is chosen but not downloaded: the phone's voice reads meanwhile. */
     const val NOTICE_NOT_DOWNLOADED = 4
+    /** Hramota's voice not downloaded, and the phone has no voice for it either: reading stops. */
+    const val NOTICE_NOT_DOWNLOADED_NO_PHONE = 5
     /** Paused this long, reading ends (the controls go and the voice's memory is freed). */
     private const val PAUSED_LIMIT = 30 * 60_000L
 
@@ -326,7 +328,11 @@ object ReadAloud {
                 else -> try { p.read(text, speed) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
             }
         }
-        if (sound === NO_VOICE) _state.update { it.copy(notice = if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }
+        if (sound === NO_VOICE) {
+            val notDownloaded = _state.value.voice != PHONE && (lang == "uk" || lang == "en") &&
+                !VoiceFiles.has(app, if (lang == "uk") VoiceFiles.Voice.TETIANA else VoiceFiles.Voice.CORI)
+            _state.update { it.copy(notice = if (notDownloaded) NOTICE_NOT_DOWNLOADED_NO_PHONE else if (lang == "uk") NOTICE_NO_VOICE else NOTICE_NO_LANGUAGE) }
+        }
         return sound
     }
 

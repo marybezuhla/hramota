@@ -57,13 +57,21 @@ object VoiceFiles {
 
     private fun dir(context: Context) = File(context.filesDir, "voices").apply { mkdirs() }
 
+    /** A copy cut off by a closed app (up to 151 MB) is not left behind; called when the reading sheet or settings show. */
+    fun cleanUp(context: Context) {
+        if (statuses.values.any { it.value.progress != null }) return
+        dir(context).listFiles { f -> f.name.endsWith(".part") }?.forEach { it.delete() }
+    }
+
     /** The downloaded file, when it is there whole. */
     fun file(context: Context, v: Voice): File? = File(dir(context), v.file).takeIf { it.isFile && it.length() == v.bytes }
 
     /** Whether the voice can be used: downloaded, or (debug builds) carried by the app. */
     fun has(context: Context, v: Voice): Boolean = file(context, v) != null || hasAsset(context, v)
 
-    private fun hasAsset(context: Context, v: Voice) = runCatching { context.assets.openFd(v.asset).use { true } }.getOrDefault(false)
+    // Only debug builds carry them; asked once, not at every sentence
+    private val assets = java.util.concurrent.ConcurrentHashMap<Voice, Boolean>()
+    private fun hasAsset(context: Context, v: Voice) = assets.getOrPut(v) { runCatching { context.assets.openFd(v.asset).use { true } }.getOrDefault(false) }
 
     /** The voice's model, mapped (not read into memory). */
     fun map(context: Context, v: Voice): ByteBuffer {
