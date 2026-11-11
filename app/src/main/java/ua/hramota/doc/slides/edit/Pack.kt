@@ -116,16 +116,54 @@ internal class Pack(
             "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
     }
 
-    /** What belongs to a slide only: the slide, its notes and comments. */
-    private fun ownParts(slide: String): Set<String> =
-        setOf(slide) + rels(relsOf(slide)).filter { r -> r.type.endsWith("/notesSlide") || r.type.contains("comments", ignoreCase = true) }.mapNotNull { it.target }
+    private val owned = HashMap<String, Set<String>>()
 
-    /** How many links from elsewhere (other slides, say: a link to go to it) lead to a slide. */
-    fun linksTo(slide: String): Int {
-        val own = ownParts(slide)
-        val presRels = relsOf("ppt/presentation.xml")
-        return texts.keys.filter { it.lowercase().endsWith(".rels") && !it.equals(presRels, ignoreCase = true) && own.none { o -> relsOf(o).equals(it, ignoreCase = true) } }
-            .sumOf { r -> rels(r).count { it.target.equals(slide, ignoreCase = true) } }
+    /** What belongs to a slide only (lower case): the slide, its notes and comments. */
+    @Synchronized fun ownParts(slide: String): Set<String> = owned.getOrPut(slide) {
+        (setOf(slide) + rels(relsOf(slide)).filter { r -> r.type.endsWith("/notesSlide") || r.type.contains("comments", ignoreCase = true) }.mapNotNull { it.target })
+            .mapTo(HashSet()) { it.lowercase() }
+    }
+
+    /** The part a links file belongs to ("" for the package's own). */
+    private fun partOfRels(r: String): String =
+        if (r.startsWith("_rels/")) "" else r.substringBeforeLast("/_rels/", "").let { d -> (if (d.isEmpty()) "" else "$d/") + r.substringAfterLast('/').removeSuffix(".rels") }
+
+    /** For each part (lower case), the parts whose links lead to it; null if a links file cannot be read. */
+    private val incoming: Map<String, Set<String>>? by lazy {
+        try {
+            val m = HashMap<String, HashSet<String>>()
+            for (r in texts.keys) if (r.lowercase().endsWith(".rels")) {
+                val from = partOfRels(r).lowercase()
+                for (rel in rels(r)) rel.target?.let { m.getOrPut(it.lowercase()) { HashSet() } += from }
+            }
+            m
+        } catch (e: Exception) { null }
+    }
+
+    /**
+     * The parts (lower case) that link to a slide from elsewhere: another slide with a link to go to it,
+     * say. Not counted: the slide list itself, the slide's own notes and comments, and the outline view's
+     * list of slides (taken care of when saving). Null when the links cannot all be read.
+     */
+    fun linkSources(slide: String): Set<String>? {
+        val all = incoming ?: return null
+        val own = try { ownParts(slide) } catch (e: Exception) { return null }
+        return all[slide.lowercase()].orEmpty().filterTo(HashSet()) { it !in own && it != "ppt/presentation.xml" && it != VIEW_PROPS }
+    }
+
+    /** Whether a new part could take this name: no file there, nothing listed for it, no links file of it. */
+    fun isFree(path: String): Boolean {
+        val l = path.lowercase()
+        return l !in lowerNames && relsOf(path).lowercase() !in lowerNames && l !in overrides
+    }
+
+    /** Part names the list of part types has an entry for (lower case). */
+    private val overrides: Set<String> by lazy {
+        val ct = texts.entries.firstOrNull { it.key.equals("[Content_Types].xml", ignoreCase = true) }?.value ?: return@lazy emptySet()
+        try {
+            val root = XmlScan.children(ct, 0, ct.length).first()
+            XmlScan.children(ct, root).filter { it.local == "Override" }.mapNotNull { it.attrs["PartName"]?.removePrefix("/")?.lowercase() }.toSet()
+        } catch (e: Exception) { emptySet() }
     }
 
     /** Every part reached through links from the package's start, with [override] for links files that change. */
@@ -184,7 +222,23 @@ internal class Pack(
                 created += s.path; created += slideRels
             }
         }
-        for (r in removed) list += groups[r]!!.drop(1)
+        // Hidden slides that came after a slide taken out stay after the slide kept before it (or at the start)
+        val orphans = HashMap<Int?, MutableList<String>>()
+        for (r in removed) {
+            val before = (r - 1 downTo 0).firstOrNull { it in kept }
+            orphans.getOrPut(before) { ArrayList() } += groups[r]!!.drop(1)
+        }
+        if (orphans.isNotEmpty()) {
+            val withOrphans = ArrayList<String>(leading)
+            orphans[null]?.let { withOrphans += it }
+            var at = leading.size
+            for (s in order) {
+                val n = when (s) { is Slide.Kept -> groups[s.index]!!.size; is Slide.New -> 1 }
+                withOrphans += list.subList(at, at + n); at += n
+                if (s is Slide.Kept) orphans[s.index]?.let { withOrphans += it }
+            }
+            list.clear(); list += withOrphans
+        }
 
         var p = pres
         val root = XmlScan.children(p, 0, p.length).first { it.local == "presentation" }
@@ -197,6 +251,24 @@ internal class Pack(
         }
         p = sections(p, list.map { raw -> newIds[raw] ?: idOf.find(raw)?.groupValues?.get(1)?.toLongOrNull() })
         out["ppt/presentation.xml"] = p
+
+        // The outline view's list of slides (PowerPoint keeps one): slides taken out leave it
+        texts.keys.firstOrNull { it.equals(relsOf(VIEW_PROPS_NAME), ignoreCase = true) }?.let { vr ->
+            val vx = texts[vr]!!
+            val removedPaths = removed.map { shown[it].path.lowercase() }.toSet()
+            val gone = rels(vr).filter { it.target?.lowercase() in removedPaths }
+            if (gone.isEmpty()) return@let
+            val b = StringBuilder(); var at = 0
+            for (r in gone.sortedBy { it.start }) { b.append(vx, at, r.start); at = r.end }
+            b.append(vx, at, vx.length)
+            out[vr] = b.toString()
+            val viewName = texts.keys.firstOrNull { it.equals(VIEW_PROPS_NAME, ignoreCase = true) }
+            if (viewName != null) {
+                var v = texts[viewName]!!
+                for (r in gone) v = v.replace(Regex("<([\\w.-]+:)?sld\\s+[\\w.-]+:id\\s*=\\s*[\"']${Regex.escape(r.id)}[\"'][^>]*/>"), "")
+                out[viewName] = v
+            }
+        }
 
         // Links of the presentation: those to slides taken out gone, the new ones added
         val removedRids = removed.map { shown[it].rid }.toSet()
@@ -287,5 +359,7 @@ internal class Pack(
         private const val R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
         private const val P = "http://schemas.openxmlformats.org/presentationml/2006/main"
         private const val PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+        private const val VIEW_PROPS_NAME = "ppt/viewProps.xml"
+        private const val VIEW_PROPS = "ppt/viewprops.xml"
     }
 }

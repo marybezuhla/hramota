@@ -78,6 +78,7 @@ object Vault {
         Shelf.clearOpened(context)
         if (key == null) return true
         key = null
+        Shelf.CoverMemory.clear()
         openState.value = false
         Library.get(context).reload()
         Recents.get(context).reload()
@@ -92,6 +93,7 @@ object Vault {
      */
     fun reset(context: Context) {
         key = null
+        Shelf.CoverMemory.clear()
         for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue")))
             dir.listFiles().orEmpty().filter { it.name.endsWith(SUFFIX) }.forEach { it.delete() }
         context.getSharedPreferences("recents", Context.MODE_PRIVATE).edit().clear().commit()

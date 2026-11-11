@@ -174,6 +174,40 @@ class PptxEditTest {
         val edit = PptxEdit.open(ByteArrayInputStream(out.toByteArray()))
         assertTrue(!edit.canRemove(1))
         assertTrue(edit.canRemove(2))
+        // Once the slide with the link is taken out too, it can go
+        assertTrue(edit.canRemove(1, listOf(2, 3)))
+    }
+
+    @Test fun theOutlineViewDoesNotHoldSlidesBack() {
+        // PowerPoint's outline view lists every slide in viewProps.xml, through links of its own
+        val ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            ZipInputStream(ByteArrayInputStream(bytes())).use { zin ->
+                while (true) {
+                    val e = zin.nextEntry ?: break
+                    var data = zin.readBytes()
+                    if (e.name == "ppt/viewProps.xml") data = String(data).replace(Regex("</p:viewPr>\\s*$"),
+                        "<p:outlineViewPr><p:cViewPr><p:origin x=\"0\" y=\"0\"/></p:cViewPr><p:sldLst><p:sld r:id=\"rId1\" collapse=\"1\"/><p:sld r:id=\"rId2\" collapse=\"1\"/></p:sldLst></p:outlineViewPr></p:viewPr>").toByteArray()
+                    z.putNextEntry(java.util.zip.ZipEntry(e.name)); z.write(data); z.closeEntry()
+                }
+                z.putNextEntry(java.util.zip.ZipEntry("ppt/_rels/viewProps.xml.rels"))
+                z.write(("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                    "<Relationship Id=\"rId1\" Type=\"$ns/slide\" Target=\"slides/slide1.xml\"/><Relationship Id=\"rId2\" Type=\"$ns/slide\" Target=\"slides/slide3.xml\"/></Relationships>").toByteArray())
+                z.closeEntry()
+            }
+        }
+        val src = out.toByteArray()
+        val edit = PptxEdit.open(ByteArrayInputStream(src))
+        assertTrue(edit.canRemove(2))
+        val order = listOf(0, 1, 3)
+        val saved = ByteArrayOutputStream().also { edit.save(edit.paragraphs.filter { edit.boxes[it.box].slide != 2 }, order, ByteArrayInputStream(src), it) }.toByteArray()
+        val v = part(saved, "ppt/_rels/viewProps.xml.rels")!!
+        assertTrue(v, v.contains("slide1.xml") && !v.contains("slide3.xml"))
+        val vx = part(saved, "ppt/viewProps.xml")!!
+        assertTrue(vx, vx.contains("r:id=\"rId1\"") && !vx.contains("r:id=\"rId2\""))
+        assertTrue("ppt/slides/slide3.xml" !in names(saved))
+        assertEquals(3, texts(saved).size)
     }
 
     @Test fun sectionsFollowTheOrder() {

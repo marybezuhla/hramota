@@ -265,7 +265,7 @@ private suspend fun paginate(
     val titles = run {
         var last = ""; var i = 0
         chapters.map { r ->
-            while (i <= r.first) { (book.blocks[i] as? BookBlock.Text)?.takeIf { it.kind == BookBlock.Kind.HEADING1 }?.let { last = it.text.replace('\n', ' ') }; i++ }
+            while (i <= r.first && i < book.blocks.size) { (book.blocks[i] as? BookBlock.Text)?.takeIf { it.kind == BookBlock.Kind.HEADING1 }?.let { last = it.text.replace('\n', ' ') }; i++ }
             last
         }
     }

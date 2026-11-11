@@ -81,7 +81,7 @@ class PptxEdit private constructor(
         val id = slideCount + added.size
         val taken = pack.names + added.map { it.path }
         var n = 1
-        while ("ppt/slides/slide$n.xml" in taken || "ppt/slides/slide$n.xml".lowercase() in pack.lowerNames) n++
+        while ("ppt/slides/slide$n.xml" in taken || !pack.isFree("ppt/slides/slide$n.xml")) n++
         val path = "ppt/slides/slide$n.xml"
         val xml = pack.newSlideXml(layout, lang)
         val pi = parts.size
@@ -101,7 +101,14 @@ class PptxEdit private constructor(
      * Whether a slide can be taken out: not while another slide links to it (a link to a slide that
      * is gone would make the file broken in PowerPoint).
      */
-    fun canRemove(slide: Int): Boolean = slide >= slideCount || pack.linksTo(pack.shown[slide].path) == 0
+    fun canRemove(slide: Int, order: Collection<Int> = (0 until slideCount).toList()): Boolean {
+        if (slide >= slideCount) return true
+        val from = pack.linkSources(pack.shown[slide].path) ?: return false
+        if (from.isEmpty()) return true
+        // Links from slides also taken out (and their notes) do not count
+        val gone = pack.shown.indices.filter { it !in order && it != slide }.flatMapTo(HashSet()) { pack.ownParts(pack.shown[it].path) }
+        return from.all { it in gone }
+    }
 
     /** The look of a character as set on its run (what the slide's design adds is not counted). */
     fun bold(m: RunStyle) = m.bold ?: flag(m.rPr, "b")
@@ -204,7 +211,7 @@ class PptxEdit private constructor(
         val created = HashSet<String>()
         if (order != (0 until slideCount).toList()) {
             val removed = (0 until slideCount).filter { it !in kept }
-            for (r in removed) if (!canRemove(r)) throw IOException("A slide being taken out is linked to")
+            for (r in removed) if (!canRemove(r, order)) throw IOException("A slide being taken out is linked to")
             val restructured = pack.restructure(order.map { id -> if (id < slideCount) Pack.Slide.Kept(id) else newParts.values.first { it.slide == id }.let { a -> Pack.Slide.New(a.path, a.layout) } })
             changed.putAll(restructured.parts)
             created.addAll(restructured.created)
@@ -287,7 +294,7 @@ class PptxEdit private constructor(
                     // The slides, and what adding or taking out slides changes or follows: the lists of parts and
                     // links (all of them: what only a slide taken out used is found through them) and the layouts
                     if (lower == "ppt/presentation.xml" || lower == "[content_types].xml" || lower.endsWith(".rels") ||
-                        lower.startsWith("ppt/slides/") && lower.endsWith(".xml") || lower.startsWith("ppt/slidelayouts/") && lower.endsWith(".xml")) {
+                        lower == "ppt/viewprops.xml" || lower.startsWith("ppt/slides/") && lower.endsWith(".xml") || lower.startsWith("ppt/slidelayouts/") && lower.endsWith(".xml")) {
                         // The same name twice: which one is meant cannot be told; not edited
                         if (raw.containsKey(name)) throw IOException("Duplicate entry $name")
                         val b = readAll(zip, MAX_PART)
@@ -343,7 +350,7 @@ class PptxEdit private constructor(
             val digests = raw.mapValues { (_, b) -> MessageDigest.getInstance("SHA-256").digest(b) }
             val pack = Pack(
                 pres = pres, entries = entries, shown = shownSlides, names = names,
-                texts = raw.keys.filter { it.lowercase().endsWith(".rels") || it.lowercase() == "[content_types].xml" || it.lowercase().startsWith("ppt/slidelayouts/") && !it.lowercase().endsWith(".rels") }
+                texts = raw.keys.filter { it.lowercase().endsWith(".rels") || it.lowercase() == "[content_types].xml" || it.lowercase() == "ppt/viewprops.xml" || it.lowercase().startsWith("ppt/slidelayouts/") && !it.lowercase().endsWith(".rels") }
                     .associateWith { text(it)!! },
             )
             return PptxEdit(parts, digests, prefixes, boxes, paras, shown, pack)

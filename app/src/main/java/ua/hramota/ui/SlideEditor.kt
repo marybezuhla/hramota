@@ -129,7 +129,7 @@ class SlideEditorState(val edit: PptxEdit) {
     }
 
     /** False when it cannot be taken out: the last slide, or one another slide links to. */
-    fun canRemove(slide: Int) = order.size > 1 && edit.canRemove(slide)
+    fun canRemove(slide: Int) = order.size > 1 && edit.canRemove(slide, order)
 
     fun removeSlide(slide: Int) {
         if (!canRemove(slide)) return
@@ -309,7 +309,7 @@ fun SlideEditorScreen(
             for ((n, slide) in order.withIndex()) {
                 item(key = "slide-$slide") {
                     SlideHeading(
-                        number = n + 1, first = n == 0, last = n == order.size - 1, enabled = !saving, canRemove = state.canRemove(slide), linked = !state.edit.canRemove(slide),
+                        number = n + 1, first = n == 0, last = n == order.size - 1, enabled = !saving, canRemove = state.canRemove(slide), linked = !state.edit.canRemove(slide, state.order),
                         picture = thumbnail?.takeIf { slide < state.edit.slideCount }?.let { t -> val f: suspend (Int) -> ImageBitmap? = { w -> t(slide, w) }; f }, slide = slide, aspect = aspect,
                         empty = bySlide[slide].isNullOrEmpty(),
                         onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },

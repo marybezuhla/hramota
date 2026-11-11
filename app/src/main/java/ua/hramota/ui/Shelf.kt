@@ -468,8 +468,8 @@ internal fun shownTitle(e: LibraryEntry): String = e.coverTitle ?: e.docTitle ?:
 
 internal fun readableName(fileName: String): String {
     val base = fileName.substringBeforeLast('.', fileName)
-    // "Book_Title.844650": the site's number after the name
-    val bare = base.replace(Regex("\\.\\d{3,}$"), "")
+    // "Book_Title.844650": the site's number after the name (a year, "Budget.2025", stays)
+    val bare = base.replace(Regex("\\.\\d{5,}$"), "")
     return bare.replace('_', ' ').replace(Regex("\\s+"), " ").trim().ifEmpty { base }
 }
 
@@ -486,13 +486,21 @@ private fun Cover(e: LibraryEntry, modifier: Modifier) {
     val picture = usesPicture(e)
     val changes by ua.hramota.data.Shelf.coversChanged.collectAsState()
     val unlocked by ua.hramota.data.Vault.unlocked.collectAsState()
-    // Kept while Hramota runs: the same picture at once on every tab and view, never the drawn cover first
-    val key = CoverKey(e.id, changes, unlocked)
-    val load by produceState(CoverCache.peek(key, picture), key, picture) {
-        if (!picture) { value = CoverLoad.None; return@produceState }
-        CoverCache.get(key)?.let { value = CoverLoad.Picture(it); return@produceState }
-        val b = withContext(Dispatchers.IO) { ua.hramota.data.Shelf.loadCover(context, e.id)?.asImageBitmap() }
-        value = if (b != null) CoverLoad.Picture(b).also { CoverCache.put(key, b) } else CoverLoad.None.also { CoverCache.noPicture(key) }
+    // Kept while Hramota runs (see Shelf.CoverMemory): the same picture at once on every tab and view,
+    // never the drawn cover first
+    fun known(): CoverLoad = when {
+        !picture -> CoverLoad.None
+        else -> ua.hramota.data.Shelf.CoverMemory.get(e.id)?.let { CoverLoad.Picture(it.asImageBitmap()) }
+            ?: if (ua.hramota.data.Shelf.CoverMemory.hasNone(e.id)) CoverLoad.None else CoverLoad.Loading
+    }
+    val load by produceState(known(), e.id, picture, changes, unlocked) {
+        // (what is known now, not the picture of before: after locking, a sealed cover is not shown again)
+        value = known()
+        if (value != CoverLoad.Loading) return@produceState
+        val epoch = ua.hramota.data.Shelf.CoverMemory.epoch
+        val b = withContext(Dispatchers.IO) { ua.hramota.data.Shelf.loadCover(context, e.id) }
+        ua.hramota.data.Shelf.CoverMemory.put(e.id, b, epoch)
+        value = b?.let { CoverLoad.Picture(it.asImageBitmap()) } ?: CoverLoad.None
     }
     Box(modifier.aspectRatio(0.72f)) {
         val l = load
@@ -509,32 +517,6 @@ private sealed interface CoverLoad {
     data object Loading : CoverLoad
     data object None : CoverLoad
     class Picture(val image: ImageBitmap) : CoverLoad
-}
-
-private data class CoverKey(val id: String, val changes: Int, val unlocked: Boolean)
-
-/**
- * Covers already read, for the shelf's views. A small number (they are small pictures); emptied when a
- * cover changes or locked storage opens or closes, so a locked cover never shows from memory.
- */
-private object CoverCache {
-    private val pictures = android.util.LruCache<CoverKey, ImageBitmap>(60)
-    /** Documents found to have no picture (so the drawn cover shows at once next time). */
-    private val none = android.util.LruCache<CoverKey, Boolean>(200)
-    private var stamp: Pair<Int, Boolean>? = null
-
-    @Synchronized private fun check(k: CoverKey) {
-        if (stamp != k.changes to k.unlocked) { pictures.evictAll(); none.evictAll(); stamp = k.changes to k.unlocked }
-    }
-    @Synchronized fun get(k: CoverKey): ImageBitmap? { check(k); return pictures.get(k) }
-    @Synchronized fun put(k: CoverKey, b: ImageBitmap) { check(k); pictures.put(k, b) }
-    @Synchronized fun peek(k: CoverKey, picture: Boolean): CoverLoad = when {
-        !picture -> CoverLoad.None
-        get(k) != null -> CoverLoad.Picture(pictures.get(k))
-        none.get(k) != null -> CoverLoad.None
-        else -> CoverLoad.Loading
-    }
-    @Synchronized fun noPicture(k: CoverKey) { check(k); none.put(k, true) }
 }
 
 @Composable

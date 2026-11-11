@@ -28,6 +28,7 @@ class ShelfTitlesTest {
         assertEquals("Sanderson Z-imli-narodzheni 1 Z-imli-narodzheni", readableName("Sanderson_Z-imli-narodzheni_1_Z-imli-narodzheni.844650.fb2"))
         assertEquals("Звіт 2024", readableName("Звіт 2024.docx"))
         assertEquals("v1.2", readableName("v1.2.pdf"))
+        assertEquals("Budget.2025", readableName("Budget.2025.xlsx"))
     }
 
     @Test fun programTitlesAreNotTaken() {
