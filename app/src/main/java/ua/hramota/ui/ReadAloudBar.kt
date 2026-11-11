@@ -1,6 +1,7 @@
 package ua.hramota.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -61,7 +62,7 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            val notice = when { state.notice == ReadAloud.NOTICE_NO_VOICE -> R.string.read_no_voice; state.notice == ReadAloud.NOTICE_NO_LANGUAGE -> R.string.read_no_language; state.preparing -> R.string.read_preparing; else -> null }
+            val notice = when { state.notice == ReadAloud.NOTICE_NO_VOICE -> R.string.read_no_voice; state.notice == ReadAloud.NOTICE_NO_LANGUAGE -> R.string.read_no_language; state.notice == ReadAloud.NOTICE_NOT_DOWNLOADED -> R.string.read_not_downloaded; state.preparing -> R.string.read_preparing; else -> null }
             if (notice != null) Text(
                 stringResource(notice), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
@@ -113,7 +114,10 @@ internal fun ReadAloudBar(state: ReadAloud.State, onBookmark: () -> Unit, onSett
 @Composable
 internal fun ReadAloudSheet(state: ReadAloud.State, chapters: Boolean, onVoice: (String) -> Unit, onSpeed: (Float) -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Text(stringResource(R.string.read_aloud), style = MaterialTheme.typography.titleLarge)
             Text(stringResource(R.string.read_voice).uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Column(Modifier.selectableGroup()) {
@@ -133,6 +137,8 @@ internal fun ReadAloudSheet(state: ReadAloud.State, chapters: Boolean, onVoice: 
                     }
                 }
             }
+            // The voices, downloaded once (not in the app)
+            if (state.voice != ReadAloud.PHONE) VoiceDownloads()
             Text(stringResource(R.string.read_speed, speedLabel(state.speed)).uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (s in READ_SPEEDS) FilterChip(selected = state.speed == s, onClick = { onSpeed(s) }, label = { Text(speedLabel(s) + "×") }, modifier = Modifier.heightIn(min = 48.dp))

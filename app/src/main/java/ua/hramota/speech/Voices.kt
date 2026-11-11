@@ -112,7 +112,6 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
         const val RATE = 22050
         /** The voice's own pace stretched to a calm narrator's, about four syllables a second. */
         const val BASE_LENGTH = 1.0f
-        const val MODEL = "voice/uk-tetiana.onnx"
         /** Longest piece read in one run (letters): longer sentences are read in pieces. */
         private const val PIECE = 400
 
@@ -124,7 +123,7 @@ class TetianaVoice private constructor(private val session: OrtSession, private 
                 options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 // Memory given back after each sentence instead of kept for the longest one
                 options.setCPUArenaAllocator(false)
-                env.createSession(mapAsset(context, MODEL), options)
+                env.createSession(VoiceFiles.map(context, VoiceFiles.Voice.TETIANA), options)
             }
             try { return finishOpen(context, session, env, dictionary) } catch (e: Throwable) { session.close(); throw e }
         }
@@ -204,7 +203,7 @@ class EnglishVoice private constructor(
     override fun close() { try { session.close() } catch (_: Exception) {} }
 
     companion object {
-        const val MODEL = "voice/en-cori.onnx"
+        private const val CONFIG = "voice/en-cori.onnx.json"
         private const val MARKS = ",;:.!?…"
         private const val CLOSING = ")]\"'»"
         /** Words whose full stop does not end a clause: «Mr. Smith», «e.g. this». */
@@ -253,7 +252,7 @@ class EnglishVoice private constructor(
 
         fun open(context: Context): EnglishVoice {
             if (!Espeak.start(context)) throw IllegalStateException("espeak")
-            val cfg = org.json.JSONObject(context.assets.open("$MODEL.json").bufferedReader().readText())
+            val cfg = org.json.JSONObject(context.assets.open(CONFIG).bufferedReader().readText())
             val map = cfg.getJSONObject("phoneme_id_map")
             val ids = HashMap<String, LongArray>()
             for (k in map.keys()) { val a = map.getJSONArray(k); ids[k] = LongArray(a.length()) { a.getLong(it) } }
@@ -263,7 +262,7 @@ class EnglishVoice private constructor(
                 options.setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
                 options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 options.setCPUArenaAllocator(false)
-                env.createSession(mapAsset(context, MODEL), options)
+                env.createSession(VoiceFiles.map(context, VoiceFiles.Voice.CORI), options)
             }
             return EnglishVoice(
                 session, env, ids, cfg.optJSONObject("espeak")?.optString("voice")?.ifEmpty { null } ?: "en-gb-x-rp",
