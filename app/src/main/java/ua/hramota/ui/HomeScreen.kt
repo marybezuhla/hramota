@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,8 +55,9 @@ import ua.hramota.data.RecentFile
 import ua.hramota.doc.Format
 
 /**
- * Home: the two main actions at the bottom, within reach of the thumb, and the recent files above.
- * [comparePrompt] replaces the actions while the second file of a comparison is being chosen.
+ * Home: the recent files and the shelf on nearly the whole screen; opening, making and comparing files
+ * behind one round button at the bottom, within reach of the thumb. [comparePrompt] replaces that button
+ * while the second file of a comparison is being chosen.
  */
 @Composable
 fun HomeScreen(
@@ -83,19 +83,13 @@ fun HomeScreen(
     /** Recent files that cannot be opened again from here (shown quieter, with why). */
     unreachable: Set<String> = emptySet(),
 ) {
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        Row(Modifier.padding(start = 20.dp, end = 8.dp, top = 24.dp, bottom = 8.dp), verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                Text(stringResource(R.string.home_tagline), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            androidx.compose.material3.IconButton(onClick = onSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+    // Nearly the whole screen for the shelf and the recent files: the tabs and settings in one row at the
+    // top; opening, making and comparing files behind one round button within reach of the thumb
+    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+      Column(Modifier.fillMaxSize()) {
         // Two tabs: recent files, and the shelf of kept documents
         var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (startOnShelf) 1 else 0) }
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
           // With a large font the tabs scroll sideways rather than break words
           Row(Modifier.weight(1f).horizontalScroll(androidx.compose.foundation.rememberScrollState()).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
             for ((i, label) in listOf(stringResource(R.string.recent), stringResource(R.string.shelf, shelf.size)).withIndex()) {
@@ -104,10 +98,13 @@ fun HomeScreen(
                     color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(end = 6.dp).clip(RoundedCornerShape(10.dp))
                         .background(if (on) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 14.dp, vertical = 14.dp))
+                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 14.dp, vertical = 12.dp))
             }
           }
             if (tab == 0 && recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false) }
+            androidx.compose.material3.IconButton(onClick = onSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         if (tab == 1) {
             Shelf(shelf, shelves, onOpenShelf, onShelfAction, onPutShelf, onRemoveShelf, onSetShelves, Modifier.weight(1f).fillMaxWidth(), startShelf)
@@ -119,37 +116,35 @@ fun HomeScreen(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).weight(1f),
             )
         } else {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // (room at the foot, so the round button never covers the last file)
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 88.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items(recents, key = { it.uri }) { file -> RecentRow(file, now, file.uri in unreachable, { onOpenRecent(file) }, { onRemove(file) }) }
             }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (comparePrompt != null) {
-                Text(comparePrompt, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 4.dp))
-            }
-            Button(onClick = onOpenFile, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.open_file))
-            }
-            if (comparePrompt == null) {
-                // Side by side while both fit on one line; one under the other with a large font (a word is never broken)
-                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 2) {
-                    OutlinedButton(onClick = onCreate, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
-                        Text(stringResource(R.string.create_new), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    }
-                    OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
-                        Text(stringResource(R.string.compare_versions), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    }
+        // Choosing the second file of a comparison: said plainly, with the way to choose it
+        if (comparePrompt != null) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(comparePrompt, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                Button(onClick = onOpenFile, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.open_file))
                 }
             }
-            Text(
-                stringResource(R.string.privacy_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp),
-            )
+        }
+      }
+        if (comparePrompt == null) {
+            var actions by remember { mutableStateOf(false) }
+            Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+                androidx.compose.material3.FloatingActionButton(onClick = { actions = true }) {
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.home_actions))
+                }
+                DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.open_file)) }, onClick = { actions = false; onOpenFile() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.create_new)) }, onClick = { actions = false; onCreate() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.compare_versions)) }, onClick = { actions = false; onCompare() })
+                }
+            }
         }
     }
 }

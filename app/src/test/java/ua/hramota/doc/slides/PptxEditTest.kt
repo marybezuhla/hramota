@@ -80,4 +80,129 @@ class PptxEditTest {
         assertTrue(x, x.contains("<a:rPr lang=\"uk-UA\" b=\"1\"/>"))
         PptxReader.read(ByteArrayInputStream(out))
     }
+
+    private fun texts(b: ByteArray) = PptxReader.read(ByteArrayInputStream(b)).slides.map { sl ->
+        sl.shapes.filterIsInstance<SlideShape.Box>().flatMap { it.paragraphs }.joinToString(" | ") { p2 -> p2.runs.joinToString("") { it.text } }
+    }
+
+    private fun names(b: ByteArray): Set<String> = ZipInputStream(ByteArrayInputStream(b)).use { z ->
+        val out = HashSet<String>(); while (true) { val e = z.nextEntry ?: break; out += e.name }; out
+    }
+
+    /** Types the text into a slide's first [n] empty paragraphs. */
+    private fun fill(edit: PptxEdit, list: MutableList<ua.hramota.doc.slides.edit.SlidePara>, slide: Int, vararg text: String) {
+        var k = 0
+        for (i in list.indices) {
+            if (k >= text.size) break
+            val p = list[i]
+            if (edit.boxes[p.box].slide != slide || !p.editable) continue
+            list[i] = p.changed(text = text[k], marks = List(text[k].length) { p.typing }); k++
+        }
+    }
+
+    @Test fun aNewPresentationGetsSlides() {
+        val bytes = ua.hramota.doc.Templates.pptx("uk-UA")
+        val edit = PptxEdit.open(ByteArrayInputStream(bytes))
+        assertEquals(1, edit.slideCount)
+        val list = edit.paragraphs.toMutableList()
+        fill(edit, list, 0, "Звіт громади", "Листопад 2026")
+        val (second, paras) = edit.addSlide(0, "uk-UA")
+        list += paras
+        fill(edit, list, second, "Що зроблено", "Світло в школі")
+        val (third, more) = edit.addSlide(second, "uk-UA")
+        list += more
+        fill(edit, list, third, "Далі")
+        val out = ByteArrayOutputStream().also { edit.save(list, listOf(0, second, third), ByteArrayInputStream(bytes), it) }.toByteArray()
+        File("build/edited").apply { mkdirs() }.let { File(it, "new-presentation.pptx").writeBytes(out); File(it, "new-presentation.pages").writeText("3") }
+        val t = texts(out)
+        assertEquals(t.toString(), 3, t.size)
+        assertTrue(t[0], t[0].startsWith("Звіт громади") && t[0].contains("Листопад 2026"))
+        assertTrue(t[1], t[1].startsWith("Що зроблено") && t[1].contains("Світло в школі"))
+        assertTrue(t[2], t[2].startsWith("Далі"))
+        // The new slides follow "Title and Content"; their language is the phone's
+        assertTrue(part(out, "ppt/slides/_rels/slide2.xml.rels")!!.contains("slideLayout2.xml"))
+        assertTrue(part(out, "ppt/slides/slide2.xml")!!.contains("lang=\"uk-UA\""))
+        assertTrue(part(out, "[Content_Types].xml")!!.contains("/ppt/slides/slide3.xml"))
+    }
+
+    @Test fun slidesAreMovedAddedAndTakenOut() {
+        val src = bytes()
+        val edit = PptxEdit.open(ByteArrayInputStream(src))
+        val list = edit.paragraphs.toMutableList()
+        val (added, paras) = edit.addSlide(0, "uk-UA")
+        list += paras
+        fill(edit, list, added, "Новий слайд")
+        // Slide 3 (the one with the picture) taken out; slide 4 before slide 2; the new one after slide 1
+        val kept = list.filter { edit.boxes[it.box].slide != 2 }
+        val order = listOf(0, added, 3, 1)
+        val arranged = order.flatMap { s -> kept.filter { edit.boxes[it.box].slide == s } }
+        assertTrue(edit.canRemove(2))
+        val out = ByteArrayOutputStream().also { edit.save(arranged, order, ByteArrayInputStream(src), it) }.toByteArray()
+        File("build/edited").apply { mkdirs() }.let { File(it, "restructured-slides.pptx").writeBytes(out); File(it, "restructured-slides.pages").writeText("4") }
+        val t = texts(out)
+        assertEquals(t.toString(), 4, t.size)
+        assertTrue(t[0], t[0].startsWith("Проєкт «Грамота»"))
+        assertTrue(t[1], t[1].startsWith("Новий слайд"))
+        assertTrue(t[2], t[2].startsWith("Таблиця"))
+        assertTrue(t[3], t[3].startsWith("Що зроблено"))
+        // What only the slide taken out used is gone from the file, and from its lists
+        val n = names(out)
+        assertTrue(n.toString(), "ppt/slides/slide3.xml" !in n && "ppt/slides/_rels/slide3.xml.rels" !in n && "ppt/media/image1.png" !in n)
+        val ct = part(out, "[Content_Types].xml")!!
+        assertTrue(!ct.contains("/ppt/slides/slide3.xml\""))
+        assertTrue(!part(out, "ppt/_rels/presentation.xml.rels")!!.contains("slides/slide3.xml"))
+        // The new slide took a free name and is listed
+        val pres = part(out, "ppt/presentation.xml")!!
+        assertEquals(4, Regex("<p:sldId ").findAll(pres).count())
+        // Untouched slides are as they were
+        assertEquals(part(src, "ppt/slides/slide4.xml"), part(out, "ppt/slides/slide4.xml"))
+    }
+
+    @Test fun aSlideLinkedToIsNotTakenOut() {
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            ZipInputStream(ByteArrayInputStream(bytes())).use { zin ->
+                while (true) {
+                    val e = zin.nextEntry ?: break
+                    var data = zin.readBytes()
+                    if (e.name == "ppt/slides/_rels/slide1.xml.rels") data = String(data).replace("</Relationships>",
+                        "<Relationship Id=\"rId9\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slide2.xml\"/></Relationships>").toByteArray()
+                    z.putNextEntry(java.util.zip.ZipEntry(e.name)); z.write(data); z.closeEntry()
+                }
+            }
+        }
+        val edit = PptxEdit.open(ByteArrayInputStream(out.toByteArray()))
+        assertTrue(!edit.canRemove(1))
+        assertTrue(edit.canRemove(2))
+    }
+
+    @Test fun sectionsFollowTheOrder() {
+        val sections = "<p:extLst><p:ext uri=\"{521415D9-36F7-43E2-AB2F-B90AF26B5E84}\"><p14:sectionLst xmlns:p14=\"http://schemas.microsoft.com/office/powerpoint/2010/main\">" +
+            "<p14:section name=\"Вступ\" id=\"{11111111-1111-1111-1111-111111111111}\"><p14:sldIdLst><p14:sldId id=\"256\"/><p14:sldId id=\"257\"/></p14:sldIdLst></p14:section>" +
+            "<p14:section name=\"Дані\" id=\"{22222222-2222-2222-2222-222222222222}\"><p14:sldIdLst><p14:sldId id=\"258\"/><p14:sldId id=\"259\"/></p14:sldIdLst></p14:section>" +
+            "</p14:sectionLst></p:ext></p:extLst></p:presentation>"
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            ZipInputStream(ByteArrayInputStream(bytes())).use { zin ->
+                while (true) {
+                    val e = zin.nextEntry ?: break
+                    var data = zin.readBytes()
+                    if (e.name == "ppt/presentation.xml") data = String(data).replace("</p:presentation>", sections).toByteArray()
+                    z.putNextEntry(java.util.zip.ZipEntry(e.name)); z.write(data); z.closeEntry()
+                }
+            }
+        }
+        val src = out.toByteArray()
+        val edit = PptxEdit.open(ByteArrayInputStream(src))
+        val (added, paras) = edit.addSlide(0, "uk-UA")
+        // A slide added after the first joins its section
+        val a = ByteArrayOutputStream().also { edit.save(edit.paragraphs + paras, listOf(0, added, 1, 2, 3), ByteArrayInputStream(src), it) }.toByteArray()
+        val pa = part(a, "ppt/presentation.xml")!!
+        assertTrue(pa, pa.contains("<p14:sldId id=\"256\"/><p14:sldId id=\"260\"/><p14:sldId id=\"257\"/></p14:sldIdLst>"))
+        // A section broken in two: sections taken out, the slides kept
+        val b = ByteArrayOutputStream().also { edit.save(edit.paragraphs, listOf(0, 2, 1, 3), ByteArrayInputStream(src), it) }.toByteArray()
+        val pb = part(b, "ppt/presentation.xml")!!
+        assertTrue(pb, !pb.contains("sectionLst") && Regex("<p:sldId ").findAll(pb).count() == 4)
+        assertEquals(4, texts(b).size)
+    }
 }

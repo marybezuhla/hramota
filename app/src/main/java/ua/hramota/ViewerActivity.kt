@@ -202,6 +202,18 @@ open class ViewerActivity : ComponentActivity() {
                         val ext = name.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
                         library.update(id) { it?.copy(title = first + ext) }
                     }
+                    // The title the document gives itself (a book's title, a Word document's properties) is shown
+                    // on the shelf instead of the file's name ("Sanderson_Z-imli-narodzheni.844650.fb2")
+                    LaunchedEffect(state, docId) {
+                        val id = docId ?: return@LaunchedEffect
+                        val own = when (val st = state) {
+                            is ViewerState.Reader -> st.book.title
+                            is ViewerState.Paged -> st.inspection?.title?.takeUnless { generatedTitle(it) }
+                            else -> null
+                        }?.let { ua.hramota.data.Library.cleanTitle(it).take(ua.hramota.data.Library.MAX_COVER_TITLE) }
+                            ?.takeIf { t -> t.count { it.isLetter() } >= 3 } ?: return@LaunchedEffect
+                        if (library.get(id)?.docTitle != own) library.update(id) { it?.copy(docTitle = own) }
+                    }
                     // A book goes on the shelf with a copy kept inside Hramota, and its cover picture as the cover
                     LaunchedEffect(state, docId) {
                         val book = (state as? ViewerState.Reader)?.book ?: return@LaunchedEffect
@@ -224,6 +236,7 @@ open class ViewerActivity : ComponentActivity() {
                         when {
                             format == Format.DOCX && state is ViewerState.Paged -> { held.autoEdited = true; startEditing(uri) }
                             format == Format.XLSX && state is ViewerState.Sheets -> { held.autoEdited = true; startSheetEditing(uri, (state as ViewerState.Sheets).workbook) }
+                            format == Format.PPTX && state is ViewerState.Paged -> { held.autoEdited = true; startSlideEditing(uri) }
                         }
                     }
                     // A presentation's first slide becomes its cover on the shelf (other documents get a drawn one)
@@ -235,8 +248,11 @@ open class ViewerActivity : ComponentActivity() {
                         pages.render(0, 360)?.let { img -> withContext(Dispatchers.IO) { ua.hramota.data.Shelf.saveCover(applicationContext, id, img.asAndroidBitmap()) } }
                     }
                     // The PDF engine holds the open file: release it when the window goes
-                    DisposableEffect(state) {
-                        onDispose { ((state as? ViewerState.Paged)?.pages as? java.io.Closeable)?.close() }
+                    // (the document this effect was started for: by the time it is disposed, `state` already
+                    // holds the next one, and closing that would leave the window showing a closed document)
+                    val shownState = state
+                    DisposableEffect(shownState) {
+                        onDispose { ((shownState as? ViewerState.Paged)?.pages as? java.io.Closeable)?.close() }
                     }
                     savingNotes?.let { pdf ->
                         androidx.compose.material3.AlertDialog(
@@ -985,6 +1001,17 @@ open class ViewerActivity : ComponentActivity() {
         /** A name that is only a code (a UUID or a long run of digits and letters), not words. */
 
         private val CODE_NAME = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F_-]{24,}")
+
+        /**
+         * A title a program wrote by itself, not the author ("Microsoft Word - report.doc", "Document1",
+         * "Slide 1"): the file's name says more.
+         */
+        internal fun generatedTitle(t: String): Boolean {
+            val s = t.trim().lowercase()
+            return s.startsWith("microsoft word -") || s.startsWith("microsoft powerpoint -") ||
+                Regex("(document|документ|документ microsoft word|presentation|презентація|slide|слайд|title|заголовок|untitled|без назви)\\s*\\d*").matches(s) ||
+                Regex(".*\\.(docx?|pptx?|pdf|rtf|odt)$").matches(s)
+        }
 
         /** Known only inside this process: proves an own copy was opened by Hramota, not by another app. */
         val TOKEN: String = java.util.UUID.randomUUID().toString()
