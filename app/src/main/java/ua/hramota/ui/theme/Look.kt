@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
@@ -40,6 +39,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.Hyphens
@@ -205,10 +206,8 @@ fun <T> Segments(options: List<Pair<T, String>>, chosen: T, modifier: Modifier =
 /** All themes at once, in rows across the whole width: none hides behind the edge of the screen. */
 @Composable
 fun ThemeRow(themes: List<Theme>, chosen: Theme, onChoose: (Theme) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth()) {
         val gap = 10.dp
-        // One theme's share of the row, to fit its name
-        val width = ((maxWidth - gap * 2) / 3).value.toInt().dp
         // Rows of exactly three, each across the whole width: a flowing row could push the third onto the next line
         Column(
             Modifier.fillMaxWidth().selectableGroup().padding(vertical = 4.dp),
@@ -220,23 +219,7 @@ fun ThemeRow(themes: List<Theme>, chosen: Theme, onChoose: (Theme) -> Unit) {
                         val selected = theme == chosen
                         Column(Modifier.weight(1f).selectable(selected, role = Role.RadioButton) { onChoose(theme) }, horizontalAlignment = Alignment.CenterHorizontally) {
                             Sample(theme, selected)
-                            // A long name with a large font gets smaller rather than broken inside a word («Зоряна ніч»)
-                            val name = themeName(theme)
-                            val base = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                            val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-                            val room = with(androidx.compose.ui.platform.LocalDensity.current) { width.toPx() }
-                            val fitted = remember(name, room, base) {
-                                val word = name.split(' ').maxByOrNull { it.length } ?: name
-                                var size = base.fontSize.value
-                                while (size > 11f && measurer.measure(word, base.copy(fontSize = size.sp)).size.width > room) size -= 0.5f
-                                size.sp
-                            }
-                            Text(
-                                name, style = MaterialTheme.typography.bodyMedium.copy(fontSize = fitted, lineHeight = fitted * 1.35f),
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
+                            ThemeName(themeName(theme), selected)
                         }
                     }
                     // A short last row keeps the same sizes
@@ -245,6 +228,27 @@ fun ThemeRow(themes: List<Theme>, chosen: Theme, onChoose: (Theme) -> Unit) {
             }
         }
     }
+}
+
+/**
+ * A theme's name under its picture, as in Komora: never broken inside a word («Viburnu / m» on a narrow phone with
+ * large text). One word per line at most; a word that does not fit gets a smaller size instead.
+ */
+@Composable
+private fun ThemeName(name: String, selected: Boolean) {
+    val style = MaterialTheme.typography.bodyMedium.merge(
+        color = MaterialTheme.colorScheme.onSurface,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        textAlign = TextAlign.Center,
+    )
+    // One word per line: any other break overflows, so the text shrinks instead
+    androidx.compose.foundation.text.BasicText(
+        name.replace(' ', '\n'),
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).semantics { contentDescription = name },
+        style = style,
+        maxLines = name.split(' ').size,
+        autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp),
+    )
 }
 
 /** A tiny app: the background, one card with two lines of text and a button, in the theme's colours. */
