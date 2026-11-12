@@ -165,11 +165,11 @@ object Shelf {
      * from its old fingerprint to the new one, sealed again if it was sealed (a sealed cover is bound to
      * its name). Without the key a sealed cover cannot move and is left out; the shelf draws one.
      */
-    fun moveCover(context: Context, from: String, to: String) {
-        if (from == to) return
-        val png = loadCoverBytes(context, from)
-        coverFile(context, from, false).delete(); coverFile(context, from, true).delete()
-        if (png != null) putCover(context, to, png) else changed()
+    fun moveCover(context: Context, from: String, to: String, keep: Boolean = false) {
+        if (from == to || !hasCover(context, from)) return
+        val png = loadCoverBytes(context, from) ?: return
+        // The old one goes only once the new one is in place ([keep]: both documents stay remembered)
+        if (putCover(context, to, png) && !keep) { coverFile(context, from, false).delete(); coverFile(context, from, true).delete(); changed() }
     }
 
     /**

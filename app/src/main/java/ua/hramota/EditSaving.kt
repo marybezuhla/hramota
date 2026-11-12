@@ -109,8 +109,9 @@ object EditSaving {
                 }
                 // The cover goes with the document. Only a presentation's own first slide (not one chosen) is
                 // made again, as it may look different now
-                if (entry.cover != "picture" && entry.format in setOf("PPTX", "PPT", "ODP")) Shelf.putCover(context, id, null)
-                else Shelf.moveCover(context, id, newId)
+                // (the copy not updated: the old version stays remembered, with its cover too)
+                if (entry.cover != "picture" && entry.format in setOf("PPTX", "PPT", "ODP")) { if (copy == null || newCopy != null) Shelf.putCover(context, id, null) }
+                else Shelf.moveCover(context, id, newId, keep = copy != null && newCopy == null)
             }
             return Outcome(Result.SAVED, newId)
         } finally {

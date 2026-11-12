@@ -128,6 +128,11 @@ class SpeechTest {
         assertTrue(said("2 судді"), said("2 судді").startsWith("два судді"))
         assertTrue(said("2 дні"), said("2 дні").startsWith("два дні"))
         assertTrue(said("два книги"), said("два книги").startsWith("два книги"))
+        assertTrue(said("2 книги та 2 ручки"), said("2 книги та 2 ручки").startsWith("дві книги та дві ручки"))
+        assertTrue(said("2 варіанти"), said("2 варіанти").startsWith("два варіанти"))
+        assertTrue(said("2 друзі"), said("2 друзі").startsWith("два друзі"))
+        assertTrue(said("пункт 2 частини 1 статті 3"), said("пункт 2 частини 1 статті 3").startsWith("пункт два частини"))
+        assertTrue(said("ст. 2 Конституції"), !said("ст. 2 Конституції").contains("дві"))
         // «черговий»: before a noun, as the owner hears it; on its own, the one on duty
         assertTrue(text.prepare("Черговий лікар прийшов.").contains("Черг+овий"))
         assertTrue(text.prepare("Покликали, і черговий прийшов.").contains("чергов+ий"))

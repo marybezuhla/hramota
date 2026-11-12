@@ -75,7 +75,16 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         "сімдесят", "вісімдесят", "дев'яносто", "триста", "чотириста", "п'ятсот", "шістсот", "сімсот", "вісімсот", "дев'ятсот")
     private val KEEP = '\uE000'
     private val WORD_ONE = Regex("""(?<![\p{L}'])(один|два)(?![\p{L}'])""", RegexOption.IGNORE_CASE)
-    private val TWO_BEFORE = Regex("""(?<![\p{L}'])(два)((?:\s+[\p{L}']+){1,3})""", RegexOption.IGNORE_CASE)
+    // (the words after it only looked at: a second «два» among them is matched too)
+    private val TWO_BEFORE = Regex("""(?<![\p{L}'])(два)(?=((?:\s+[\p{L}']+){1,3}))""", RegexOption.IGNORE_CASE)
+    private val LETTERS = Regex("""[\p{L}']+""")
+    // A number that names, not counts: «пункт 2 частини 1», «стаття 2 Конституції» (the next noun is a genitive)
+    private val LABELS = setOf("пункт", "пункту", "пункті", "підпункт", "підпункту", "частина", "частини", "частині", "стаття", "статті", "статтю",
+        "розділ", "розділу", "розділі", "підрозділ", "глава", "глави", "главі", "додаток", "додатку", "додатка", "сторінка", "сторінці", "сторінки",
+        "рисунок", "рисунку", "малюнок", "малюнку", "таблиця", "таблиці", "том", "тому", "номер", "номера", "номері", "клас", "класу", "класі",
+        "абзац", "абзацу", "абзаці", "параграф", "параграфа", "параграфі", "схема", "схеми", "графік", "графіка", "крок", "кроку", "етап", "етапу",
+        "варіант", "варіанта", "варіанту", "версія", "версії", "рядок", "рядка", "рядку", "палата", "палати", "кімната", "кімнати", "квартира", "квартири",
+        "будинок", "будинку", "корпус", "корпусу", "поверх", "поверху", "аудиторія", "аудиторії", "група", "групи", "групі", "курс", "курсу", "рівень", "рівня")
     private val ONE_BEFORE = Regex("""(?<![\p{L}'])(один)(\s+)([\p{L}']{3,})""", RegexOption.IGNORE_CASE)
 
     private fun agree(text: String): String = ONE_BEFORE.replace(text) { m ->
@@ -116,17 +125,31 @@ class UkrainianText(private val dictionary: StressDictionary?) {
             else -> return false
         }
         if (singular.any { it in MASCULINE_O_A }) return false
+        // The same stem with a masculine «-ом/-ем» («варіантом», «другом», «балом»): not told apart, left as «два»
+        val stem = if (w.endsWith("ії")) w.dropLast(2) else w.dropLast(1)
+        val masculine = if (w.endsWith("ії")) known(stem + "ій") && known(stem + "ієм") else known(stem + "ом") || known(stem + "ем") || known(stem + "єм")
+        if (masculine) return false
         return instrumental.any(::known)
     }
 
     /** «2 книги» — «дві книги»: «два» from a number takes the gender of its noun (an adjective may come between). */
     private fun agreeTwo(text: String): String = TWO_BEFORE.replace(text) { m ->
-        val words = Regex("""[\p{L}']+""").findAll(m.groupValues[2]).map { it.value.lowercase() }.toList()
+        val original = LETTERS.findAll(m.groupValues[2]).map { it.value }.toList()
+        val words = original.map { it.lowercase() }
+        // «пункт 2 частини»: a number naming something, not counting
+        // (the word before the whole number: «пункт двадцять два»)
+        val before = LETTERS.findAll(text.substring(0, m.range.first).takeLast(80)).map { it.value.lowercase() }.toList()
+            .lastOrNull { it !in NUMERALS }
+        if (before != null && before in LABELS) return@replace m.value
         var k = 0
         while (k < words.size - 1 && k < 2 && adjectivePlural(words[k])) k++
+        // Still an adjective after two: not sure which word is the noun
+        if (adjectivePlural(words[k]) && k > 0) return@replace m.value
+        // A name («2 Конституції») is not counted
+        if (original[k][0].isUpperCase()) return@replace m.value
         if (!femininePlural(words[k])) return@replace m.value
         val two = m.groupValues[1]
-        (if (two[0].isUpperCase()) "Дві" else "дві") + m.groupValues[2]
+        if (two[0].isUpperCase()) "Дві" else "дві"
     }
 
     /** Words whose stress depends on the next one: «черго́вий лікар» (next in turn, on duty for the owner), «чергови́й» alone (the one on duty). */
