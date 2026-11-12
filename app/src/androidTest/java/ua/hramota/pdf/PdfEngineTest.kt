@@ -136,4 +136,20 @@ class PdfEngineTest {
             assertTrue(saved.text(0)!!.contains("Hramota test page"))
         } finally { saved.close() }
     }
+
+    @Test fun protectedPdfOpensWithItsPassword(): Unit = runBlocking {
+        try {
+            PdfiumPages.open(context, asset("protected.pdf")).close()
+            fail("a protected file must ask for its password")
+        } catch (e: PdfPasswordException) {}
+        try {
+            PdfiumPages.open(context, asset("protected.pdf"), "wrong").close()
+            fail("a wrong password must not open it")
+        } catch (e: PdfPasswordException) {}
+        val pages = PdfiumPages.open(context, asset("protected.pdf"), "hramota2026")
+        try {
+            assertEquals(2, pages.pageCount)
+            assertNotNull(pages.render(0, 300))
+        } finally { pages.close() }
+    }
 }

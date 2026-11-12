@@ -51,3 +51,14 @@ data = [["Формат", "Перегляд", "Пошук"], ["DOCX", "сторі
 for i in range(rows):
     for j in range(cols): t.cell(i, j).text = data[i][j]
 prs.save(os.path.join(out, "01-project.pptx"))
+
+# A presentation with speaker notes on its first slide only (notes are edited and added in Hramota)
+notes = Presentation()
+s1 = notes.slides.add_slide(notes.slide_layouts[1])
+s1.shapes.title.text = "Бюджет громади"
+s1.placeholders[1].text = "Видатки на школи"
+s1.notes_slide.notes_text_frame.text = "Сказати про ремонт даху"
+s2 = notes.slides.add_slide(notes.slide_layouts[1])
+s2.shapes.title.text = "Далі"
+s2.placeholders[1].text = "Голосування"
+notes.save(os.path.join(out, "02-notes.pptx"))

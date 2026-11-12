@@ -39,7 +39,9 @@ class SlidePara(
 /** A text box: which slide (in the order shown), what kind ("title", "body"…), where its paragraphs are. */
 class TextBox(val slide: Int, val kind: String, internal val part: Int, internal val from: Int, internal val to: Int,
               /** Paragraphs counted by an animation (one by one): they are neither split nor joined here. */
-              val fixed: Boolean = false)
+              val fixed: Boolean = false,
+              /** The id of the shape placed on the slide that holds it (a group's for a shape inside one). */
+              val shape: String? = null)
 
 /**
  * A PPTX opened for editing its text. Only the text boxes whose paragraphs changed are written anew
@@ -56,6 +58,14 @@ class PptxEdit private constructor(
     val slideCount: Int,
     /** What adding, taking out and moving slides needs: the package's lists and links as opened. */
     private val pack: Pack,
+    /** The slide each part belongs to (a slide's own part, or its speaker notes). */
+    private val partSlide: MutableList<Int>,
+    /** Parts that are speaker notes. */
+    private val notesParts: MutableSet<Int>,
+    /** The notes master (new speaker notes follow it); null when the presentation has none. */
+    private val notesMaster: String?,
+    /** Slides that link to speaker notes (read here or not). */
+    private val notesLinked: Set<Int>,
 ) {
     /** Every text box, of the slides as opened and of those added since. */
     val boxes: List<TextBox> get() = boxList
@@ -73,6 +83,7 @@ class PptxEdit private constructor(
      * Content" layout places them) to be put [after] that slide. Returns its number among the slides
      * (the slides as opened are 0 until [slideCount]) and its paragraphs. Nothing is written until saving.
      */
+    @Synchronized
     fun addSlide(after: Int?, lang: String): Pair<Int, List<SlidePara>> {
         val layout = when {
             after != null && after >= slideCount -> added.firstOrNull { it.slide == after }?.layout
@@ -87,6 +98,7 @@ class PptxEdit private constructor(
         val pi = parts.size
         parts += path to xml
         prefixes += "a"
+        partSlide += id
         val root = XmlScan.children(xml, 0, xml.length).first { it.local == "sld" }
         val paras = ArrayList<SlidePara>()
         readSlide(xml, root, "a", pi, id, boxList, paras, HashMap(), { nextKey++ })
@@ -108,6 +120,194 @@ class PptxEdit private constructor(
         // Links from slides also taken out (and their notes) do not count
         val gone = pack.shown.indices.filter { it !in order && it != slide }.flatMapTo(HashSet()) { pack.ownParts(pack.shown[it].path) }
         return from.all { it in gone }
+    }
+
+    // ---- Speaker notes ----
+
+    /** Whether [slide] has speaker notes (its own, or ones added here). */
+    fun hasNotes(slide: Int) = boxList.any { it.slide == slide && it.kind == "notes" }
+
+    /** New speaker notes added to a slide: the part made here, written only if it keeps its paragraph. */
+    private class NewNotes(val slide: Int, val part: Int, val path: String, val paragraphs: List<SlidePara>)
+    private val newNotes = ArrayList<NewNotes>()
+
+    /** Empty speaker notes for [slide] (one paragraph to type into), or null when the presentation has no notes master. */
+    @Synchronized
+    fun addNotes(slide: Int, lang: String): List<SlidePara>? {
+        // Added before (and undone): the same notes again
+        newNotes.firstOrNull { it.slide == slide }?.let { nn -> return nn.paragraphs.map { p -> SlidePara(nextKey++, p.startTag, p.box, p.text, p.marks, p.pPr, p.end, p.editable, p.original, p.typing) } }
+        // A slide linked to notes of its own (read or not) gets no second ones
+        if (notesMaster == null || hasNotes(slide) || slide in notesLinked) return null
+        val taken = pack.names + newNotes.map { it.path }
+        var n = 1
+        while ("ppt/notesSlides/notesSlide$n.xml" in taken || !pack.isFree("ppt/notesSlides/notesSlide$n.xml")) n++
+        val path = "ppt/notesSlides/notesSlide$n.xml"
+        val l = XmlScan.escape(lang)
+        val xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
+            "<p:notes xmlns:a=\"$DML\" xmlns:r=\"$REL\" xmlns:p=\"$PML\"><p:cSld><p:spTree>" + ua.hramota.doc.Templates.GROUP +
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Slide Image Placeholder 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"sldImg\"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>" +
+            ua.hramota.doc.Templates.placeholder(3, "Notes Placeholder 2", "<p:ph type=\"body\" idx=\"1\"/>", lang) +
+            "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>"
+        val pi = parts.size
+        parts += path to xml
+        prefixes += "a"
+        partSlide += slide
+        notesParts += pi
+        newNotes += NewNotes(slide, pi, path, emptyList())
+        val root = XmlScan.children(xml, 0, xml.length).first { it.local == "notes" }
+        val paras = ArrayList<SlidePara>()
+        readNotes(xml, root, "a", pi, slide, boxList, paras, HashMap()) { nextKey++ }
+        val typing = RunStyle("<a:rPr lang=\"$l\" dirty=\"0\"/>")
+        val list = paras.map { SlidePara(it.key, it.startTag, it.box, it.text, it.marks, it.pPr, it.end, it.editable, it.original, typing) }
+        newNotes[newNotes.size - 1] = NewNotes(slide, pi, path, list)
+        return list
+    }
+
+    // ---- Shapes: moved, sized, taken out; text boxes and pictures added ----
+
+    /** A shape placed on a slide: the slide's number (as [addSlide] gives it) and the shape's id there. */
+    data class ShapeRef(val slide: Int, val id: String)
+
+    /**
+     * What happened to shapes, kept by the editor (one value per step to undo): new places and sizes in
+     * EMU (x, y, width, height), shapes taken out, and the pictures added that stay.
+     */
+    data class Shapes(val placed: Map<ShapeRef, LongArray> = emptyMap(), val removed: Set<ShapeRef> = emptySet(), val pictures: Set<ShapeRef> = emptySet())
+
+    /** A shape added here: a text box (its paragraphs decide whether it stays) or a picture (with its file). */
+    private class AddedShape(val ref: ShapeRef, val part: Int, val start: Int, val end: Int, val picture: Picture?)
+    private class Picture(val bytes: ByteArray, val ext: String, val rel: String)
+    private val addedShapes = ArrayList<AddedShape>()
+
+    private fun partOf(slide: Int): Int = if (slide < slideCount) slide else added.firstOrNull { it.slide == slide }?.part ?: throw IOException("No slide")
+
+    private fun prefixOf(xml: String, root: Elem, ns: String): String? =
+        root.attrs.entries.firstOrNull { it.value == ns && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
+
+    /** A free shape id on the slide (ids are numbers, unique within the slide). */
+    private fun freeId(xml: String): Int = (Regex("""<(?:[\w.-]+:)?cNvPr\s[^>]*\bid\s*=\s*["'](\d+)["']""").findAll(xml)
+        .mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull() ?: 1) + 1
+
+    /** Puts [shape] last on the slide (in front of everything), keeping every text box before it where it was. */
+    private fun append(pi: Int, shape: (p: String, a: String, r: String?, id: Int) -> String): Triple<Int, Int, Int> {
+        val (path, xml) = parts[pi]
+        val root = XmlScan.children(xml, 0, xml.length).first { it.local == "sld" }
+        val tree = XmlScan.children(xml, root).firstOrNull { it.local == "cSld" }?.let { c -> XmlScan.children(xml, c).firstOrNull { it.local == "spTree" } }
+            ?: throw IOException("No shape tree")
+        val p = prefixOf(xml, root, PML) ?: throw IOException("No prefix")
+        val a = prefixes[pi]
+        val r = prefixOf(xml, root, REL)
+        val id = freeId(xml)
+        val text = shape(p, a, r, id)
+        // Before the tree's extension list, which must stay last
+        val at = XmlScan.children(xml, tree).lastOrNull()?.takeIf { it.local == "extLst" }?.start ?: tree.closeStart
+        parts[pi] = path to (xml.substring(0, at) + text + xml.substring(at))
+        return Triple(id, at, at + text.length)
+    }
+
+    private fun xfrm(a: String, rect: LongArray) =
+        "<$a:xfrm><$a:off x=\"${rect[0]}\" y=\"${rect[1]}\"/><$a:ext cx=\"${rect[2]}\" cy=\"${rect[3]}\"/></$a:xfrm>"
+
+    /** A text box at [rect] (EMU) on [slide], one empty paragraph to type into; its paragraphs and its reference. */
+    @Synchronized
+    fun addTextBox(slide: Int, rect: LongArray, lang: String): Pair<ShapeRef, List<SlidePara>> {
+        val pi = partOf(slide)
+        val l = XmlScan.escape(lang)
+        val (id, start, end) = append(pi) { p, a, _, id ->
+            "<$p:sp><$p:nvSpPr><$p:cNvPr id=\"$id\" name=\"TextBox $id\"/><$p:cNvSpPr txBox=\"1\"/><$p:nvPr/></$p:nvSpPr>" +
+                "<$p:spPr>${xfrm(a, rect)}<$a:prstGeom prst=\"rect\"><$a:avLst/></$a:prstGeom><$a:noFill/></$p:spPr>" +
+                "<$p:txBody><$a:bodyPr wrap=\"square\" rtlCol=\"0\"><$a:spAutoFit/></$a:bodyPr><$a:lstStyle/><$a:p><$a:endParaRPr lang=\"$l\" dirty=\"0\"/></$a:p></$p:txBody></$p:sp>"
+        }
+        val xml = parts[pi].second
+        val sp = XmlScan.children(xml, start, end).first()
+        val body = XmlScan.children(xml, sp).first { it.local == "txBody" }
+        val para = XmlScan.children(xml, body).first { it.local == "p" }
+        val bi = boxList.size
+        boxList += TextBox(slide, "text", pi, para.start, para.end, shape = id.toString())
+        val typing = RunStyle("<${prefixes[pi]}:rPr lang=\"$l\" dirty=\"0\"/>")
+        val p0 = paragraph(xml, prefixes[pi], para, bi, nextKey++, HashMap(), false)
+        val ref = ShapeRef(slide, id.toString())
+        addedShapes += AddedShape(ref, pi, start, end, null)
+        return ref to listOf(SlidePara(p0.key, p0.startTag, p0.box, p0.text, p0.marks, p0.pPr, p0.end, p0.editable, p0.original, typing))
+    }
+
+    /** A picture ([bytes]: a PNG or JPEG file) at [rect] (EMU) on [slide]. */
+    @Synchronized
+    fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): ShapeRef {
+        val pi = partOf(slide)
+        // (unique also against pictures added by Hramota before, already in the slide's links)
+        val rel = "rIdH" + java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+        val (id, start, end) = append(pi) { p, a, r, id ->
+            r ?: throw IOException("No relationship prefix")
+            "<$p:pic><$p:nvPicPr><$p:cNvPr id=\"$id\" name=\"Picture $id\"/><$p:cNvPicPr><$a:picLocks noChangeAspect=\"1\"/></$p:cNvPicPr><$p:nvPr/></$p:nvPicPr>" +
+                "<$p:blipFill><$a:blip $r:embed=\"$rel\"/><$a:stretch><$a:fillRect/></$a:stretch></$p:blipFill>" +
+                "<$p:spPr>${xfrm(a, rect)}<$a:prstGeom prst=\"rect\"><$a:avLst/></$a:prstGeom></$p:spPr></$p:pic>"
+        }
+        val ref = ShapeRef(slide, id.toString())
+        addedShapes += AddedShape(ref, pi, start, end, Picture(bytes, if (png) "png" else "jpeg", rel))
+        return ref
+    }
+
+    /** Whether an animation names the shape (it is not taken out: the animation would point at nothing). */
+    fun isAnimated(ref: ShapeRef): Boolean {
+        val xml = parts[partOf(ref.slide)].second
+        return Regex("""\bspid\s*=\s*["']${Regex.escape(ref.id)}["']""").containsMatchIn(xml)
+    }
+
+    /** Whether a shape is one added here (a picture: kept only while listed in [Shapes.pictures]). */
+    fun isAddedPicture(ref: ShapeRef) = addedShapes.any { it.ref == ref && it.picture != null }
+
+    /**
+     * The slide part with shapes moved or taken out (on the text already written): [moved] in EMU,
+     * [cut] by id. Shapes keep everything else.
+     */
+    private fun reshaped(xml: String, a: String, moved: Map<String, LongArray>, cut: Set<String>): String {
+        if (moved.isEmpty() && cut.isEmpty()) return xml
+        val root = XmlScan.children(xml, 0, xml.length).first { it.local == "sld" }
+        val tree = XmlScan.children(xml, root).firstOrNull { it.local == "cSld" }?.let { c -> XmlScan.children(xml, c).firstOrNull { it.local == "spTree" } } ?: return xml
+        val b = StringBuilder(xml.length)
+        var pos = 0
+        for (k in XmlScan.children(xml, tree)) {
+            val nv = XmlScan.children(xml, k).firstOrNull { it.local.startsWith("nv") } ?: continue
+            val id = XmlScan.children(xml, nv).firstOrNull { it.local == "cNvPr" }?.attrs?.get("id") ?: continue
+            if (id in cut) { b.append(xml, pos, k.start); pos = k.end; continue }
+            val rect = moved[id] ?: continue
+            // Where the place is written: the shape's properties (or the frame of a table)
+            val holder = when (k.local) {
+                "sp", "pic", "cxnSp" -> XmlScan.children(xml, k).firstOrNull { it.local == "spPr" }
+                "grpSp" -> XmlScan.children(xml, k).firstOrNull { it.local == "grpSpPr" }
+                "graphicFrame" -> null
+                else -> continue
+            }
+            if (k.local == "graphicFrame") {
+                val x = XmlScan.children(xml, k).firstOrNull { it.local == "xfrm" } ?: continue
+                b.append(xml, pos, x.start)
+                b.append(placedXfrm(xml, x, rect, x.name.substringBefore(':', "").let { if (it.isEmpty()) a else it }, a))
+                pos = x.end
+                continue
+            }
+            holder ?: continue
+            val old = XmlScan.children(xml, holder).firstOrNull { it.local == "xfrm" }
+            when {
+                old != null -> { b.append(xml, pos, old.start); b.append(placedXfrm(xml, old, rect, a, a)); pos = old.end }
+                holder.empty -> {
+                    // "<p:spPr/>": opened, with the place inside
+                    b.append(xml, pos, holder.start)
+                    b.append("<${holder.name}>").append(xfrm(a, rect)).append("</${holder.name}>")
+                    pos = holder.end
+                }
+                else -> { b.append(xml, pos, holder.openEnd); b.append(xfrm(a, rect)); pos = holder.openEnd }
+            }
+        }
+        b.append(xml, pos, xml.length)
+        return b.toString()
+    }
+
+    /** An xfrm with a new place and size; its turn, flips and (in a group) the children's frame stay. */
+    private fun placedXfrm(xml: String, old: Elem, rect: LongArray, own: String, a: String): String {
+        val open = xml.substring(old.start, old.openEnd).removeSuffix("/>").removeSuffix(">")
+        val kids = if (old.empty) emptyList() else XmlScan.children(xml, old).filter { it.local == "chOff" || it.local == "chExt" }.map { xml.substring(it.start, it.end) }
+        return "$open><$a:off x=\"${rect[0]}\" y=\"${rect[1]}\"/><$a:ext cx=\"${rect[2]}\" cy=\"${rect[3]}\"/>" + kids.joinToString("") + "</${old.name}>"
     }
 
     /** The look of a character as set on its run (what the slide's design adds is not counted). */
@@ -182,30 +382,53 @@ class PptxEdit private constructor(
      * Writes the edited presentation with its slides in [order] (numbers as [addSlide] gives them; a slide
      * as opened that is not in it is taken out, with what only it used: its notes, comments, pictures).
      */
-    fun save(list: List<SlidePara>, order: List<Int>, source: InputStream, out: OutputStream) {
+    @Synchronized
+    fun save(list: List<SlidePara>, order: List<Int>, source: InputStream, out: OutputStream, shapes: Shapes = Shapes()) {
         if (order.isEmpty() || order.toSet().size != order.size || order.any { it !in 0 until slideCount + added.size }) throw IOException("Bad slide order")
         val changed = HashMap<String, String>()
         val byBox = list.groupBy { it.box }
-        val counts = paragraphs.groupingBy { it.box }.eachCount() + addedParagraphs.values.flatten().groupingBy { it.box }.eachCount()
+        val counts = paragraphs.groupingBy { it.box }.eachCount() + addedParagraphs.values.flatten().groupingBy { it.box }.eachCount() +
+            boxList.withIndex().filter { (_, b) -> newNotes.any { it.part == b.part } }.associate { it.index to 1 } +
+            boxList.withIndex().filter { (_, b) -> addedShapes.any { it.part == b.part && b.from >= it.start && b.to <= it.end } }.associate { it.index to 1 }
         val boxesOf = boxes.withIndex().groupBy { it.value.part }
         val kept = order.toSet()
         val newParts = added.filter { it.slide in kept }.associateBy { it.part }
+        // Shapes added here that stay: a text box while it has its paragraphs, a picture while it is listed
+        val present = list.mapTo(HashSet()) { it.box }
+        val stays = addedShapes.filter { a ->
+            a.ref !in shapes.removed && if (a.picture != null) a.ref in shapes.pictures
+            else boxList.withIndex().any { (bi, b) -> b.part == a.part && b.shape == a.ref.id && bi in present }
+        }.toSet()
+        // New speaker notes that keep their paragraph, on slides that stay
+        val notesKept = newNotes.filter { nn -> nn.slide in kept && boxList.withIndex().any { (bi, b) -> b.part == nn.part && bi in present } }
         for ((pi, part) in parts.withIndex()) {
             val (path, xml) = part
             val mine = boxesOf[pi].orEmpty()
-            // A slide taken out is not written; one added always is
-            if (mine.firstOrNull()?.value?.slide?.let { it !in kept } == true || pi >= slideCountParts && pi !in newParts) continue
-            val touched = if (pi in newParts) mine else mine.filter { (bi, _) -> byBox[bi].orEmpty().any { it.original == null } || byBox[bi].orEmpty().size != counts[bi] }
-            if (touched.isEmpty()) { if (pi in newParts) changed[path] = xml; continue }
+            val slide = partSlide[pi]
+            // A slide taken out is not written (nor its notes); one added always is
+            if (slide !in kept) continue
+            val made = newNotes.firstOrNull { it.part == pi }
+            if (made != null && notesKept.none { it === made }) continue
+            val isSlide = pi !in notesParts
+            // Shapes moved or taken out on this slide (and those added here that do not stay)
+            val moved = if (isSlide) shapes.placed.filterKeys { it.slide == slide }.mapKeys { it.key.id } else emptyMap()
+            val cut = if (isSlide) shapes.removed.filter { it.slide == slide }.mapTo(HashSet()) { it.id } +
+                addedShapes.filter { it.part == pi && it !in stays }.map { it.ref.id } else emptySet()
+            val reshape = moved.isNotEmpty() || cut.isNotEmpty() || addedShapes.any { it.part == pi }
+            val fresh = pi in newParts || made != null
+            val touched = if (fresh) mine else mine.filter { (bi, _) -> byBox[bi].orEmpty().any { it.original == null } || byBox[bi].orEmpty().size != counts[bi] }
+            if (touched.isEmpty()) { if (fresh || reshape) changed[path] = reshaped(xml, prefixes[pi], moved, cut); continue }
             val b = StringBuilder(xml.length + 2048)
             var pos = 0
             for ((bi, box) in touched.sortedBy { it.value.from }) {
                 b.append(xml, pos, box.from)
-                for (p in byBox[bi].orEmpty()) write(p, prefixes[pi], b)
+                val ps = byBox[bi].orEmpty()
+                // A box left with no paragraph keeps one empty (a text body needs one); its shape is taken out anyway if it goes
+                if (ps.isEmpty()) b.append("<${prefixes[pi]}:p/>") else for (p in ps) write(p, prefixes[pi], b)
                 pos = box.to
             }
             b.append(xml, pos, xml.length)
-            changed[path] = b.toString()
+            changed[path] = reshaped(b.toString(), prefixes[pi], moved, cut)
         }
         var drop = emptySet<String>()
         val created = HashSet<String>()
@@ -217,13 +440,29 @@ class PptxEdit private constructor(
             created.addAll(restructured.created)
             drop = restructured.drop
         }
-        copy(source, out, changed, drop, created)
+        // Pictures added: their files, the slides' links to them, their kind in the list of part types
+        val files = HashMap<String, ByteArray>()
+        val pictures = stays.filter { it.picture != null && partSlide[it.part] in kept }
+        if (pictures.isNotEmpty()) {
+            var n = 1
+            val links = pictures.map { a ->
+                while (!pack.isFree("ppt/media/hramota$n.${a.picture!!.ext}") || "ppt/media/hramota$n.${a.picture.ext}" in files) n++
+                val media = "ppt/media/hramota$n.${a.picture.ext}"
+                files[media] = a.picture.bytes
+                Triple(parts[a.part].first, a.picture.rel, media)
+            }
+            pack.linkPictures(links, changed, created)
+        }
+        // New speaker notes: their part, their links (to the notes master and the slide), the slide's link to them
+        if (notesKept.isNotEmpty()) {
+            val slidePath = { slide: Int -> parts[partOf(slide)].first }
+            for (nn in notesKept) created += nn.path
+            pack.linkNotes(notesKept.map { Triple(slidePath(it.slide), it.path, notesMaster!!) }, changed, created)
+        }
+        copy(source, out, changed, drop, created, files)
     }
 
-    /** How many parts belong to the slides as opened (added slides' parts come after them). */
-    private val slideCountParts = parts.size
-
-    private fun copy(source: InputStream, out: OutputStream, changed: Map<String, String>, drop: Set<String> = emptySet(), created: Set<String> = emptySet()) {
+    private fun copy(source: InputStream, out: OutputStream, changed: Map<String, String>, drop: Set<String> = emptySet(), created: Set<String> = emptySet(), files: Map<String, ByteArray> = emptyMap()) {
         val written = HashSet<String>()
         var total = 0L
         ZipInputStream(source).use { zip ->
@@ -266,12 +505,18 @@ class PptxEdit private constructor(
                 z.write((changed[name] ?: throw IOException("$name empty")).toByteArray(Charsets.UTF_8))
                 z.closeEntry()
             }
+            for ((name, bytes) in files.toSortedMap()) {
+                if (name in written || "/$name" in written || name in created) throw IOException("$name already there")
+                z.putNextEntry(ZipEntry(name)); z.write(bytes); z.closeEntry()
+            }
             z.finish(); z.flush()
         }
     }
 
     companion object {
         const val DML = "http://schemas.openxmlformats.org/drawingml/2006/main"
+        private const val PML = "http://schemas.openxmlformats.org/presentationml/2006/main"
+        private const val REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
         /** A line break within a paragraph (Shift+Enter). */
         const val LINE = '\u2028'
         private const val MAX_PART = 16L * 1024 * 1024
@@ -294,7 +539,8 @@ class PptxEdit private constructor(
                     // The slides, and what adding or taking out slides changes or follows: the lists of parts and
                     // links (all of them: what only a slide taken out used is found through them) and the layouts
                     if (lower == "ppt/presentation.xml" || lower == "[content_types].xml" || lower.endsWith(".rels") ||
-                        lower == "ppt/viewprops.xml" || lower.startsWith("ppt/slides/") && lower.endsWith(".xml") || lower.startsWith("ppt/slidelayouts/") && lower.endsWith(".xml")) {
+                        lower == "ppt/viewprops.xml" || lower.startsWith("ppt/slides/") && lower.endsWith(".xml") || lower.startsWith("ppt/slidelayouts/") && lower.endsWith(".xml") ||
+                        lower.startsWith("ppt/notesslides/") && lower.endsWith(".xml")) {
                         // The same name twice: which one is meant cannot be told; not edited
                         if (raw.containsKey(name)) throw IOException("Duplicate entry $name")
                         val b = readAll(zip, MAX_PART)
@@ -347,13 +593,58 @@ class PptxEdit private constructor(
                 shown++
             }
             if (parts.isEmpty()) throw IOException("No slides")
+            // Speaker notes of the slides shown (after all the slides' own parts)
+            val partSlide = ArrayList<Int>((0 until shown).toList())
+            val notesParts = HashSet<Int>()
+            val notesLinked = HashSet<Int>()
+            for ((i, sh) in shownSlides.withIndex()) {
+                val dir = sh.path.substringBeforeLast('/', "")
+                val r = text("$dir/_rels/${sh.path.substringAfterLast('/')}.rels") ?: continue
+                val rroot = XmlScan.children(r, 0, r.length).firstOrNull() ?: continue
+                val target = XmlScan.children(r, rroot).firstOrNull { it.local == "Relationship" && it.attrs["Type"]?.endsWith("/notesSlide") == true && it.attrs["TargetMode"] != "External" }
+                    ?.attrs?.get("Target") ?: continue
+                notesLinked += i
+                val notesPath = if (target.startsWith("/")) target.removePrefix("/") else java.io.File(dir, target).normalize().path.replace('\\', '/')
+                val nx = text(notesPath) ?: continue
+                val nroot = XmlScan.children(nx, 0, nx.length).firstOrNull { it.local == "notes" } ?: continue
+                val a = nroot.attrs.entries.firstOrNull { it.value == DML && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:") ?: "a"
+                val pi = parts.size
+                parts += notesPath to nx
+                prefixes += a
+                partSlide += i
+                notesParts += pi
+                readNotes(nx, nroot, a, pi, i, boxes, paras, interned) { paras.size.toLong() + 1 }
+            }
+            val notesMaster = text("ppt/_rels/presentation.xml.rels")?.let { r ->
+                val rroot = XmlScan.children(r, 0, r.length).firstOrNull() ?: return@let null
+                XmlScan.children(r, rroot).firstOrNull { it.local == "Relationship" && it.attrs["Type"]?.endsWith("/notesMaster") == true }?.attrs?.get("Target")
+                    ?.let { t -> if (t.startsWith("/")) t.removePrefix("/") else java.io.File("ppt", t).normalize().path.replace('\\', '/') }
+            }?.takeIf { it in names }
             val digests = raw.mapValues { (_, b) -> MessageDigest.getInstance("SHA-256").digest(b) }
             val pack = Pack(
                 pres = pres, entries = entries, shown = shownSlides, names = names,
                 texts = raw.keys.filter { it.lowercase().endsWith(".rels") || it.lowercase() == "[content_types].xml" || it.lowercase() == "ppt/viewprops.xml" || it.lowercase().startsWith("ppt/slidelayouts/") && !it.lowercase().endsWith(".rels") }
                     .associateWith { text(it)!! },
             )
-            return PptxEdit(parts, digests, prefixes, boxes, paras, shown, pack)
+            return PptxEdit(parts, digests, prefixes, boxes, paras, shown, pack, partSlide, notesParts, notesMaster, notesLinked)
+        }
+
+        /** Reads the text of speaker notes (their body placeholder only: not the slide picture or the number). */
+        internal fun readNotes(xml: String, root: Elem, a: String, pi: Int, slide: Int, boxes: MutableList<TextBox>, paras: MutableList<SlidePara>, interned: HashMap<String, RunStyle>, key: () -> Long) {
+            val tree = XmlScan.children(xml, root).firstOrNull { it.local == "cSld" }?.let { c -> XmlScan.children(xml, c).firstOrNull { it.local == "spTree" } } ?: return
+            for (sp in XmlScan.children(xml, tree)) {
+                if (sp.local != "sp") continue
+                val nv = XmlScan.children(xml, sp).firstOrNull { it.local == "nvSpPr" } ?: continue
+                val ph = XmlScan.children(xml, nv).firstOrNull { it.local == "nvPr" }?.let { n -> XmlScan.children(xml, n).firstOrNull { it.local == "ph" } } ?: continue
+                if (ph.attrs["type"] != "body") continue
+                val body = XmlScan.children(xml, sp).firstOrNull { it.local == "txBody" } ?: continue
+                val ps = XmlScan.children(xml, body).filter { it.local == "p" }
+                if (ps.isEmpty()) continue
+                val bi = boxes.size
+                boxes += TextBox(slide, "notes", pi, ps.first().start, ps.last().end, shape = XmlScan.children(xml, nv).firstOrNull { it.local == "cNvPr" }?.attrs?.get("id"))
+                for (p in ps) paras += paragraph(xml, a, p, bi, key(), interned, false)
+                return
+            }
         }
 
         /** Reads one slide's text boxes and paragraphs (the slide numbered [slide] among those shown, part [pi]). */
@@ -379,13 +670,16 @@ class PptxEdit private constructor(
                 scan(timing)
             }
             // Every text body on the slide, in drawing order (shapes, groups, table cells)
-            fun walk(e: Elem, kind: String, spid: String?, noEdit: Boolean) {
+            fun walk(e: Elem, kind: String, spid: String?, noEdit: Boolean, top: String? = null, level: Int = 0) {
                 for (k in XmlScan.children(xml, e)) {
+                    // The shape placed on the slide this text belongs to
+                    val topId = if (level == 0) XmlScan.children(xml, k).firstOrNull { it.local.startsWith("nv") }
+                        ?.let { nv -> XmlScan.children(xml, nv).firstOrNull { it.local == "cNvPr" }?.attrs?.get("id") } else top
                     if (k.local == "txBody") {
                         val ps = XmlScan.children(xml, k).filter { it.local == "p" }
                         if (ps.isEmpty()) continue
                         val bi = boxes.size
-                        boxes += TextBox(slide, kind, pi, ps.first().start, ps.last().end, fixed = spid != null && spid in byParagraph)
+                        boxes += TextBox(slide, kind, pi, ps.first().start, ps.last().end, fixed = spid != null && spid in byParagraph, shape = top)
                         val locked = noEdit || (spid != null && spid in byCharacter)
                         for (p in ps) paras += paragraph(xml, a, p, bi, key(), interned, locked)
                     } else if (!k.empty && k.local !in setOf("nvSpPr", "spPr", "extLst", "AlternateContent", "nvGrpSpPr", "grpSpPr")) {
@@ -397,8 +691,8 @@ class PptxEdit private constructor(
                             val kids = nv?.let { XmlScan.children(xml, it) }.orEmpty()
                             val id = kids.firstOrNull { it.local == "cNvPr" }?.attrs?.get("id")
                             val lockText = kids.firstOrNull { it.local == "cNvSpPr" }?.let { c -> XmlScan.children(xml, c).firstOrNull { it.local == "spLocks" }?.attrs?.get("noTextEdit") }.let { it == "1" || it == "true" }
-                            walk(k, type, id, lockText)
-                        } else walk(k, type, spid, noEdit)
+                            walk(k, type, id, lockText, topId, level + 1)
+                        } else walk(k, type, spid, noEdit, topId, level + 1)
                     }
                 }
             }

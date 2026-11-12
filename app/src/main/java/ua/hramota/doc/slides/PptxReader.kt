@@ -312,7 +312,33 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
         if (showMaster && layout?.root?.attr("showMasterSp") != "0") master?.let { decorations(it, shapes, styles) }
         if (showMaster) layout?.let { decorations(it, shapes, styles) }
         tree(slide.root, slide, layout, master, styles, shapes, Transform())
-        return Slide(background, shapes.take(Deck.MAX_SHAPES))
+        return Slide(background, shapes.take(Deck.MAX_SHAPES), frames(slide, layout, master))
+    }
+
+    /** Where each of the slide's own top-level shapes is (an empty placeholder too: it can be moved and filled). */
+    private fun frames(p: Part, layout: Part?, master: Part?): List<Frame> {
+        val spTree = p.root.child("cSld")?.child("spTree") ?: return emptyList()
+        val out = ArrayList<Frame>()
+        for (n in spTree.children.take(Deck.MAX_SHAPES)) {
+            val nv = n.children.firstOrNull { it.name.startsWith("nv") }
+            val id = nv?.child("cNvPr")?.attr("id") ?: continue
+            val (kind, xfrm) = when (n.name) {
+                "sp" -> {
+                    val ph = ph(n)
+                    val lph = ph?.let { findPh(layout, it) }
+                    val mph = ph?.let { findPh(master, it) ?: lph?.let { l -> ph(l) }?.let { findPh(master, it) } }
+                    "text" to (n.child("spPr")?.child("xfrm") ?: lph?.child("spPr")?.child("xfrm") ?: mph?.child("spPr")?.child("xfrm"))
+                }
+                "pic" -> "picture" to n.child("spPr")?.child("xfrm")
+                "cxnSp" -> "line" to n.child("spPr")?.child("xfrm")
+                "grpSp" -> "group" to n.child("grpSpPr")?.child("xfrm")
+                "graphicFrame" -> "table" to n.child("xfrm")
+                else -> continue
+            }
+            val r = rect(xfrm, Transform()) ?: continue
+            out += Frame(id, kind, r.x, r.y, r.w, r.h, r.rot)
+        }
+        return out
     }
 
     private fun background(p: Part): Int? {

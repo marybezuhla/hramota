@@ -25,7 +25,7 @@ import ua.hramota.doc.TextPages
  * is ready and the rest is laid out on other threads; [pageCount] grows (and the screen with it)
  * until [complete]. Without it, everything is laid out before the constructor returns.
  */
-class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : TextPages, Closeable {
+class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : TextPages, ua.hramota.doc.PrintPages, Closeable {
     private val pictures = PictureCache(doc)
     private val layout = DocxLayout(doc, fonts) { rel, w, h -> pictures.get(rel, w, h) }
     private val laidOut = ArrayList<LaidOutPage>()
@@ -80,6 +80,9 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
 
     /** Stops laying out (the window was closed). */
     override fun close() { closed = true }
+
+    /** All the document's pages are laid out (not stopped by closing, nor cut short). */
+    override val whole: Boolean get() = done && !closed && failure == null
 
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.Default) {
         lock.withLock { draw(index, widthPx)?.asImageBitmap() }
@@ -158,6 +161,23 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
                 return@withLock seg.pageStart + (off - seg.layoutStart)
             }
             -1
+        }
+    }
+
+    override fun pointSize(index: Int): Pair<Float, Float> = layout.pageWidth / DocxLayout.U to layout.pageHeight / DocxLayout.U
+
+    override suspend fun drawInto(index: Int, canvas: Canvas) = withContext(Dispatchers.Default) {
+        lock.withLock {
+            val page = page(index) ?: return@withLock
+            canvas.save()
+            try {
+                canvas.drawColor(Color.WHITE)
+                canvas.scale(1f / DocxLayout.U, 1f / DocxLayout.U)
+                painter.draw(canvas, page)
+                painter.draw(canvas, LaidOutPage(layout.headerFooter(index, count)))
+            } catch (e: OutOfMemoryError) {
+                throw java.io.IOException("Out of memory")
+            } finally { canvas.restore() }
         }
     }
 

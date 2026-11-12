@@ -89,6 +89,9 @@ class SheetViewState {
     var zoom by mutableFloatStateOf(1f)
     internal var target by mutableStateOf<Pair<Int, Int>?>(null)
     fun scrollTo(row: Int, col: Int) { target = row to col }
+    /** A cell to choose (and show): "Find and replace" in the editor. */
+    internal var pick by mutableStateOf<Pair<Int, Int>?>(null)
+    fun select(row: Int, col: Int) { pick = row to col; target = row to col }
 }
 
 /** Column edges and row edges in points, computed once per sheet. */
@@ -133,6 +136,7 @@ fun WorkbookDocument(
     val sheet = workbook.sheets[index]
     // The chosen cell stays when the phone is turned
     var selected by androidx.compose.runtime.saveable.rememberSaveable(index, stateSaver = androidx.compose.runtime.saveable.listSaver<Pair<Int, Int>?, Int>(save = { it?.toList() ?: emptyList() }, restore = { if (it.size == 2) it[0] to it[1] else null })) { mutableStateOf(startCell) }
+    LaunchedEffect(state.pick) { state.pick?.let { selected = it; state.pick = null } }
     // Another sheet opens at its top left (an edited one stays where it is)
     var shown by remember { mutableStateOf(index) }
     if (shown != index) { shown = index; state.x = 0f; state.y = 0f }
