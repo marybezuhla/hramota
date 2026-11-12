@@ -192,7 +192,16 @@ internal fun cleanPicture(open: () -> InputStream?): Triple<ByteArray, Boolean, 
         while (bounds.outWidth / sample > 2560 || bounds.outHeight / sample > 2560) sample *= 2
         val decoded = open()?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
         // A photo turned as the camera says (the mark itself is not kept)
-        val turn = try { open()?.use { android.media.ExifInterface(it).rotationDegrees } ?: 0 } catch (e: Exception) { 0 }
+        val turn = try {
+            open()?.use {
+                when (android.media.ExifInterface(it).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)) {
+                    android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+            } ?: 0
+        } catch (e: Exception) { 0 }
         val bmp = if (decoded != null && turn != 0) Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, android.graphics.Matrix().apply { postRotate(turn.toFloat()) }, true).also { if (it !== decoded) decoded.recycle() } else decoded
         if (bmp == null) null else {
             val png = bmp.hasAlpha()
