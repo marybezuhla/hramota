@@ -43,7 +43,7 @@
     <string name="legend_removed">removed</string>
     <string name="compare_too_big">The documents differ too much to compare paragraph by paragraph; the changed part is shown as a whole.</string>
     <string name="password_title">This document is password-protected</string>
-    <string name="password_body">Opening password-protected documents is coming later.</string>
+    <string name="password_body">Type the password to open it. Hramota keeps it only while the document is open.</string>
     <string name="insp_banner_risky">Caution: %1$s</string>
     <string name="insp_banner">This document has: %1$s</string>
     <string name="insp_more">Details</string>
@@ -477,4 +477,10 @@
         <item quantity="one">Replaced %d time</item>
         <item quantity="other">Replaced %d times</item>
     </plurals>
+    <string name="password_wrong">That password does not open it. Try again.</string>
+    <string name="password_field">Password</string>
+    <string name="password_show">Show</string>
+    <string name="password_hide">Hide</string>
+    <string name="password_open">Open</string>
+    <string name="password_unsupported">Hramota cannot open this kind of protection: old .doc, .xls and .ppt files with a password. Save the document in the newer format in Word, Excel or PowerPoint.</string>
 </resources>

@@ -45,7 +45,7 @@
     <string name="legend_removed">видалено</string>
     <string name="compare_too_big">Документи відрізняються надто сильно для порівняння за абзацами; змінену частину показано цілком.</string>
     <string name="password_title">Документ захищено паролем</string>
-    <string name="password_body">Відкриття захищених паролем документів з\'явиться згодом.</string>
+    <string name="password_body">Введіть пароль, щоб відкрити його. Грамота пам'ятає пароль, лише поки документ відкритий.</string>
     <string name="insp_banner_risky">Увага: %1$s</string>
     <string name="insp_banner">У документі: %1$s</string>
     <string name="insp_more">Докладніше</string>
@@ -487,4 +487,10 @@
         <item quantity="many">Замінено %d разів</item>
         <item quantity="other">Замінено %d разу</item>
     </plurals>
+    <string name="password_wrong">Пароль не підходить. Спробуйте ще раз.</string>
+    <string name="password_field">Пароль</string>
+    <string name="password_show">Показати</string>
+    <string name="password_hide">Сховати</string>
+    <string name="password_open">Відкрити</string>
+    <string name="password_unsupported">Цей вид захисту Грамота не відкриває: старі файли .doc, .xls і .ppt із паролем. Збережіть документ у Word, Excel чи PowerPoint у новому форматі.</string>
 </resources>
