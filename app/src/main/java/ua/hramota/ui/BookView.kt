@@ -212,6 +212,41 @@ private fun BookScroll(book: Book, list: LazyListState, v: BookView) {
     }
 }
 
+/**
+ * The book cut into pieces laid out one by one (each starts a page). Chapters (first-level headings);
+ * a long chapter (a part of a book holding its chapters) is cut again at its next-level headings, a
+ * few hundred paragraphs at least to a piece, and a piece with no headings at all into long runs. So
+ * the first page shows after a short piece is laid out, not after a whole part of the book.
+ */
+internal fun bookPieces(blocks: List<BookBlock>): List<IntRange> {
+    fun kind(i: Int) = (blocks[i] as? BookBlock.Text)?.kind
+    val starts = ArrayList<Int>().apply { add(0); for (i in 1 until blocks.size) if (kind(i) == BookBlock.Kind.HEADING1) add(i) }
+    val out = ArrayList<IntRange>()
+    for (k in starts.indices) {
+        val chapter = starts[k] until (starts.getOrNull(k + 1) ?: blocks.size)
+        if (chapter.isEmpty()) continue
+        val cuts = ArrayList<Int>().apply { add(chapter.first) }
+        if (chapter.count() > LONG_CHAPTER) {
+            // At lower headings, keeping pieces long enough that the new pages they start pass unnoticed
+            for (i in chapter.first + 1..chapter.last) {
+                val k2 = kind(i)
+                if ((k2 == BookBlock.Kind.HEADING2 || k2 == BookBlock.Kind.HEADING3 && starts.size == 1) && i - cuts.last() >= MIN_PIECE && chapter.last + 1 - i >= MIN_PIECE / 2) cuts += i
+            }
+        }
+        for (c in cuts.indices) {
+            val end = cuts.getOrNull(c + 1) ?: (chapter.last + 1)
+            var a = cuts[c]
+            while (end - a > MAX_RUN * 2) { out += a until a + MAX_RUN; a += MAX_RUN }
+            out += a until end
+        }
+    }
+    return out.ifEmpty { listOf(0 until blocks.size) }
+}
+
+private const val LONG_CHAPTER = 600
+private const val MIN_PIECE = 300
+private const val MAX_RUN = 1500
+
 /** One part of a block on a page: [top] and [height] within the block's own layout, in pixels. */
 private class Slice(val block: Int, val top: Int, val height: Int, val padTop: Int, val from: Int = 0, val to: Int = Int.MAX_VALUE)
 private class Page(val slices: List<Slice>, val firstBlock: Int, val firstChar: Int, val chapter: String)
@@ -225,59 +260,58 @@ private suspend fun paginate(
     book: Book, look: BookLook, resolver: FontFamily.Resolver, density: Density, width: Int, height: Int,
     startBlock: Int, publish: (List<Page>, Boolean, Boolean, IntRange) -> Unit,
 ) = coroutineScope {
-    val starts = ArrayList<Int>().apply {
-        add(0)
-        for (i in 1 until book.blocks.size) if ((book.blocks[i] as? BookBlock.Text)?.kind == BookBlock.Kind.HEADING1) add(i)
-    }
-    var chapters = starts.indices.map { k -> starts[k] until (starts.getOrNull(k + 1) ?: book.blocks.size) }
-    // A book without chapters would be laid out in one piece: cut it at lower headings, else in long runs
-    // (each piece starts a page, so runs are long enough for that to pass unnoticed)
-    if (chapters.size == 1 && book.blocks.size > 2000) {
-        val cuts = (1 until book.blocks.size).filter { (book.blocks[it] as? BookBlock.Text)?.kind == BookBlock.Kind.HEADING2 }
-        val at = (listOf(0) + cuts).toMutableList()
-        val runs = ArrayList<Int>()
-        for (k in at.indices) {
-            val end = at.getOrNull(k + 1) ?: book.blocks.size
-            var a = at[k]
-            runs += a
-            while (end - a > 3000) { a += 1500; runs += a }
+    val chapters = bookPieces(book.blocks)
+    // A piece that starts inside a chapter keeps the chapter's name for its page heads
+    val titles = run {
+        var last = ""; var i = 0
+        chapters.map { r ->
+            while (i <= r.first && i < book.blocks.size) { (book.blocks[i] as? BookBlock.Text)?.takeIf { it.kind == BookBlock.Kind.HEADING1 }?.let { last = it.text.replace('\n', ' ') }; i++ }
+            last
         }
-        chapters = runs.indices.map { k -> runs[k] until (runs.getOrNull(k + 1) ?: book.blocks.size) }
     }
     val target = chapters.indexOfFirst { startBlock in it }.coerceAtLeast(0)
     val done = arrayOfNulls<List<Page>>(chapters.size)
     val threads = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 6)
-    // The chapter being read first: it is shown alone at once (the book opens without waiting for the
-    // chapters before it), then the book from its start as soon as those are laid out too
-    val order = listOf(target) + (0 until target) + (target + 1 until chapters.size)
+    // The piece being read first, by itself: it is shown alone at once (the book opens without waiting
+    // for anything before it); then the pieces after it, so reading on (or aloud) does not wait either;
+    // then the book from its start, shown whole once everything before the piece being read is laid out
+    val ahead = (target + 1 until minOf(chapters.size, target + 1 + threads))
+    val order = listOf(listOf(target)) + listOf(ahead.toList()).filter { it.isNotEmpty() } +
+        ((0 until target) + (ahead.last.coerceAtLeast(target) + 1 until chapters.size)).chunked(threads * 2)
     var published = -1
-    var alone = false
+    // The pieces shown alone: from the one being read up to here (only ever growing at the end, so the
+    // pages already shown keep their places)
+    var aloneTo = -1
     fun prefix(): Int { var k = 0; while (k < done.size && done[k] != null) k++; return k }
-    for (batch in order.chunked(threads * 2)) {
+    for (batch in order) {
         batch.map { k ->
             async(Dispatchers.Default) {
                 val measurer = TextMeasurer(resolver, density, LayoutDirection.Ltr, cacheSize = 0)
-                done[k] = chapterPages(book, look, measurer, density, chapters[k], width, height)
+                done[k] = chapterPages(book, look, measurer, density, chapters[k], width, height, titles[k])
             }
         }.awaitAll()
         val have = prefix()
         if (have > target && have > published) {
             published = have
             publish(done.take(have).flatMap { it!! }, have == done.size, false, 0 until chapters[have - 1].last + 1)
-        } else if (published < 0 && !alone && done[target] != null) {
-            alone = true
-            publish(done[target]!!, false, true, chapters[target])
+        } else if (published < 0) {
+            var to = target
+            while (to + 1 < done.size && done[to + 1] != null) to++
+            if (to > aloneTo) {
+                aloneTo = to
+                publish(done.slice(target..to).flatMap { it!! }, false, true, chapters[target].first until chapters[to].last + 1)
+            }
         }
     }
     if (published < done.size) publish(done.flatMap { it.orEmpty() }, true, false, 0 until book.blocks.size)
 }
 
-private suspend fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int): List<Page> {
+private suspend fun chapterPages(book: Book, look: BookLook, measurer: TextMeasurer, density: Density, range: IntRange, width: Int, height: Int, title: String): List<Page> {
     val pages = ArrayList<Page>()
     var slices = ArrayList<Slice>()
     var y = 0
     var firstBlock = range.first; var firstChar = 0
-    var chapter = ""
+    var chapter = title
     // Space owed below the last thing placed, given to the next one (dropped at a page top)
     var owed = 0
     fun px(d: androidx.compose.ui.unit.Dp) = with(density) { d.roundToPx() }

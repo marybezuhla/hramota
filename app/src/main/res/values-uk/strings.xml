@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Грамота</string>
-    <string name="home_tagline">Приватний офіс. Працює без інтернету.</string>
+    <string name="home_actions">Відкрити, створити або порівняти</string>
     <string name="open_file">Відкрити файл</string>
     <string name="compare_versions">Порівняти дві версії</string>
     <string name="compare_pick_first">Оберіть попередню версію</string>
@@ -12,7 +12,6 @@
     <string name="recent_remove">Прибрати з нещодавніх</string>
     <string name="today_at">Сьогодні, %1$s</string>
     <string name="yesterday_at">Учора, %1$s</string>
-    <string name="privacy_note">Без доступу до інтернету: ніщо не залишає телефон.</string>
     <string name="loading">Відкриваю…</string>
     <string name="back">Назад</string>
     <string name="open_failed">Не вдалося відкрити файл. Можливо, він пошкоджений або доступ до нього закінчився.</string>
@@ -458,4 +457,15 @@
     <string name="about_support_defence">Оборона</string>
     <string name="about_support_humanitarian">Гуманітарна допомога</string>
     <string name="about_support_any">Підтримати можна й будь-який перевірений фонд, волонтерів чи підрозділ, яким ви довіряєте. Перевіряйте збори: офіційні реквізити й звіти.</string>
+    <string name="slide_add">Додати слайд</string>
+    <string name="slide_add_after">Додати слайд після цього</string>
+    <string name="slide_add_failed">У цій презентації немає макета для нового слайда.</string>
+    <string name="slide_up">Вище</string>
+    <string name="slide_down">Нижче</string>
+    <string name="slide_more">Ще</string>
+    <string name="slide_remove">Видалити слайд</string>
+    <string name="slide_remove_linked">Видалити не можна: на слайд ведуть посилання</string>
+    <string name="slide_no_text">Без тексту</string>
+    <string name="create_pptx">Презентація PowerPoint (PPTX)</string>
+    <string name="new_presentation_name">Нова презентація</string>
 </resources>

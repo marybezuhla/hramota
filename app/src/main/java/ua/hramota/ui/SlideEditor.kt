@@ -22,6 +22,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -77,10 +81,14 @@ private const val MARK = '​'
 class SlideEditorState(val edit: PptxEdit) {
     var paras by mutableStateOf(edit.paragraphs)
         private set
+    /** The slides in the order they will be saved (numbers as [PptxEdit] gives them). */
+    var order by mutableStateOf((0 until edit.slideCount).toList())
+        private set
     var dirty by mutableStateOf(false)
         private set
-    private val undoStack = ArrayList<List<SlidePara>>()
-    private val redoStack = ArrayList<List<SlidePara>>()
+    private class Step(val paras: List<SlidePara>, val order: List<Int>)
+    private val undoStack = ArrayList<Step>()
+    private val redoStack = ArrayList<Step>()
     var canUndo by mutableStateOf(false)
         private set
     var canRedo by mutableStateOf(false)
@@ -94,18 +102,55 @@ class SlideEditorState(val edit: PptxEdit) {
 
     fun indexOf(key: Long?) = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
-    private fun commit(list: List<SlidePara>, typingIn: Long? = null) {
+    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order) {
         val now = System.currentTimeMillis()
         if (!(typingIn != null && typingIn == lastKey && now - lastTyped < 1500)) {
-            undoStack += paras; if (undoStack.size > 200) undoStack.removeAt(0)
+            undoStack += Step(paras, order); if (undoStack.size > 200) undoStack.removeAt(0)
         }
         lastTyped = now; lastKey = typingIn ?: -1L
-        redoStack.clear(); paras = list; dirty = true
+        redoStack.clear(); paras = list; order = newOrder; dirty = true
         canUndo = true; canRedo = false
     }
 
-    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += paras; paras = p; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
-    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += paras; paras = n; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order); paras = p.paras; order = p.order; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
+    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order); paras = n.paras; order = n.order; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+
+    /** Which slide a paragraph is on. */
+    fun slideOf(p: SlidePara) = edit.boxes[p.box].slide
+
+    /** The paragraphs put in the order of [newOrder] (each slide's own in their order). */
+    private fun arranged(list: List<SlidePara>, newOrder: List<Int>): List<SlidePara> {
+        val by = list.groupBy(::slideOf)
+        return newOrder.flatMap { by[it].orEmpty() }
+    }
+
+    /** Moves a slide one place up ([by] -1) or down (1). */
+    fun moveSlide(slide: Int, by: Int) {
+        val i = order.indexOf(slide); val j = i + by
+        if (i < 0 || j !in order.indices) return
+        val o = order.toMutableList().apply { add(j, removeAt(i)) }
+        commit(arranged(paras, o), newOrder = o)
+    }
+
+    /** False when it cannot be taken out: the last slide, or one another slide links to. */
+    fun canRemove(slide: Int) = order.size > 1 && edit.canRemove(slide, order)
+
+    fun removeSlide(slide: Int) {
+        if (!canRemove(slide)) return
+        val o = order - slide
+        if (focused?.let { k -> paras.firstOrNull { it.key == k }?.let(::slideOf) } == slide) focused = null
+        commit(paras.filter { slideOf(it) != slide }, newOrder = o)
+    }
+
+    /** Adds an empty slide after [after] (at the end when null); false if the presentation has no layout for it. */
+    fun addSlide(after: Int?, lang: String): Boolean {
+        val (id, list) = try { edit.addSlide(after ?: order.lastOrNull(), lang) } catch (e: java.io.IOException) { return false }
+        val at = after?.let { order.indexOf(it) + 1 } ?: order.size
+        val o = order.toMutableList().apply { add(at.coerceIn(0, size), id) }
+        commit(arranged(paras + list, o), newOrder = o)
+        list.firstOrNull { it.editable }?.let { moveTo = it.key to 0 }
+        return true
+    }
 
     /** New text of a paragraph; Enter splits it within its text box. */
     fun typed(key: Long, typedText: String, typedCursor: Int) {
@@ -184,9 +229,10 @@ class SlideEditorState(val edit: PptxEdit) {
     /** What saving needs: the paragraphs as they are now, written into the presentation read again. */
     fun maker(): EditSaving.Maker {
         val list = paras
+        val slides = order
         return object : EditSaving.Maker {
             override val ext = "pptx"
-            override fun write(source: InputStream, out: OutputStream) = edit.save(list, source, out)
+            override fun write(source: InputStream, out: OutputStream) = edit.save(list, slides, source, out)
             override fun check(made: InputStream) { ua.hramota.doc.slides.PptxReader.read(made, withMedia = false) }
         }
     }
@@ -258,28 +304,48 @@ fun SlideEditorScreen(
         },
     ) { padding ->
         val list = state.paras
+        val order = state.order
+        val lang = remember { java.util.Locale.getDefault().stripExtensions().toLanguageTag() }
+        var noLayout by remember { mutableStateOf(false) }
+        // Each slide in order: its heading (number, picture, what can be done with it), then its text boxes
+        val bySlide = remember(list) { list.groupBy(state::slideOf) }
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
-            itemsIndexed(list, key = { _, p -> p.key }) { i, p ->
-                val box = state.edit.boxes[p.box]
-                Column {
-                    val firstOfSlide = i == 0 || state.edit.boxes[list[i - 1].box].slide != box.slide
-                    if (firstOfSlide) {
-                        Text(stringResource(R.string.slide_n, box.slide + 1), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = if (i == 0) 0.dp else 20.dp, bottom = 6.dp))
-                        if (thumbnail != null) {
-                            val img by produceState<ImageBitmap?>(null, box.slide) { value = thumbnail(box.slide, 720) }
-                            img?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(aspect).border(1.dp, MaterialTheme.colorScheme.outlineVariant)) }
-                        }
-                    }
-                    val firstOfBox = i == 0 || list[i - 1].box != p.box
-                    if (firstOfBox) Text(
-                        stringResource(when (box.kind) { "title" -> R.string.slide_box_title; "subtitle" -> R.string.slide_box_subtitle; "table" -> R.string.slide_box_table; else -> R.string.slide_box_text }),
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
+            for ((n, slide) in order.withIndex()) {
+                item(key = "slide-$slide") {
+                    SlideHeading(
+                        number = n + 1, first = n == 0, last = n == order.size - 1, enabled = !saving, canRemove = state.canRemove(slide), linked = !state.edit.canRemove(slide, state.order),
+                        picture = thumbnail?.takeIf { slide < state.edit.slideCount }?.let { t -> val f: suspend (Int) -> ImageBitmap? = { w -> t(slide, w) }; f }, slide = slide, aspect = aspect,
+                        empty = bySlide[slide].isNullOrEmpty(),
+                        onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },
+                        onRemove = { state.removeSlide(slide) },
+                        onAddAfter = { if (!state.addSlide(slide, lang)) noLayout = true },
                     )
-                    SlideParagraph(state, p, title = box.kind == "title", readOnly = saving, onLocked = { locked = true })
+                }
+                val ps = bySlide[slide].orEmpty()
+                itemsIndexed(ps, key = { _, p -> p.key }) { i, p ->
+                    val box = state.edit.boxes[p.box]
+                    Column {
+                        val firstOfBox = i == 0 || ps[i - 1].box != p.box
+                        if (firstOfBox) Text(
+                            stringResource(when (box.kind) { "title" -> R.string.slide_box_title; "subtitle" -> R.string.slide_box_subtitle; "table" -> R.string.slide_box_table; else -> R.string.slide_box_text }),
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
+                        )
+                        SlideParagraph(state, p, title = box.kind == "title", readOnly = saving, onLocked = { locked = true })
+                    }
+                }
+            }
+            item(key = "add") {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { if (!state.addSlide(null, lang)) noLayout = true }, enabled = !saving,
+                    modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Text(stringResource(R.string.slide_add), modifier = Modifier.padding(start = 8.dp))
                 }
             }
         }
+        if (noLayout) AlertDialog(onDismissRequest = { noLayout = false }, text = { Text(stringResource(R.string.slide_add_failed)) },
+            confirmButton = { TextButton(onClick = { noLayout = false }) { Text(stringResource(R.string.ok)) } })
     }
     if (askClose) AlertDialog(
         onDismissRequest = { askClose = false },
@@ -289,6 +355,38 @@ fun SlideEditorScreen(
     )
     if (locked) AlertDialog(onDismissRequest = { locked = false }, text = { Text(stringResource(R.string.slide_locked_paragraph)) },
         confirmButton = { TextButton(onClick = { locked = false }) { Text(stringResource(R.string.ok)) } })
+}
+
+/** A slide's heading while editing: its number and picture, and moving it, adding one after it, taking it out. */
+@Composable
+private fun SlideHeading(
+    number: Int, first: Boolean, last: Boolean, enabled: Boolean, canRemove: Boolean, linked: Boolean,
+    picture: (suspend (Int) -> ImageBitmap?)?, slide: Int, aspect: Float, empty: Boolean,
+    onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onAddAfter: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Column(Modifier.padding(top = if (first) 0.dp else 20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.slide_n, number), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+            IconButton(onClick = onUp, enabled = enabled && !first) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.slide_up)) }
+            IconButton(onClick = onDown, enabled = enabled && !last) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.slide_down)) }
+            androidx.compose.foundation.layout.Box {
+                IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.slide_more)) }
+                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; onAddAfter() })
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(stringResource(if (linked) R.string.slide_remove_linked else R.string.slide_remove)) },
+                        enabled = canRemove, onClick = { menu = false; onRemove() },
+                    )
+                }
+            }
+        }
+        if (picture != null) {
+            val img by produceState<ImageBitmap?>(null, slide) { value = picture(720) }
+            img?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(aspect).border(1.dp, MaterialTheme.colorScheme.outlineVariant)) }
+        }
+        if (empty) Text(stringResource(R.string.slide_no_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+    }
 }
 
 @Composable

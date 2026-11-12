@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private var creating by mutableStateOf(false)
     private val createDocx = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { uri -> onCreated(uri, "docx") }
     private val createXlsx = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri -> onCreated(uri, "xlsx") }
+    private val createPptx = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.presentationml.presentation")) { uri -> onCreated(uri, "pptx") }
 
     /** Writes the empty document into the new file and opens it ready to edit. */
     private fun onCreated(uri: Uri?, kind: String) {
@@ -73,8 +74,12 @@ class MainActivity : ComponentActivity() {
                 // A file chosen from those already there is never written over with an empty document
                 if (!EditSaving.isEmpty(app, uri)) return@withContext R.string.create_exists
                 val ok = try {
-                    val bytes = if (kind == "docx") ua.hramota.doc.Templates.docx(java.util.Locale.getDefault().stripExtensions().toLanguageTag())
-                        else ua.hramota.doc.Templates.xlsx(sheetName)
+                    val lang = java.util.Locale.getDefault().stripExtensions().toLanguageTag()
+                    val bytes = when (kind) {
+                        "docx" -> ua.hramota.doc.Templates.docx(lang)
+                        "pptx" -> ua.hramota.doc.Templates.pptx(lang)
+                        else -> ua.hramota.doc.Templates.xlsx(sheetName)
+                    }
                     EditSaving.writeChecked(object : EditSaving.Io {
                         override fun read() = app.contentResolver.openInputStream(uri)
                         override fun write(mode: String) = app.contentResolver.openOutputStream(uri, mode)
@@ -162,6 +167,7 @@ class MainActivity : ComponentActivity() {
                             androidx.compose.foundation.layout.Column {
                                 androidx.compose.material3.TextButton(onClick = { creating = false; createDocx.launch(getString(R.string.new_document_name) + ".docx") }) { androidx.compose.material3.Text(getString(R.string.create_docx)) }
                                 androidx.compose.material3.TextButton(onClick = { creating = false; createXlsx.launch(getString(R.string.new_sheet_file_name) + ".xlsx") }) { androidx.compose.material3.Text(getString(R.string.create_xlsx)) }
+                                androidx.compose.material3.TextButton(onClick = { creating = false; createPptx.launch(getString(R.string.new_presentation_name) + ".pptx") }) { androidx.compose.material3.Text(getString(R.string.create_pptx)) }
                             }
                         },
                         confirmButton = {},
