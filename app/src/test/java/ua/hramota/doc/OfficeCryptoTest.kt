@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ua.hramota.doc.docx.DocxReader
+import ua.hramota.readingText
 import ua.hramota.doc.sheet.XlsxReader
 import ua.hramota.doc.slides.PptxReader
 import java.io.File

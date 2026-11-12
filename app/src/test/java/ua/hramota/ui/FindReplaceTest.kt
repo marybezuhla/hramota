@@ -7,6 +7,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import ua.hramota.doc.docx.DocxReader
+import ua.hramota.readingText
 import ua.hramota.doc.docx.edit.DocxEdit
 import ua.hramota.doc.slides.edit.PptxEdit
 import java.io.ByteArrayInputStream
