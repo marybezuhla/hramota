@@ -33,7 +33,7 @@ import kotlin.math.roundToInt
  * Slides drawn as pages: each slide is laid out once (in units of 1/[U] point, independent of the
  * screen), then drawn at the width it is shown. Text can be searched, selected and copied.
  */
-class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
+class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages, ua.hramota.doc.PrintPages {
     companion object { const val U = 8f }
 
     private val lock = Mutex()
@@ -142,15 +142,33 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
     /** Draws slide [index] into a new bitmap [widthPx] wide (also used by tests). */
     fun draw(index: Int, widthPx: Int): Bitmap? = try { drawSlide(index, widthPx) } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
 
+    override fun pointSize(index: Int): Pair<Float, Float> = deck.width to deck.height
+
+    override suspend fun drawInto(index: Int, canvas: Canvas) = withContext(Dispatchers.Default) {
+        lock.withLock {
+            if (index !in deck.slides.indices) return@withLock
+            canvas.save()
+            // Pictures at print quality: about 200 dots per inch across the slide
+            try { drawOn(canvas, index, 1f / U, 200f / 72f / U) } catch (e: Exception) {} catch (e: OutOfMemoryError) {}
+            canvas.restore()
+        }
+    }
+
     private fun drawSlide(index: Int, widthPx: Int): Bitmap? {
         if (index !in deck.slides.indices || widthPx <= 0) return null
         val w = widthPx.coerceAtMost(2048)
         val h = (w * ratio).toInt().coerceIn(1, 2048 * 2)
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        val scale = w / (deck.width * U)
+        drawOn(canvas, index, scale, scale)
+        return bitmap
+    }
+
+    /** Draws slide [index] in layout units scaled by [scale]; pictures decoded for [pictureScale] pixels per unit. */
+    private fun drawOn(canvas: Canvas, index: Int, scale: Float, pictureScale: Float) {
         val slide = deck.slides[index]
         canvas.drawColor(slide.background)
-        val scale = w / (deck.width * U)
         canvas.scale(scale, scale)
         val laid = laid(index)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -160,7 +178,7 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
             canvas.save()
             if (s.rotation != 0f) canvas.rotate(s.rotation, rect.centerX(), rect.centerY())
             when (s) {
-                is SlideShape.Picture -> picture(s.key, (s.w * U * scale).roundToInt(), (s.h * U * scale).roundToInt())?.let { canvas.drawBitmap(it, null, rect, fill.apply { color = 0xFF000000.toInt(); isFilterBitmap = true }) }
+                is SlideShape.Picture -> picture(s.key, (s.w * U * pictureScale).roundToInt(), (s.h * U * pictureScale).roundToInt())?.let { canvas.drawBitmap(it, null, rect, fill.apply { color = 0xFF000000.toInt(); isFilterBitmap = true }) }
                 is SlideShape.Box -> {
                     s.fill?.let { fill.color = it; shape(canvas, s.geometry, rect, fill) }
                     s.line?.let { stroke.color = it; stroke.strokeWidth = max(0.5f, s.lineWidth) * U; shape(canvas, s.geometry, rect, stroke) }
@@ -174,7 +192,6 @@ class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages {
             }
             canvas.restore()
         }
-        return bitmap
     }
 
     private fun shape(canvas: Canvas, geometry: String, r: RectF, paint: Paint) = when (geometry) {

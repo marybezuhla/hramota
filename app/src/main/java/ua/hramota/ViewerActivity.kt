@@ -388,6 +388,16 @@ open class ViewerActivity : ComponentActivity() {
                                 (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 }?.let { n ->
                                     getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
                                 },
+                                // Printing (through the phone's print window) and a PDF of the pages where the person chooses
+                                (state as? ViewerState.Paged)?.pages?.takeIf { ua.hramota.doc.PdfExport.printable(it, format == Format.PDF) }?.let { pg ->
+                                    getString(R.string.print) to {
+                                        ua.hramota.doc.PdfExport.print(this@ViewerActivity, held.scope, name, pg, if (format == Format.PDF) ({ contentResolver.openInputStream(uri) }) else null)
+                                        Unit
+                                    }
+                                },
+                                ((state as? ViewerState.Paged)?.pages as? ua.hramota.doc.PrintPages)?.let { pg ->
+                                    getString(R.string.save_as_pdf) to { pendingPdf = pg; savePdf.launch(name.substringBeforeLast('.', name) + ".pdf"); Unit }
+                                },
                                 // The cover on the shelf: its title and look (and, if wanted, the file's name)
                                 if (state !is ViewerState.Loading && state !is ViewerState.Failed && state !is ViewerState.Password) getString(R.string.cover_menu) to { held.coverAsk = true; Unit } else null,
                                 // On the shelf = kept inside Hramota; taking it off keeps bookmarks and notes
@@ -485,6 +495,33 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
     private var currentId: String? = null
+
+    // The pages waiting for the place of their PDF
+    private var pendingPdf: ua.hramota.doc.PrintPages? = null
+    private val savePdf = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/pdf")) { target ->
+        val pages = pendingPdf
+        pendingPdf = null
+        if (target == null) return@registerForActivityResult
+        val app = applicationContext
+        // The window was made again meanwhile: the file just made is removed
+        if (pages == null) { lifecycleScope.launch(Dispatchers.IO) { try { EditSaving.removeIfEmpty(app, target) } catch (e: Exception) {} }; return@registerForActivityResult }
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        // (in the window's holder: turning the screen does not stop it halfway)
+        held.scope.launch {
+            held.opening = true
+            val ok = try {
+                withContext(Dispatchers.IO) {
+                    try {
+                        // Only into a file just made (one chosen from those already there is not written over)
+                        if (!EditSaving.isEmpty(app, target)) false
+                        else app.contentResolver.openOutputStream(target, "wt")?.use { ua.hramota.doc.PdfExport.write(pages, it) } == true
+                    } catch (e: Exception) { false }
+                }
+            } finally { held.opening = false }
+            if (!ok) withContext(Dispatchers.IO) { try { EditSaving.removeIfEmpty(app, target) } catch (e: Exception) {} }
+            android.widget.Toast.makeText(app, app.getString(if (ok) R.string.pdf_saved else R.string.pdf_not_saved), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     // A book's notes waiting for the file the person chooses (kept when the screen turns meanwhile)
     private var pendingNotes: String?

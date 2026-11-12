@@ -460,4 +460,8 @@
     <string name="slide_no_text">No text</string>
     <string name="create_pptx">PowerPoint presentation (PPTX)</string>
     <string name="new_presentation_name">New presentation</string>
+    <string name="print">Print</string>
+    <string name="save_as_pdf">Save as PDF</string>
+    <string name="pdf_saved">PDF saved</string>
+    <string name="pdf_not_saved">Could not save the PDF</string>
 </resources>

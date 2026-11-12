@@ -468,4 +468,8 @@
     <string name="slide_no_text">Без тексту</string>
     <string name="create_pptx">Презентація PowerPoint (PPTX)</string>
     <string name="new_presentation_name">Нова презентація</string>
+    <string name="print">Друкувати</string>
+    <string name="save_as_pdf">Зберегти як PDF</string>
+    <string name="pdf_saved">PDF збережено</string>
+    <string name="pdf_not_saved">Не вдалося зберегти PDF</string>
 </resources>
