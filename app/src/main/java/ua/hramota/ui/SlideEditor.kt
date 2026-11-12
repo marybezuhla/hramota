@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -78,7 +79,7 @@ import java.io.OutputStream
 private const val MARK = '​'
 
 /** A presentation's text being edited: paragraphs of every text box, and what was done, to undo and redo. */
-class SlideEditorState(val edit: PptxEdit) {
+class SlideEditorState(val edit: PptxEdit) : Replaceable {
     var paras by mutableStateOf(edit.paragraphs)
         private set
     /** The slides in the order they will be saved (numbers as [PptxEdit] gives them). */
@@ -99,6 +100,45 @@ class SlideEditorState(val edit: PptxEdit) {
     var selection by mutableStateOf(TextRange.Zero)
     var pending by mutableStateOf<RunStyle?>(null)
     var moveTo by mutableStateOf<Pair<Long, Int>?>(null)
+    /** With [moveTo]: the end of the text to select (a place found). */
+    var selectTill: Int? = null
+
+    override fun searchable(): List<Pair<Long, String>> = paras.filter { it.editable }.map { it.key to it.text }
+
+    override fun show(f: Found) { selectTill = f.end; moveTo = f.key to f.start }
+
+    private fun replaced(p: SlidePara, start: Int, end: Int, with: String): SlidePara {
+        val style = p.marks.getOrNull(start) ?: p.marks.getOrNull(start - 1) ?: p.typing
+        val marks = ArrayList<RunStyle>(p.text.length - (end - start) + with.length)
+        marks.addAll(p.marks.subList(0, start)); repeat(with.length) { marks += style }; marks.addAll(p.marks.subList(end, p.text.length))
+        return p.changed(text = p.text.replaceRange(start, end, with), marks = marks)
+    }
+
+    override fun replace(f: Found, with: String): Boolean {
+        val i = indexOf(f.key); if (i < 0) return false
+        val p = paras[i]
+        if (!p.editable || f.end > p.text.length || '\n' in with) return false
+        val list = paras.toMutableList()
+        list[i] = replaced(p, f.start, f.end, with)
+        commit(list)
+        show(Found(f.key, f.start, f.start + with.length))
+        return true
+    }
+
+    override fun replaceAll(found: List<Found>, with: String): Int {
+        if ('\n' in with || found.isEmpty()) return 0
+        val list = paras.toMutableList()
+        var n = 0
+        for ((key, places) in found.groupBy { it.key }) {
+            val i = list.indexOfFirst { it.key == key }
+            if (i < 0 || !list[i].editable) continue
+            var p = list[i]
+            for (f in places.sortedByDescending { it.start }) { if (f.end <= p.text.length) { p = replaced(p, f.start, f.end, with); n++ } }
+            list[i] = p
+        }
+        if (n > 0) commit(list)
+        return n
+    }
 
     fun indexOf(key: Long?) = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
@@ -276,16 +316,25 @@ fun SlideEditorScreen(
 ) {
     var askClose by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
-    BackHandler { if (state.dirty) askClose = true else onClose() }
+    val find = remember { FindState() }
+    var replacedCount by remember { mutableStateOf<Int?>(null) }
+    BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
     Scaffold(
         topBar = {
+          Column {
             TopAppBar(
                 title = { Text(name.substringBeforeLast('.', name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = { if (state.dirty) askClose = true else onClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.edit_close)) } },
-                actions = { TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) } },
+                actions = {
+                    IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
+                    TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
+                },
             )
+            if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
+          }
         },
         bottomBar = {
+          if (!find.open) {
             val i = state.indexOf(state.focused)
             val active = !saving && i >= 0 && state.paras.getOrNull(i)?.editable == true
             Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
@@ -301,6 +350,7 @@ fun SlideEditorScreen(
                     }
                 }
             }
+          }
         },
     ) { padding ->
         val list = state.paras
@@ -309,7 +359,20 @@ fun SlideEditorScreen(
         var noLayout by remember { mutableStateOf(false) }
         // Each slide in order: its heading (number, picture, what can be done with it), then its text boxes
         val bySlide = remember(list) { list.groupBy(state::slideOf) }
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        // A place found (or a new slide's text) is brought into view
+        LaunchedEffect(state.moveTo) {
+            val key = state.moveTo?.first ?: return@LaunchedEffect
+            var at = 0
+            for (slide in order) {
+                at++ // the slide's heading
+                val ps = bySlide[slide].orEmpty()
+                val k = ps.indexOfFirst { it.key == key }
+                if (k >= 0) { at += k; if (listState.layoutInfo.visibleItemsInfo.none { it.index == at }) listState.scrollToItem(at); return@LaunchedEffect }
+                at += ps.size
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
             for ((n, slide) in order.withIndex()) {
                 item(key = "slide-$slide") {
                     SlideHeading(
@@ -343,6 +406,10 @@ fun SlideEditorScreen(
                     Text(stringResource(R.string.slide_add), modifier = Modifier.padding(start = 8.dp))
                 }
             }
+        }
+        replacedCount?.let { n ->
+            AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
+                confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
         }
         if (noLayout) AlertDialog(onDismissRequest = { noLayout = false }, text = { Text(stringResource(R.string.slide_add_failed)) },
             confirmButton = { TextButton(onClick = { noLayout = false }) { Text(stringResource(R.string.ok)) } })
@@ -409,8 +476,10 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
     LaunchedEffect(state.moveTo) {
         val (key, at) = state.moveTo ?: return@LaunchedEffect
         if (key != p.key) return@LaunchedEffect
-        value = TextFieldValue(MARK + p.text, TextRange(at + 1))
-        state.focused = p.key; state.selection = TextRange(at, at); state.moveTo = null
+        val till = (state.selectTill ?: at).coerceIn(at, p.text.length)
+        state.selectTill = null
+        value = TextFieldValue(MARK + p.text, TextRange(at + 1, till + 1))
+        state.focused = p.key; state.selection = TextRange(at, till); state.moveTo = null
         try { focus.requestFocus() } catch (_: Exception) {}
     }
     BasicTextField(

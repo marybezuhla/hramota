@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -85,7 +86,7 @@ private const val ZW = '​'
  * A DOCX being edited: the paragraphs, what was done (to undo and redo), and where the cursor is.
  * Typing within one paragraph is undone in pauses, not letter by letter.
  */
-class EditorState(val edit: DocxEdit) {
+class EditorState(val edit: DocxEdit) : Replaceable {
     var paras by mutableStateOf(edit.paragraphs)
         private set
     var shown: List<Shown> by mutableStateOf(edit.shown(edit.paragraphs))
@@ -108,6 +109,47 @@ class EditorState(val edit: DocxEdit) {
     var pending by mutableStateOf<RunStyle?>(null)
     /** Where the cursor goes next (paragraph, position), after a split or a join. */
     var moveTo by mutableStateOf<Pair<Long, Int>?>(null)
+    /** With [moveTo]: the end of the text to select (a place found). */
+    var selectTill: Int? = null
+
+    override fun searchable(): List<Pair<Long, String>> = paras.filter { it.editable }.map { it.key to it.text }
+
+    override fun show(f: Found) { selectTill = f.end; moveTo = f.key to f.start }
+
+    /** Paragraph [p] with [start]..[end] replaced by [with], in the formatting of the text replaced. */
+    private fun replaced(p: EditPara, start: Int, end: Int, with: String): EditPara {
+        val style = p.marks.getOrNull(start) ?: p.marks.getOrNull(start - 1) ?: p.typing
+        val marks = ArrayList<RunStyle>(p.text.length - (end - start) + with.length)
+        marks.addAll(p.marks.subList(0, start)); repeat(with.length) { marks += style }; marks.addAll(p.marks.subList(end, p.text.length))
+        return edit.retyped(p, p.text.replaceRange(start, end, with), marks, start, end)
+    }
+
+    override fun replace(f: Found, with: String): Boolean {
+        val i = indexOf(f.key); if (i < 0) return false
+        val p = paras[i]
+        if (!p.editable || f.end > p.text.length || '\n' in with) return false
+        val list = paras.toMutableList()
+        list[i] = replaced(p, f.start, f.end, with)
+        commit(list)
+        show(Found(f.key, f.start, f.start + with.length))
+        return true
+    }
+
+    override fun replaceAll(found: List<Found>, with: String): Int {
+        if ('\n' in with || found.isEmpty()) return 0
+        val list = paras.toMutableList()
+        var n = 0
+        // Each paragraph from its last place to its first, so earlier places keep their positions
+        for ((key, places) in found.groupBy { it.key }) {
+            val i = list.indexOfFirst { it.key == key }
+            if (i < 0 || !list[i].editable) continue
+            var p = list[i]
+            for (f in places.sortedByDescending { it.start }) { if (f.end <= p.text.length) { p = replaced(p, f.start, f.end, with); n++ } }
+            list[i] = p
+        }
+        if (n > 0) commit(list)
+        return n
+    }
 
     fun indexOf(key: Long?): Int = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
@@ -340,9 +382,12 @@ fun DocxEditorScreen(
     var commenting by remember { mutableStateOf(false) }
     var listing by remember { mutableStateOf(startWithComments) }
     var locked by remember { mutableStateOf(false) }
-    BackHandler { if (state.dirty) askClose = true else onClose() }
+    val find = remember { FindState() }
+    var replacedCount by remember { mutableStateOf<Int?>(null) }
+    BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
     Scaffold(
         topBar = {
+          Column {
             TopAppBar(
                 title = { Text(name.substringBeforeLast('.', name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
@@ -353,11 +398,14 @@ fun DocxEditorScreen(
                 actions = {
                     val commentsLabel = stringResource(R.string.comments_count, state.comments.size)
                     if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}", modifier = Modifier.clearAndSetSemantics { contentDescription = commentsLabel }) }
+                    IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
+            if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
+          }
         },
-        bottomBar = { EditToolbar(state, enabled = !saving, onComment = { commenting = true }) },
+        bottomBar = { if (!find.open) EditToolbar(state, enabled = !saving, onComment = { commenting = true }) },
     ) { padding ->
         val listState = rememberLazyListState()
         LazyColumn(
@@ -394,6 +442,10 @@ fun DocxEditorScreen(
         state.addComment(text, who)
     }
     if (listing) CommentsSheet(state, enabled = !saving, onDismiss = { listing = false })
+    replacedCount?.let { n ->
+        AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
+            confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
+    }
     if (locked) AlertDialog(
         onDismissRequest = { locked = false },
         text = { Text(stringResource(R.string.edit_locked_paragraph)) },
@@ -440,9 +492,11 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
         LaunchedEffect(state.moveTo) {
             val (key, at) = state.moveTo ?: return@LaunchedEffect
             if (key != p.key) return@LaunchedEffect
-            value = TextFieldValue(ZW + p.text, TextRange(at + 1))
+            val till = (state.selectTill ?: at).coerceIn(at, p.text.length)
+            state.selectTill = null
+            value = TextFieldValue(ZW + p.text, TextRange(at + 1, till + 1))
             state.focused = p.key
-            state.selection = TextRange(at, at)
+            state.selection = TextRange(at, till)
             state.moveTo = null
             try { focus.requestFocus() } catch (_: Exception) {}
         }

@@ -464,4 +464,17 @@
     <string name="save_as_pdf">Save as PDF</string>
     <string name="pdf_saved">PDF saved</string>
     <string name="pdf_not_saved">Could not save the PDF</string>
+    <string name="find_replace">Find and replace</string>
+    <string name="find_what">Find</string>
+    <string name="replace_with">Replace with</string>
+    <string name="find_previous">Previous</string>
+    <string name="find_next">Next</string>
+    <string name="find_close">Close search</string>
+    <string name="replace_one">Replace</string>
+    <string name="replace_all">All</string>
+    <string name="find_match_case">Match case</string>
+    <plurals name="replaced_n">
+        <item quantity="one">Replaced %d time</item>
+        <item quantity="other">Replaced %d times</item>
+    </plurals>
 </resources>

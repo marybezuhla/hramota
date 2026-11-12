@@ -472,4 +472,19 @@
     <string name="save_as_pdf">Зберегти як PDF</string>
     <string name="pdf_saved">PDF збережено</string>
     <string name="pdf_not_saved">Не вдалося зберегти PDF</string>
+    <string name="find_replace">Знайти й замінити</string>
+    <string name="find_what">Знайти</string>
+    <string name="replace_with">Замінити на</string>
+    <string name="find_previous">Попереднє</string>
+    <string name="find_next">Наступне</string>
+    <string name="find_close">Закрити пошук</string>
+    <string name="replace_one">Замінити</string>
+    <string name="replace_all">Усі</string>
+    <string name="find_match_case">Великі й малі літери</string>
+    <plurals name="replaced_n">
+        <item quantity="one">Замінено %d раз</item>
+        <item quantity="few">Замінено %d рази</item>
+        <item quantity="many">Замінено %d разів</item>
+        <item quantity="other">Замінено %d разу</item>
+    </plurals>
 </resources>

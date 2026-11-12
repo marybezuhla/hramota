@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -70,6 +71,8 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
 
     private sealed class Step
     private class CellStep(val key: CellKey, val before: Input?, val after: Input?) : Step()
+    /** Several cells changed at once ("replace all"): one step. */
+    private class CellsStep(val steps: List<CellStep>) : Step()
     /** Rows inserted or deleted: the whole workbook before and after (a few kept, they can be large). */
     private class RowStep(val before: XlsxEdit.Snapshot, val after: XlsxEdit.Snapshot, val shownBefore: Workbook, val shownAfter: Workbook) : Step()
     private val undoStack = ArrayList<Step>()
@@ -114,16 +117,63 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         draft = null; typing = false
         // Typed exactly what is there: nothing to change
         if (typed == edit.content(key)) return true
-        val shown = original.sheets[sheet]
-        val styleIndex = edit.style(key) ?: shown.row(row)?.let { r -> r.find(col).takeIf { it >= 0 }?.let { r.styles[it] } }
-        val dateCell = styleIndex?.let { shown.styles.getOrNull(it) }?.format?.let { NumberFormat.isDate(it) } == true
-        // A formula that cannot be read is not taken (the field shows it as wrong)
-        val input = edit.parse(typed, dateCell, shown.date1904) ?: return false
-        val before = edit.changes[key]
-        edit.set(key, input)
-        push(CellStep(key, before, input))
+        val step = put(sheet, key, typed) ?: return false
+        push(step)
         changed()
         return true
+    }
+
+    /** Sets a cell (not yet a step to undo); null when what is typed cannot be taken. */
+    private fun put(sheet: Int, key: CellKey, typed: String): CellStep? {
+        val shown = original.sheets[sheet]
+        val styleIndex = edit.style(key) ?: shown.row(key.row)?.let { r -> r.find(key.col).takeIf { it >= 0 }?.let { r.styles[it] } }
+        val dateCell = styleIndex?.let { shown.styles.getOrNull(it) }?.format?.let { NumberFormat.isDate(it) } == true
+        // A formula that cannot be read is not taken (the field shows it as wrong)
+        val input = edit.parse(typed, dateCell, shown.date1904) ?: return null
+        val before = edit.changes[key]
+        edit.set(key, input)
+        return CellStep(key, before, input)
+    }
+
+    /** A cell as one number for "Find and replace" (row and column). */
+    private fun cellKey(row: Int, col: Int) = (row.toLong() shl 15) or col.toLong()
+
+    /** The filled cells of shown sheet [sheet] in reading order, with what they hold (formulas as typed). */
+    fun searchable(sheet: Int): List<Pair<Long, String>> {
+        if (busy) return emptyList()
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return emptyList()
+        val cells = java.util.TreeSet<Long>()
+        original.sheets.getOrNull(sheet)?.rows?.forEach { r -> for (c in r.cols) cells += cellKey(r.index, c) }
+        for (k in edit.changes.keys) if (k.sheet == s) cells += cellKey(k.row, k.col)
+        return cells.mapNotNull { k ->
+            val key = CellKey(s, (k shr 15).toInt(), (k and 0x7FFF).toInt())
+            if (edit.locked(key)) null else edit.content(key).takeIf { it.isNotEmpty() }?.let { k to it }
+        }
+    }
+
+    fun place(key: Long): Pair<Int, Int> = (key shr 15).toInt() to (key and 0x7FFF).toInt()
+
+    /** Replaces places found on shown sheet [sheet] (one step to undo); how many cells changed. */
+    fun replaceIn(sheet: Int, found: List<Found>, with: String): Int {
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return 0
+        if (busy || found.isEmpty()) return 0
+        flush()
+        val steps = ArrayList<CellStep>()
+        var places = 0
+        for ((k, list) in found.groupBy { it.key }) {
+            val (row, col) = place(k)
+            val key = CellKey(s, row, col)
+            if (edit.locked(key)) continue
+            var text = edit.content(key)
+            var n = 0
+            for (f in list.sortedByDescending { it.start }) if (f.end <= text.length) { text = text.replaceRange(f.start, f.end, with); n++ }
+            if (n == 0) continue
+            put(sheet, key, text)?.let { steps += it; places += n }
+        }
+        if (steps.isEmpty()) return 0
+        push(if (steps.size == 1) steps[0] else CellsStep(steps))
+        changed()
+        return places
     }
 
     private fun push(step: Step) {
@@ -145,6 +195,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         val st = undoStack.removeLastOrNull() ?: return
         when (st) {
             is CellStep -> edit.set(st.key, st.before)
+            is CellsStep -> for (c in st.steps.asReversed()) edit.set(c.key, c.before)
             is RowStep -> { edit.restore(st.before); original = st.shownBefore }
         }
         redoStack += st
@@ -157,6 +208,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         val st = redoStack.removeLastOrNull() ?: return
         when (st) {
             is CellStep -> edit.set(st.key, st.after)
+            is CellsStep -> for (c in st.steps) edit.set(c.key, c.after)
             is RowStep -> { edit.restore(st.after); original = st.shownAfter }
         }
         undoStack += st
@@ -261,7 +313,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
     // What is being typed counts: it goes in first
     val save = { state.flush(); onSave() }
     val close = { state.flush(); if (state.dirty) askClose = true else onClose() }
-    BackHandler { close() }
+    BackHandler { if (find.open) find.open = false else close() }
     LaunchedEffect(state.version) { if (state.version > 0) state.refresh() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     state.notice?.let { msg ->
@@ -271,8 +323,20 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
             confirmButton = { TextButton(onClick = { state.notice = null }) { Text(stringResource(R.string.ok)) } },
         )
     }
+    val find = remember { FindState() }
+    var replacedCount by remember { mutableStateOf<Int?>(null) }
+    // "Find and replace" on the sheet shown
+    val target = remember(sheetIndex) {
+        object : Replaceable {
+            override fun searchable() = state.searchable(sheetIndex)
+            override fun show(f: Found) { val (r, c) = state.place(f.key); view.select(r, c) }
+            override fun replace(f: Found, with: String) = state.replaceIn(sheetIndex, listOf(f), with) > 0
+            override fun replaceAll(found: List<Found>, with: String) = state.replaceIn(sheetIndex, found, with)
+        }
+    }
     Scaffold(
         topBar = {
+          androidx.compose.foundation.layout.Column {
             TopAppBar(
                 title = { Text(name.substringBeforeLast('.', name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
@@ -284,9 +348,12 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     val undoLabel = stringResource(R.string.edit_undo); val redoLabel = stringResource(R.string.edit_redo)
                     TextButton(onClick = { state.undo() }, enabled = state.canUndo && !saving && !state.busy) { Text("↶", modifier = Modifier.clearAndSetSemantics { contentDescription = undoLabel }) }
                     TextButton(onClick = { state.redo() }, enabled = state.canRedo && !saving && !state.busy) { Text("↷", modifier = Modifier.clearAndSetSemantics { contentDescription = redoLabel }) }
+                    IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
                     TextButton(onClick = { save() }, enabled = (state.dirty || state.typing) && !saving && !state.busy) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
+            if (find.open) FindBar(find, target, state.version to sheetIndex, enabled = !saving && !state.busy) { n -> if (n != 1) replacedCount = n }
+          }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
@@ -300,6 +367,10 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                 startCell = startCell,
             )
         }
+    }
+    replacedCount?.let { n ->
+        AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
+            confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
     }
     if (askClose) AlertDialog(
         onDismissRequest = { askClose = false },
