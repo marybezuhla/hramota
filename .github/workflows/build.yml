@@ -144,6 +144,12 @@ jobs:
             b="$(basename "$f")"; pdf="edited-pdf/${b%.*}.pdf"
             test -s "$pdf" || { echo "LibreOffice could not open $f"; exit 1; }
             pdftoppm -r 60 -png -f 1 -l 1 "$pdf" "log/edited/${b%.*}" || true
+            # Presentations whose slides were added or taken out: LibreOffice sees as many as the test expects
+            if [ -f "${f%.*}.pages" ]; then
+              want="$(cat "${f%.*}.pages")"; got="$(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}')"
+              [ "$want" = "$got" ] || { echo "$f: LibreOffice shows $got slides, expected $want"; exit 1; }
+              pdftoppm -r 40 -png "$pdf" "log/edited/${b%.*}-all" || true
+            fi
           done
           echo "edited documents open: $(ls edited-pdf | wc -l)"
 

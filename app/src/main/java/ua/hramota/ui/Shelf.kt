@@ -15,8 +15,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.draw.CacheDrawScope
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.heightIn
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -139,7 +137,7 @@ fun Shelf(
     // Both delete the copy kept in Hramota: asked first
     var confirming by remember { mutableStateOf<Pair<LibraryEntry, ShelfAction>?>(null) }
     confirming?.let { (e, a) ->
-        val title = e.title.substringBeforeLast('.', e.title)
+        val title = shownTitle(e)
         AlertDialog(
             onDismissRequest = { confirming = null },
             text = { Text(stringResource(if (a == ShelfAction.FORGET) R.string.forget_confirm else R.string.drop_confirm, title)) },
@@ -226,7 +224,8 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
     val tint = if (hue >= 0f) Color.hsl(hue, 0.35f, if (dark) 0.13f else 0.94f) else Color.Transparent
     LazyVerticalGrid(
         GridCells.Adaptive(108.dp), Modifier.fillMaxSize().background(tint),
-        contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp),
+        // (room at the foot for the round button over the shelf)
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         // The one being read, at the top with how far it is, to go on with one tap
         entries.filter { it.total > 1 && it.position in 1 until it.total - 1 }.maxByOrNull { it.openedAt }?.let { now ->
@@ -236,7 +235,7 @@ private fun ModernShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (Librar
                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Book(now, onOpen, menu, Modifier.width(104.dp).shadow(6.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp)), spine = true)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(now.title.substringBeforeLast('.', now.title), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Text(shownTitle(now), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
                             Progress(now)
                             androidx.compose.material3.Button(onClick = { onOpen(now) }, modifier = Modifier.padding(top = 4.dp).heightIn(min = 44.dp)) { Text(stringResource(R.string.shelf_continue)) }
                         }
@@ -317,7 +316,8 @@ private fun WoodShelf(entries: List<LibraryEntry>, hue: Float, onOpen: (LibraryE
         val bookW = (maxWidth - 40.dp - gap * (perRow - 1)) / perRow
         val rowH = bookW / 0.72f + 30.dp + 22.dp
         val rows = entries.chunked(perRow)
-        val count = maxOf(rows.size, (maxHeight / rowH).toInt() + 1)
+        // An empty plank after the last books, so the round button over the shelf never covers one
+        val count = maxOf(rows.size + 1, (maxHeight / rowH).toInt() + 1)
         LazyColumn(Modifier.fillMaxSize()) {
             items(count) { i -> WoodRow(i, rows.getOrNull(i).orEmpty(), perRow, gap, w, onOpen, menu) }
         }
@@ -407,7 +407,7 @@ private fun StandingBook(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: 
             .clip(shape)
             .combinedClickable(onClick = { onOpen(e) }, onLongClick = { open = true }),
     ) {
-        Cover(e, Modifier.fillMaxWidth(), bound = true)
+        Cover(e, Modifier.fillMaxWidth())
         // The binding: light catches the spine's ridge, the hinge just after it is in shadow; a faint gloss on top
         Box(Modifier.matchParentSize().drawBehind {
             drawRect(Brush.horizontalGradient(0f to Color(0x30000000), 0.015f to Color(0x55FFFFFF), 0.04f to Color(0x10FFFFFF), 0.065f to Color(0x45000000), 0.095f to Color.Transparent, 0.93f to Color.Transparent, 1f to Color(0x30000000)))
@@ -422,7 +422,7 @@ private fun StandingBook(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ListShelf(entries: List<LibraryEntry>, color: Color, onOpen: (LibraryEntry) -> Unit, menu: @Composable (LibraryEntry, () -> Unit) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 88.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(entries, key = { it.id }) { e ->
             var open by remember { mutableStateOf(false) }
             Box {
@@ -460,8 +460,18 @@ private fun Book(e: LibraryEntry, onOpen: (LibraryEntry) -> Unit, menu: @Composa
     }
 }
 
-/** The title a document shows on the shelf: the one chosen for its cover, else its name without the extension. */
-internal fun shownTitle(e: LibraryEntry): String = e.coverTitle ?: e.title.substringBeforeLast('.', e.title)
+/**
+ * The title a document shows on the shelf: the one chosen for its cover, else the one it gives itself (a
+ * book's title), else its file's name made readable (no extension, no "_" or number left by a download site).
+ */
+internal fun shownTitle(e: LibraryEntry): String = e.coverTitle ?: e.docTitle ?: readableName(e.title)
+
+internal fun readableName(fileName: String): String {
+    val base = fileName.substringBeforeLast('.', fileName)
+    // "Book_Title.844650": the site's number after the name (a year, "Budget.2025", stays)
+    val bare = base.replace(Regex("\\.\\d{5,}$"), "")
+    return bare.replace('_', ' ').replace(Regex("\\s+"), " ").trim().ifEmpty { base }
+}
 
 /** Whether a picture is its cover: one chosen, or as usual a book's own and a presentation's first slide. */
 internal fun usesPicture(e: LibraryEntry): Boolean = when (e.cover) {
@@ -471,23 +481,42 @@ internal fun usesPicture(e: LibraryEntry): Boolean = when (e.cover) {
 }
 
 @Composable
-private fun Cover(e: LibraryEntry, modifier: Modifier, bound: Boolean = false) {
+private fun Cover(e: LibraryEntry, modifier: Modifier) {
     val context = LocalContext.current
     val picture = usesPicture(e)
     val changes by ua.hramota.data.Shelf.coversChanged.collectAsState()
-    val cover by produceState<ImageBitmap?>(null, e.id, picture, e.cover, changes) {
-        value = if (!picture) null else withContext(Dispatchers.IO) {
-            ua.hramota.data.Shelf.loadCover(context, e.id)?.asImageBitmap()
-        }
+    val unlocked by ua.hramota.data.Vault.unlocked.collectAsState()
+    // Kept while Hramota runs (see Shelf.CoverMemory): the same picture at once on every tab and view,
+    // never the drawn cover first
+    fun known(): CoverLoad = when {
+        !picture -> CoverLoad.None
+        else -> ua.hramota.data.Shelf.CoverMemory.get(e.id)?.let { CoverLoad.Picture(it.asImageBitmap()) }
+            ?: if (ua.hramota.data.Shelf.CoverMemory.hasNone(e.id)) CoverLoad.None else CoverLoad.Loading
     }
-    BoxWithConstraints(modifier.aspectRatio(0.72f)) {
-        val width = maxWidth
-        val c = cover
+    val load by produceState(known(), e.id, picture, changes, unlocked) {
+        // (what is known now, not the picture of before: after locking, a sealed cover is not shown again)
+        value = known()
+        if (value != CoverLoad.Loading) return@produceState
+        val epoch = ua.hramota.data.Shelf.CoverMemory.epoch
+        val b = withContext(Dispatchers.IO) { ua.hramota.data.Shelf.loadCover(context, e.id) }
+        ua.hramota.data.Shelf.CoverMemory.put(e.id, b, epoch)
+        value = b?.let { CoverLoad.Picture(it.asImageBitmap()) } ?: CoverLoad.None
+    }
+    Box(modifier.aspectRatio(0.72f)) {
+        val l = load
         val title = shownTitle(e)
-        if (c != null) Image(c, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
-        else if (bound && width >= 72.dp) BoundCover(e, title, width)
+        // (still loading a picture: an empty cover, not a drawn one that would flash and then change)
+        if (l is CoverLoad.Picture) Image(l.image, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().background(Color.White))
+        else if (l == CoverLoad.Loading) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
+        // The same drawn cover in every view (and as chosen in the cover dialog)
         else DrawnCover(title, e.format)
     }
+}
+
+private sealed interface CoverLoad {
+    data object Loading : CoverLoad
+    data object None : CoverLoad
+    class Picture(val image: ImageBitmap) : CoverLoad
 }
 
 @Composable
@@ -500,41 +529,6 @@ private fun Progress(e: LibraryEntry) {
     LinearProgressIndicator(progress = { page.toFloat() / e.total }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(3.dp).clip(RoundedCornerShape(2.dp)))
 }
 
-/** Book cloth, for a cover with no picture: one of a few classic bindings, always the same for a title. */
-private val CLOTH = listOf(
-    Color(0xFF7A1F1F), Color(0xFF1E3A5F), Color(0xFF2F4F3A), Color(0xFF6B4A1A), Color(0xFF4A2F55),
-    Color(0xFF1F4A4F), Color(0xFF5A2A1C), Color(0xFF2B2F3A), Color(0xFF8A5A1E),
-)
-private val GILT = Color(0xFFE2C27A)
-
-/** A cloth-bound cover: gilt rules, the title in the book face, the format in small letters at the foot. */
-@Composable
-private fun BoundCover(e: LibraryEntry, title: String, width: androidx.compose.ui.unit.Dp) {
-    val cloth = CLOTH[(title.hashCode() and 0x7fffffff) % CLOTH.size]
-    val measurer = rememberTextMeasurer()
-    val room = with(LocalDensity.current) { (width - 30.dp).toPx() }
-    val fs = remember(title, room) {
-        val word = title.split(' ', '-', '_').maxByOrNull { it.length } ?: ""
-        var s = 14f
-        while (s > 9f && measurer.measure(word, TextStyle(fontSize = s.sp, fontFamily = Literata, fontWeight = FontWeight.Bold)).size.width > room) s -= 0.5f
-        s
-    }
-    Box(
-        Modifier.fillMaxSize()
-            .background(Brush.linearGradient(listOf(lerp(cloth, Color.White, 0.10f), cloth, lerp(cloth, Color.Black, 0.25f))))
-            .drawBehind {
-                // Gilt rules near head and foot, as stamped on cloth
-                val inset = 10.dp.toPx()
-                for (y in listOf(9.dp.toPx(), 12.dp.toPx(), size.height - 12.dp.toPx(), size.height - 9.dp.toPx()))
-                    drawLine(GILT.copy(alpha = 0.75f), Offset(inset, y), Offset(size.width - inset * 0.7f, y), 0.8.dp.toPx())
-            }
-            .padding(start = 12.dp, end = 8.dp, top = 20.dp, bottom = 18.dp),
-    ) {
-        Text(title, color = Color(0xFFF6EBD6), fontFamily = Literata, fontWeight = FontWeight.Bold, fontSize = fs.sp, lineHeight = (fs + 3).sp,
-            maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.TopStart))
-        Text(e.format, color = GILT, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp, modifier = Modifier.align(Alignment.BottomStart))
-    }
-}
 
 /** A shelf's name, look and colour; a slider picks the colour, or the natural one. */
 @OptIn(ExperimentalMaterial3Api::class)

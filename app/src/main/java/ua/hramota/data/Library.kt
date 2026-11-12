@@ -48,6 +48,8 @@ data class LibraryEntry(
     val shelves: Set<String> = emptySet(),
     /** The title on its shelf cover, if chosen (else the file's name). */
     val coverTitle: String? = null,
+    /** The title the document itself gives (a book's title, a document's properties), shown instead of the file's name. */
+    val docTitle: String? = null,
     /** Its cover: "" as usual (a book's own picture, a presentation's first slide, else drawn), "drawn" or "picture". */
     val cover: String = "",
 ) {
@@ -239,6 +241,7 @@ class Library private constructor(private val context: Context) {
         put("bookmarks", JSONArray(e.bookmarks.sorted())); put("shelf", e.onShelf); put("opened", e.openedAt)
         if (e.shelves.isNotEmpty()) put("shelves", JSONArray(e.shelves.toList()))
         e.coverTitle?.let { put("coverTitle", it) }
+        e.docTitle?.let { put("docTitle", it) }
         if (e.cover.isNotEmpty()) put("cover", e.cover)
         if (e.notes.isNotEmpty()) put("notes", JSONArray().apply {
             for (n in e.notes) put(JSONObject().apply { put("b", n.block); put("s", n.start); put("eb", n.endBlock); put("e", n.end); put("c", n.color); if (n.text.isNotEmpty()) put("t", n.text); put("at", n.at) })
@@ -262,6 +265,7 @@ class Library private constructor(private val context: Context) {
             bookmarks = o.optJSONArray("bookmarks")?.let { a -> (0 until minOf(a.length(), MAX_BOOKMARKS)).map { a.optInt(it) }.filter { it >= 0 }.toSet() } ?: emptySet(),
             onShelf = o.optBoolean("shelf"), openedAt = o.optLong("opened"),
             coverTitle = o.optString("coverTitle").let { cleanTitle(it) }.take(MAX_COVER_TITLE).ifBlank { null },
+            docTitle = o.optString("docTitle").let { cleanTitle(it) }.take(MAX_COVER_TITLE).ifBlank { null },
             cover = o.optString("cover").takeIf { it in COVERS } ?: "",
             notes = o.optJSONArray("notes")?.let { a ->
                 (0 until minOf(a.length(), MAX_NOTES)).mapNotNull { k ->

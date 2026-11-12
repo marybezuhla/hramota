@@ -116,6 +116,29 @@ object Shelf {
     /** Counts cover changes, so the shelf shows a new picture at once. */
     val coversChanged = kotlinx.coroutines.flow.MutableStateFlow(0)
 
+    private fun changed() { CoverMemory.clear(); coversChanged.value++ }
+
+    /**
+     * Covers already read, for the shelf's views (the same picture at once on every tab). Emptied when a
+     * cover changes and when locked storage closes: a sealed cover never stays in memory after locking.
+     */
+    object CoverMemory {
+        private val pictures = android.util.LruCache<String, Bitmap>(60)
+        /** Documents found to have no picture (their drawn cover shows at once next time). */
+        private val none = android.util.LruCache<String, Boolean>(200)
+        /** Grows on every emptying: a picture read before it is not kept after it. */
+        @Volatile var epoch = 0
+            private set
+
+        @Synchronized fun get(id: String): Bitmap? = pictures.get(id)
+        @Synchronized fun hasNone(id: String): Boolean = none.get(id) != null
+        @Synchronized fun put(id: String, b: Bitmap?, readAt: Int) {
+            if (readAt != epoch) return
+            if (b != null) pictures.put(id, b) else none.put(id, true)
+        }
+        @Synchronized fun clear() { epoch++; pictures.evictAll(); none.evictAll() }
+    }
+
     /**
      * Puts [png] in place as the cover (sealed while the storage is locked), or removes the cover when null: written
      * beside first, then moved over the old one, so a cut-off write never leaves half a picture. Used to undo a change.
@@ -125,14 +148,14 @@ object Shelf {
         val key = Vault.key()
         if (png != null && sealing && key == null) return false
         val plain = coverFile(context, id, false); val sealed = coverFile(context, id, true)
-        if (png == null) { plain.delete(); sealed.delete(); coversChanged.value++; return true }
+        if (png == null) { plain.delete(); sealed.delete(); changed(); return true }
         val f = if (sealing) sealed else plain
         val tmp = File(f.parentFile, f.name + ".new")
         return try {
             tmp.writeBytes(if (sealing) Sealed.seal(key!!, png, "$id.png") else png)
             if (!tmp.renameTo(f)) { tmp.delete(); return false }
             (if (sealing) plain else sealed).delete()
-            coversChanged.value++
+            changed()
             true
         } catch (_: Exception) { tmp.delete(); false }
     }

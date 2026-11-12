@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hramota</string>
-    <string name="home_tagline">Private office. Works offline.</string>
+    <string name="home_actions">Open, create or compare</string>
     <string name="open_file">Open a file</string>
     <string name="compare_versions">Compare two versions</string>
     <string name="compare_pick_first">Choose the earlier version</string>
@@ -12,7 +12,6 @@
     <string name="recent_remove">Remove from recent</string>
     <string name="today_at">Today, %1$s</string>
     <string name="yesterday_at">Yesterday, %1$s</string>
-    <string name="privacy_note">No internet access: nothing leaves your phone.</string>
     <string name="loading">Opening…</string>
     <string name="back">Back</string>
     <string name="open_failed">This file could not be opened. It may be damaged, or access to it has expired.</string>
@@ -450,4 +449,15 @@
     <string name="about_support_defence">Defence</string>
     <string name="about_support_humanitarian">Humanitarian aid</string>
     <string name="about_support_any">You can also support any trusted foundation, volunteers or unit you know. Check fundraisers: official details and reports.</string>
+    <string name="slide_add">Add a slide</string>
+    <string name="slide_add_after">Add a slide after this one</string>
+    <string name="slide_add_failed">This presentation has no layout for a new slide.</string>
+    <string name="slide_up">Up</string>
+    <string name="slide_down">Down</string>
+    <string name="slide_more">More</string>
+    <string name="slide_remove">Delete slide</string>
+    <string name="slide_remove_linked">Cannot delete: other slides link to it</string>
+    <string name="slide_no_text">No text</string>
+    <string name="create_pptx">PowerPoint presentation (PPTX)</string>
+    <string name="new_presentation_name">New presentation</string>
 </resources>
