@@ -161,6 +161,18 @@ object Shelf {
     }
 
     /**
+     * The cover goes with a document whose content changed (an edit saved, notes written into a PDF):
+     * from its old fingerprint to the new one, sealed again if it was sealed (a sealed cover is bound to
+     * its name). Without the key a sealed cover cannot move and is left out; the shelf draws one.
+     */
+    fun moveCover(context: Context, from: String, to: String) {
+        if (from == to) return
+        val png = loadCoverBytes(context, from)
+        coverFile(context, from, false).delete(); coverFile(context, from, true).delete()
+        if (png != null) putCover(context, to, png) else changed()
+    }
+
+    /**
      * Seals or opens one file in place (for turning locked storage on or off): the new form is written
      * and checked first, then the old one removed. Returns the file in its new form, or null if untouched.
      */

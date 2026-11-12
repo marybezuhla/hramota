@@ -74,7 +74,8 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         "тисячі", "тисяч", "мільйон", "мільйона", "мільйонів", "кома", "плюс", "мінус", "двадцять", "тридцять", "сорок", "п'ятдесят", "шістдесят",
         "сімдесят", "вісімдесят", "дев'яносто", "триста", "чотириста", "п'ятсот", "шістсот", "сімсот", "вісімсот", "дев'ятсот")
     private val KEEP = '\uE000'
-    private val WORD_ONE = Regex("""(?<![\p{L}'])один(?![\p{L}'])""", RegexOption.IGNORE_CASE)
+    private val WORD_ONE = Regex("""(?<![\p{L}'])(один|два)(?![\p{L}'])""", RegexOption.IGNORE_CASE)
+    private val TWO_BEFORE = Regex("""(?<![\p{L}'])(два)((?:\s+[\p{L}']+){1,3})""", RegexOption.IGNORE_CASE)
     private val ONE_BEFORE = Regex("""(?<![\p{L}'])(один)(\s+)([\p{L}']{3,})""", RegexOption.IGNORE_CASE)
 
     private fun agree(text: String): String = ONE_BEFORE.replace(text) { m ->
@@ -90,6 +91,42 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         // (only before a word the dictionary knows as a noun-like word: «один з них» stays)
         if (dictionary != null && dictionary.lookup(noun).isEmpty()) return@replace m.value
         (if (one[0].isUpperCase()) form.replaceFirstChar { it.uppercase() } else form) + m.groupValues[2] + m.groupValues[3]
+    }
+
+    private fun known(w: String) = dictionary != null && dictionary.lookup(w).isNotEmpty()
+
+    /** A plural adjective («нові», «сині»): its masculine form is a word. */
+    private fun adjectivePlural(w: String): Boolean {
+        if (!w.endsWith("і") && !w.endsWith("ї")) return false
+        val s = w.dropLast(1)
+        return known(s + "ий") || known(s + "ій") || known(s + "їй")
+    }
+
+    /**
+     * A feminine noun in the plural («книги», «гривні», «лінії»), told by its feminine singular forms: the
+     * dictionary has no genders, but only a feminine noun has «книгою», «гривнею», «лінією» («столи»,
+     * «коні», «дні» have none). Masculine nouns in -а/-я («судді») are listed.
+     */
+    private fun femininePlural(w: String): Boolean {
+        val (singular, instrumental) = when {
+            w.endsWith("ії") -> w.dropLast(2).let { listOf(it + "ія") to listOf(it + "ією") }
+            w.endsWith("ї") -> w.dropLast(1).let { listOf(it + "я") to listOf(it + "єю") }
+            w.endsWith("и") -> w.dropLast(1).let { listOf(it + "а") to listOf(it + "ою") }
+            w.endsWith("і") -> w.dropLast(1).let { listOf(it + "я", it + "а") to listOf(it + "ею", it + "ою") }
+            else -> return false
+        }
+        if (singular.any { it in MASCULINE_O_A }) return false
+        return instrumental.any(::known)
+    }
+
+    /** «2 книги» — «дві книги»: «два» from a number takes the gender of its noun (an adjective may come between). */
+    private fun agreeTwo(text: String): String = TWO_BEFORE.replace(text) { m ->
+        val words = Regex("""[\p{L}']+""").findAll(m.groupValues[2]).map { it.value.lowercase() }.toList()
+        var k = 0
+        while (k < words.size - 1 && k < 2 && adjectivePlural(words[k])) k++
+        if (!femininePlural(words[k])) return@replace m.value
+        val two = m.groupValues[1]
+        (if (two[0].isUpperCase()) "Дві" else "дві") + m.groupValues[2]
     }
 
     /** Words whose stress depends on the next one: «черго́вий лікар» (next in turn, on duty for the owner), «чергови́й» alone (the one on duty). */
@@ -117,10 +154,10 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         }
         for ((r, w) in ABBREVIATIONS) t = r.replace(t, w)
         t = Regex("""\b\p{Lu}{2,6}\b""").replace(t) { m -> if (m.value in SPELLED) spell(m.value) else m.value }
-        // «один» written as a word stays as written («один одного», «один удома»): only a number agrees with its noun
+        // «один», «два» written as words stay as written («один одного», «один удома»): only a number agrees with its noun
         t = WORD_ONE.replace(t) { it.value.dropLast(1) + KEEP + it.value.last() }
         t = UkrainianNumbers.expand(t)
-        t = agree(t).replace(KEEP.toString(), "")
+        t = agreeTwo(agree(t)).replace(KEEP.toString(), "")
         t = t.replace('’', '\'').replace('ʼ', '\'').replace('`', '\'').replace('‘', '\'')
         val words = WORD.findAll(t).toList()
         val sb = StringBuilder()

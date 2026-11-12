@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import ua.hramota.data.Library
 import ua.hramota.data.Sealed
+import ua.hramota.data.Shelf
 import ua.hramota.data.Vault
 import ua.hramota.doc.docx.DocxReader
 import ua.hramota.doc.docx.edit.DocxEdit
@@ -106,9 +107,10 @@ object EditSaving {
                     library.update(id) { null }
                     if (copy != null && newCopy != null && copy.path != newCopy.path) copy.delete()
                 }
-                // The first page may look different now: its picture is made again
-                File(Library.coversDir(context), "$id.png").delete()
-                File(Library.coversDir(context), "$id.png${Vault.SUFFIX}").delete()
+                // The cover goes with the document. Only a presentation's own first slide (not one chosen) is
+                // made again, as it may look different now
+                if (entry.cover != "picture" && entry.format in setOf("PPTX", "PPT", "ODP")) Shelf.putCover(context, id, null)
+                else Shelf.moveCover(context, id, newId)
             }
             return Outcome(Result.SAVED, newId)
         } finally {
