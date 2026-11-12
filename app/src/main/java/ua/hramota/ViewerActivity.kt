@@ -366,7 +366,8 @@ open class ViewerActivity : ComponentActivity() {
                     held.slides?.let { slideEditor ->
                         val pages = (state as? ViewerState.Paged)?.pages
                         ua.hramota.ui.SlideEditorScreen(name, slideEditor, held.saving, onSave = { saveEdits(uri, docId, name) }, onClose = { held.slides = null },
-                            thumbnail = pages?.let { pg -> { i: Int, w: Int -> pg.render(i, w) } }, aspect = pages?.let { 1f / it.aspect(0) } ?: (16f / 9f))
+                            thumbnail = pages?.let { pg -> { i: Int, w: Int -> pg.render(i, w) } }, aspect = pages?.let { 1f / it.aspect(0) } ?: (16f / 9f),
+                            source = { contentResolver.openInputStream(uri) })
                         return@Surface
                     }
                     held.sheet?.let { sheetEditor ->

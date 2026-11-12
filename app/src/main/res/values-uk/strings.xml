@@ -493,4 +493,15 @@
     <string name="password_hide">Сховати</string>
     <string name="password_open">Відкрити</string>
     <string name="password_unsupported">Цей вид захисту Грамота не відкриває: старі файли .doc, .xls і .ppt із паролем. Збережіть документ у Word, Excel чи PowerPoint у новому форматі.</string>
+    <string name="slide_box_notes">Нотатки доповідача</string>
+    <string name="slide_place">Розміщення: рамки, текст, картинка</string>
+    <string name="slide_add_notes">Додати нотатки доповідача</string>
+    <string name="slide_notes_failed">У цій презентації не можна додати нотатки: у ній немає зразка нотаток.</string>
+    <string name="slide_layout_title">Слайд %1$d: розміщення</string>
+    <string name="slide_layout_done">Готово</string>
+    <string name="slide_layout_failed">Не вдалося показати слайд.</string>
+    <string name="slide_layout_hint">Торкніться рамки, щоб вибрати її. Тягніть, щоб пересунути, а за кружечок у куті, щоб змінити розмір.</string>
+    <string name="slide_add_text">Текст</string>
+    <string name="slide_add_picture">Картинка</string>
+    <string name="slide_remove_shape">Видалити</string>
 </resources>

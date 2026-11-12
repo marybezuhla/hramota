@@ -87,7 +87,10 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
         private set
     var dirty by mutableStateOf(false)
         private set
-    private class Step(val paras: List<SlidePara>, val order: List<Int>)
+    /** Shapes moved, sized, taken out; pictures added (see [PptxEdit.Shapes]). */
+    var shapes by mutableStateOf(PptxEdit.Shapes())
+        private set
+    private class Step(val paras: List<SlidePara>, val order: List<Int>, val shapes: PptxEdit.Shapes)
     private val undoStack = ArrayList<Step>()
     private val redoStack = ArrayList<Step>()
     var canUndo by mutableStateOf(false)
@@ -142,18 +145,65 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
 
     fun indexOf(key: Long?) = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
-    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order) {
+    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order, newShapes: PptxEdit.Shapes = shapes) {
         val now = System.currentTimeMillis()
         if (!(typingIn != null && typingIn == lastKey && now - lastTyped < 1500)) {
-            undoStack += Step(paras, order); if (undoStack.size > 200) undoStack.removeAt(0)
+            undoStack += Step(paras, order, shapes); if (undoStack.size > 200) undoStack.removeAt(0)
         }
         lastTyped = now; lastKey = typingIn ?: -1L
-        redoStack.clear(); paras = list; order = newOrder; dirty = true
+        redoStack.clear(); paras = list; order = newOrder; shapes = newShapes; dirty = true
         canUndo = true; canRedo = false
     }
 
-    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order); paras = p.paras; order = p.order; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
-    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order); paras = n.paras; order = n.order; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order, shapes); paras = p.paras; order = p.order; shapes = p.shapes; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
+    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order, shapes); paras = n.paras; order = n.order; shapes = n.shapes; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+
+    // ---- Shapes on a slide ----
+
+    /** Moves or sizes a shape: x, y, width, height in EMU. */
+    fun placeShape(ref: PptxEdit.ShapeRef, rect: LongArray) = commit(paras, newShapes = shapes.copy(placed = shapes.placed + (ref to rect)))
+
+    /** Takes a shape out (with its text). */
+    fun removeShape(ref: PptxEdit.ShapeRef) {
+        val list = paras.filterNot { p -> edit.boxes[p.box].let { it.slide == ref.slide && it.shape == ref.id && it.kind != "notes" } }
+        if (focused?.let { k -> list.none { it.key == k } } == true) focused = null
+        commit(list, newShapes = shapes.copy(removed = shapes.removed + ref, pictures = shapes.pictures - ref))
+    }
+
+    /** Adds a text box at [rect] (EMU) on [slide], ready to type into. */
+    fun addTextBox(slide: Int, rect: LongArray, lang: String) {
+        val (_, list) = try { edit.addTextBox(slide, rect, lang) } catch (e: java.io.IOException) { return }
+        commit(arranged(paras + list, order))
+        list.firstOrNull()?.let { moveTo = it.key to 0 }
+    }
+
+    /** Adds a picture (PNG or JPEG bytes) at [rect] (EMU) on [slide]. */
+    fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): Boolean {
+        val ref = try { edit.addPicture(slide, bytes, png, rect) } catch (e: java.io.IOException) { return false }
+        commit(paras, newShapes = shapes.copy(pictures = shapes.pictures + ref))
+        return true
+    }
+
+    /** Adds empty speaker notes to [slide]; false when the presentation cannot have them. */
+    fun addNotes(slide: Int, lang: String): Boolean {
+        val list = edit.addNotes(slide, lang) ?: return false
+        commit(arranged(paras + list, order))
+        list.firstOrNull()?.let { moveTo = it.key to 0 }
+        return true
+    }
+
+    /** Whether a slide has speaker notes (now, with what was undone left out). */
+    fun hasNotes(slide: Int) = paras.any { edit.boxes[it.box].let { b -> b.slide == slide && b.kind == "notes" } }
+
+    /** The presentation as it would be saved now, read again (for the picture of a slide while placing shapes). */
+    suspend fun preview(source: () -> InputStream?): ua.hramota.doc.slides.Deck? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val list = paras; val o = order; val sh = shapes
+        try {
+            val out = java.io.ByteArrayOutputStream()
+            source()?.use { edit.save(list, o, it, out, sh) } ?: return@withContext null
+            ua.hramota.doc.slides.PptxReader.read(out.toByteArray().inputStream())
+        } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+    }
 
     /** Which slide a paragraph is on. */
     fun slideOf(p: SlidePara) = edit.boxes[p.box].slide
@@ -270,9 +320,10 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
     fun maker(): EditSaving.Maker {
         val list = paras
         val slides = order
+        val sh = shapes
         return object : EditSaving.Maker {
             override val ext = "pptx"
-            override fun write(source: InputStream, out: OutputStream) = edit.save(list, slides, source, out)
+            override fun write(source: InputStream, out: OutputStream) = edit.save(list, slides, source, out, sh)
             override fun check(made: InputStream) { ua.hramota.doc.slides.PptxReader.read(made, withMedia = false) }
         }
     }
@@ -313,9 +364,17 @@ fun SlideEditorScreen(
     /** A slide's picture at a width in pixels (the presentation as opened), or null. */
     thumbnail: (suspend (Int, Int) -> ImageBitmap?)? = null,
     aspect: Float = 16f / 9f,
+    /** The file as opened (read again to show slides as they will be saved), for placing shapes. */
+    source: (() -> InputStream?)? = null,
 ) {
+    // Placing shapes on one slide: a screen of its own
+    var placing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Int?>(null) }
+    placing?.let { slide ->
+        if (source != null && slide in state.order) { SlideLayoutScreen(state, slide, source, onDone = { placing = null }); return }
+    }
     var askClose by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
+    var noNotes by remember { mutableStateOf(false) }
     val find = remember { FindState() }
     var replacedCount by remember { mutableStateOf<Int?>(null) }
     BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
@@ -382,6 +441,8 @@ fun SlideEditorScreen(
                         onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },
                         onRemove = { state.removeSlide(slide) },
                         onAddAfter = { if (!state.addSlide(slide, lang)) noLayout = true },
+                        onPlace = if (source != null && !saving) ({ placing = slide }) else null,
+                        onNotes = if (!saving && !state.hasNotes(slide)) ({ if (!state.addNotes(slide, lang)) noNotes = true }) else null,
                     )
                 }
                 val ps = bySlide[slide].orEmpty()
@@ -390,7 +451,7 @@ fun SlideEditorScreen(
                     Column {
                         val firstOfBox = i == 0 || ps[i - 1].box != p.box
                         if (firstOfBox) Text(
-                            stringResource(when (box.kind) { "title" -> R.string.slide_box_title; "subtitle" -> R.string.slide_box_subtitle; "table" -> R.string.slide_box_table; else -> R.string.slide_box_text }),
+                            stringResource(when (box.kind) { "title" -> R.string.slide_box_title; "subtitle" -> R.string.slide_box_subtitle; "table" -> R.string.slide_box_table; "notes" -> R.string.slide_box_notes; else -> R.string.slide_box_text }),
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
                         )
                         SlideParagraph(state, p, title = box.kind == "title", readOnly = saving, onLocked = { locked = true })
@@ -411,6 +472,8 @@ fun SlideEditorScreen(
             AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
                 confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
         }
+        if (noNotes) AlertDialog(onDismissRequest = { noNotes = false }, text = { Text(stringResource(R.string.slide_notes_failed)) },
+            confirmButton = { TextButton(onClick = { noNotes = false }) { Text(stringResource(R.string.ok)) } })
         if (noLayout) AlertDialog(onDismissRequest = { noLayout = false }, text = { Text(stringResource(R.string.slide_add_failed)) },
             confirmButton = { TextButton(onClick = { noLayout = false }) { Text(stringResource(R.string.ok)) } })
     }
@@ -430,6 +493,7 @@ private fun SlideHeading(
     number: Int, first: Boolean, last: Boolean, enabled: Boolean, canRemove: Boolean, linked: Boolean,
     picture: (suspend (Int) -> ImageBitmap?)?, slide: Int, aspect: Float, empty: Boolean,
     onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onAddAfter: () -> Unit,
+    onPlace: (() -> Unit)? = null, onNotes: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.padding(top = if (first) 0.dp else 20.dp)) {
@@ -440,6 +504,8 @@ private fun SlideHeading(
             androidx.compose.foundation.layout.Box {
                 IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.slide_more)) }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    onPlace?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_place)) }, onClick = { menu = false; go() }) }
+                    onNotes?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_notes)) }, onClick = { menu = false; go() }) }
                     androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; onAddAfter() })
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text(stringResource(if (linked) R.string.slide_remove_linked else R.string.slide_remove)) },

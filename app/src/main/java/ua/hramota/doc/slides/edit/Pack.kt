@@ -308,6 +308,79 @@ internal class Pack(
         return Result(out, created, drop)
     }
 
+    /** Adds [rel] (a Relationship element) to [part]'s links file, made if it has none. */
+    private fun addLink(part: String, rel: (Set<String>) -> String, changed: MutableMap<String, String>, created: MutableSet<String>) {
+        val relsName = changed.keys.firstOrNull { it.equals(relsOf(part), ignoreCase = true) }
+            ?: texts.keys.firstOrNull { it.equals(relsOf(part), ignoreCase = true) } ?: relsOf(part)
+        val old = changed[relsName] ?: texts[relsName]
+        val add = rel(rels(relsName, old).map { it.id }.toSet())
+        changed[relsName] = if (old == null) {
+            created += relsName
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"$PKG\">$add</Relationships>"
+        } else {
+            val close = old.lastIndexOf("</")
+            if (close < 0) throw IOException("Bad links")
+            old.substring(0, close) + add + old.substring(close)
+        }
+    }
+
+    /** New speaker notes: for each (slide, notes part, notes master) the notes' links, the slide's link to them, their type. */
+    fun linkNotes(notes: List<Triple<String, String, String>>, changed: MutableMap<String, String>, created: MutableSet<String>) {
+        for ((slide, path, master) in notes) {
+            val dir = path.substringBeforeLast('/')
+            addLink(path, { _ ->
+                "<Relationship Id=\"rId1\" Type=\"$R/notesMaster\" Target=\"${XmlScan.escape(relative(dir, master))}\"/>" +
+                    "<Relationship Id=\"rId2\" Type=\"$R/slide\" Target=\"${XmlScan.escape(relative(dir, slide))}\"/>"
+            }, changed, created)
+            addLink(slide, { ids ->
+                var n = 1; while ("rIdHn$n" in ids) n++
+                "<Relationship Id=\"rIdHn$n\" Type=\"$R/notesSlide\" Target=\"${XmlScan.escape(relative(slide.substringBeforeLast('/'), path))}\"/>"
+            }, changed, created)
+        }
+        val ctName = texts.keys.firstOrNull { it.equals("[Content_Types].xml", ignoreCase = true) } ?: throw IOException("No content types")
+        val ct = changed[ctName] ?: texts[ctName]!!
+        val root = XmlScan.children(ct, 0, ct.length).first()
+        val prefix = root.name.substringBefore(':', "").let { if (it.isEmpty()) "" else "$it:" }
+        val add = notes.joinToString("") { (_, path, _) -> "<${prefix}Override PartName=\"/${XmlScan.escape(path)}\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml\"/>" }
+        changed[ctName] = ct.substring(0, root.closeStart) + add + ct.substring(root.closeStart)
+    }
+
+    /**
+     * Links added slides' pictures: for each (slide part, link id, picture part) a link in the slide's
+     * links file and the picture's kind in the list of part types. [changed] holds files already changed
+     * (a new slide's links file is there); new files go into [created].
+     */
+    fun linkPictures(links: List<Triple<String, String, String>>, changed: MutableMap<String, String>, created: MutableSet<String>) {
+        for ((slide, items) in links.groupBy { it.first }) {
+            val relsName = changed.keys.firstOrNull { it.equals(relsOf(slide), ignoreCase = true) }
+                ?: texts.keys.firstOrNull { it.equals(relsOf(slide), ignoreCase = true) } ?: relsOf(slide)
+            val old = changed[relsName] ?: texts[relsName]
+            val ids = rels(relsName, old).map { it.id }.toSet()
+            val add = items.joinToString("") { (_, id, media) ->
+                if (id in ids) throw IOException("Link id taken")
+                "<Relationship Id=\"$id\" Type=\"$R/image\" Target=\"${XmlScan.escape(relative(slide.substringBeforeLast('/'), media))}\"/>"
+            }
+            changed[relsName] = if (old == null) {
+                created += relsName
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"$PKG\">$add</Relationships>"
+            } else {
+                val close = old.lastIndexOf("</")
+                if (close < 0) throw IOException("Bad links")
+                old.substring(0, close) + add + old.substring(close)
+            }
+        }
+        val ctName = texts.keys.firstOrNull { it.equals("[Content_Types].xml", ignoreCase = true) } ?: throw IOException("No content types")
+        val ct = changed[ctName] ?: texts[ctName]!!
+        val root = XmlScan.children(ct, 0, ct.length).first()
+        val prefix = root.name.substringBefore(':', "").let { if (it.isEmpty()) "" else "$it:" }
+        val have = XmlScan.children(ct, root).filter { it.local == "Default" }.mapNotNull { it.attrs["Extension"]?.lowercase() }.toSet()
+        val need = links.map { it.third.substringAfterLast('.').lowercase() }.toSet() - have
+        if (need.isNotEmpty()) {
+            val add = need.joinToString("") { ext -> "<${prefix}Default Extension=\"$ext\" ContentType=\"image/${if (ext == "jpg") "jpeg" else ext}\"/>" }
+            changed[ctName] = ct.substring(0, root.closeStart) + add + ct.substring(root.closeStart)
+        }
+    }
+
     /**
      * Sections (PowerPoint's groups of slides) follow the new order: a slide added joins the section of
      * the slide before it. If the order breaks a section in two, the sections are taken out (the slides

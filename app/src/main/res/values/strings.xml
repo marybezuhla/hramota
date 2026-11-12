@@ -483,4 +483,15 @@
     <string name="password_hide">Hide</string>
     <string name="password_open">Open</string>
     <string name="password_unsupported">Hramota cannot open this kind of protection: old .doc, .xls and .ppt files with a password. Save the document in the newer format in Word, Excel or PowerPoint.</string>
+    <string name="slide_box_notes">Speaker notes</string>
+    <string name="slide_place">Layout: frames, text, picture</string>
+    <string name="slide_add_notes">Add speaker notes</string>
+    <string name="slide_notes_failed">Notes cannot be added to this presentation: it has no notes master.</string>
+    <string name="slide_layout_title">Slide %1$d: layout</string>
+    <string name="slide_layout_done">Done</string>
+    <string name="slide_layout_failed">Could not show the slide.</string>
+    <string name="slide_layout_hint">Touch a frame to choose it. Drag to move it, drag the circle in its corner to resize.</string>
+    <string name="slide_add_text">Text</string>
+    <string name="slide_add_picture">Picture</string>
+    <string name="slide_remove_shape">Delete</string>
 </resources>
