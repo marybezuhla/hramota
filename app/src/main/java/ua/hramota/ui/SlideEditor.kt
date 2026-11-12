@@ -73,6 +73,7 @@ import ua.hramota.doc.docx.edit.RunStyle
 import ua.hramota.doc.slides.edit.PptxEdit
 import ua.hramota.doc.slides.edit.SlidePara
 import java.io.InputStream
+import kotlinx.coroutines.launch
 import java.io.OutputStream
 
 /** Before each paragraph's text: its deletion (Backspace at the very start) joins it to the one before. */
@@ -163,30 +164,34 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
     /** Moves or sizes a shape: x, y, width, height in EMU. */
     fun placeShape(ref: PptxEdit.ShapeRef, rect: LongArray) = commit(paras, newShapes = shapes.copy(placed = shapes.placed + (ref to rect)))
 
-    /** Takes a shape out (with its text). */
-    fun removeShape(ref: PptxEdit.ShapeRef) {
+    /** Takes a shape out (with its text); false for one an animation names (the animation would point at nothing). */
+    fun removeShape(ref: PptxEdit.ShapeRef): Boolean {
+        if (edit.isAnimated(ref)) return false
         val list = paras.filterNot { p -> edit.boxes[p.box].let { it.slide == ref.slide && it.shape == ref.id && it.kind != "notes" } }
         if (focused?.let { k -> list.none { it.key == k } } == true) focused = null
         commit(list, newShapes = shapes.copy(removed = shapes.removed + ref, pictures = shapes.pictures - ref))
+        return true
     }
 
     /** Adds a text box at [rect] (EMU) on [slide], ready to type into. */
-    fun addTextBox(slide: Int, rect: LongArray, lang: String) {
-        val (_, list) = try { edit.addTextBox(slide, rect, lang) } catch (e: java.io.IOException) { return }
+    suspend fun addTextBox(slide: Int, rect: LongArray, lang: String): Boolean {
+        // (off the main thread: the file may be being written for the slide's picture meanwhile)
+        val (_, list) = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addTextBox(slide, rect, lang) } } catch (e: java.io.IOException) { return false }
         commit(arranged(paras + list, order))
         list.firstOrNull()?.let { moveTo = it.key to 0 }
+        return true
     }
 
     /** Adds a picture (PNG or JPEG bytes) at [rect] (EMU) on [slide]. */
-    fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): Boolean {
-        val ref = try { edit.addPicture(slide, bytes, png, rect) } catch (e: java.io.IOException) { return false }
+    suspend fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): Boolean {
+        val ref = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addPicture(slide, bytes, png, rect) } } catch (e: java.io.IOException) { return false }
         commit(paras, newShapes = shapes.copy(pictures = shapes.pictures + ref))
         return true
     }
 
     /** Adds empty speaker notes to [slide]; false when the presentation cannot have them. */
-    fun addNotes(slide: Int, lang: String): Boolean {
-        val list = edit.addNotes(slide, lang) ?: return false
+    suspend fun addNotes(slide: Int, lang: String): Boolean {
+        val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addNotes(slide, lang) } ?: return false
         commit(arranged(paras + list, order))
         list.firstOrNull()?.let { moveTo = it.key to 0 }
         return true
@@ -233,8 +238,8 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
     }
 
     /** Adds an empty slide after [after] (at the end when null); false if the presentation has no layout for it. */
-    fun addSlide(after: Int?, lang: String): Boolean {
-        val (id, list) = try { edit.addSlide(after ?: order.lastOrNull(), lang) } catch (e: java.io.IOException) { return false }
+    suspend fun addSlide(after: Int?, lang: String): Boolean {
+        val (id, list) = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addSlide(after ?: order.lastOrNull(), lang) } } catch (e: java.io.IOException) { return false }
         val at = after?.let { order.indexOf(it) + 1 } ?: order.size
         val o = order.toMutableList().apply { add(at.coerceIn(0, size), id) }
         commit(arranged(paras + list, o), newOrder = o)
@@ -416,6 +421,7 @@ fun SlideEditorScreen(
         val order = state.order
         val lang = remember { java.util.Locale.getDefault().stripExtensions().toLanguageTag() }
         var noLayout by remember { mutableStateOf(false) }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
         // Each slide in order: its heading (number, picture, what can be done with it), then its text boxes
         val bySlide = remember(list) { list.groupBy(state::slideOf) }
         val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -440,9 +446,9 @@ fun SlideEditorScreen(
                         empty = bySlide[slide].isNullOrEmpty(),
                         onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },
                         onRemove = { state.removeSlide(slide) },
-                        onAddAfter = { if (!state.addSlide(slide, lang)) noLayout = true },
+                        onAddAfter = { scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } },
                         onPlace = if (source != null && !saving) ({ placing = slide }) else null,
-                        onNotes = if (!saving && !state.hasNotes(slide)) ({ if (!state.addNotes(slide, lang)) noNotes = true }) else null,
+                        onNotes = if (!saving && !state.hasNotes(slide)) ({ scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }; Unit }) else null,
                     )
                 }
                 val ps = bySlide[slide].orEmpty()
@@ -460,7 +466,7 @@ fun SlideEditorScreen(
             }
             item(key = "add") {
                 androidx.compose.material3.OutlinedButton(
-                    onClick = { if (!state.addSlide(null, lang)) noLayout = true }, enabled = !saving,
+                    onClick = { scope.launch { if (!state.addSlide(null, lang)) noLayout = true } }, enabled = !saving,
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null)

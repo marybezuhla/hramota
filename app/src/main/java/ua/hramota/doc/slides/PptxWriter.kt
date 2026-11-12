@@ -69,21 +69,26 @@ object PptxWriter {
             val bullet = p.bullet
             if (bullet == null) b.append("<a:buNone/>") else {
                 p.bulletColor?.let { b.append("<a:buClr>").append(color(it)).append("</a:buClr>") }
-                p.bulletSize?.let { b.append("<a:buSzPts val=\"${(it * 100).roundToLong()}\"/>") }
+                p.bulletSize?.let { b.append("<a:buSzPts val=\"${(it * 100).roundToLong().coerceIn(100, 400000)}\"/>") }
                 b.append("<a:buChar char=\"${esc(bullet.take(2))}\"/>")
             }
             b.append("</a:pPr>")
             for (r in p.runs) {
                 if (r.text.isEmpty()) continue
-                b.append("<a:r><a:rPr lang=\"$l\" sz=\"${(r.size * 100).roundToLong().coerceIn(100, 400000)}\"")
-                if (r.bold) b.append(" b=\"1\"")
-                if (r.italic) b.append(" i=\"1\"")
-                if (r.underline) b.append(" u=\"sng\"")
-                if (r.strike) b.append(" strike=\"sngStrike\"")
-                if (r.baseline != 0f) b.append(" baseline=\"${(r.baseline * 1000).roundToLong()}\"")
-                b.append(" dirty=\"0\">").append(fill(r.color))
-                r.font?.let { b.append("<a:latin typeface=\"${esc(it)}\"/><a:cs typeface=\"${esc(it)}\"/>") }
-                b.append("</a:rPr><a:t>").append(esc(clean(r.text))).append("</a:t></a:r>")
+                val rPr = StringBuilder("<a:rPr lang=\"$l\" sz=\"${(r.size * 100).roundToLong().coerceIn(100, 400000)}\"")
+                if (r.bold) rPr.append(" b=\"1\"")
+                if (r.italic) rPr.append(" i=\"1\"")
+                if (r.underline) rPr.append(" u=\"sng\"")
+                if (r.strike) rPr.append(" strike=\"sngStrike\"")
+                if (r.baseline != 0f) rPr.append(" baseline=\"${(r.baseline * 1000).roundToLong()}\"")
+                rPr.append(" dirty=\"0\">").append(fill(r.color))
+                r.font?.let { rPr.append("<a:latin typeface=\"${esc(it)}\"/><a:cs typeface=\"${esc(it)}\"/>") }
+                rPr.append("</a:rPr>")
+                // A line break within the paragraph stays one
+                for ((k, line) in clean(r.text).split('\n').withIndex()) {
+                    if (k > 0) b.append("<a:br>").append(rPr).append("</a:br>")
+                    if (line.isNotEmpty()) b.append("<a:r>").append(rPr).append("<a:t>").append(esc(line)).append("</a:t></a:r>")
+                }
             }
             b.append("<a:endParaRPr lang=\"$l\" sz=\"${(p.emptySize * 100).roundToLong().coerceIn(100, 400000)}\"/></a:p>")
         }
@@ -116,8 +121,8 @@ object PptxWriter {
         else -> null
     }
 
-    /** Characters XML cannot hold are left out (a vertical tab becomes a line break PowerPoint keeps as one). */
-    private fun clean(s: String) = s.filter { it == '\t' || it == '\n' || it >= ' ' && it != '￾' && it != '￿' }.replace('\n', ' ')
+    /** Characters XML cannot hold are left out; line breaks stay (written as breaks). */
+    private fun clean(s: String) = s.filter { it == '\t' || it == '\n' || it >= ' ' && it != '\uFFFE' && it != '\uFFFF' }
 
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 }

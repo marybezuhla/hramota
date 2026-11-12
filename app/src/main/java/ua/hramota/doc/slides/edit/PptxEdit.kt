@@ -64,6 +64,8 @@ class PptxEdit private constructor(
     private val notesParts: MutableSet<Int>,
     /** The notes master (new speaker notes follow it); null when the presentation has none. */
     private val notesMaster: String?,
+    /** Slides that link to speaker notes (read here or not). */
+    private val notesLinked: Set<Int>,
 ) {
     /** Every text box, of the slides as opened and of those added since. */
     val boxes: List<TextBox> get() = boxList
@@ -126,13 +128,16 @@ class PptxEdit private constructor(
     fun hasNotes(slide: Int) = boxList.any { it.slide == slide && it.kind == "notes" }
 
     /** New speaker notes added to a slide: the part made here, written only if it keeps its paragraph. */
-    private class NewNotes(val slide: Int, val part: Int, val path: String)
+    private class NewNotes(val slide: Int, val part: Int, val path: String, val paragraphs: List<SlidePara>)
     private val newNotes = ArrayList<NewNotes>()
 
     /** Empty speaker notes for [slide] (one paragraph to type into), or null when the presentation has no notes master. */
     @Synchronized
     fun addNotes(slide: Int, lang: String): List<SlidePara>? {
-        if (notesMaster == null || hasNotes(slide)) return null
+        // Added before (and undone): the same notes again
+        newNotes.firstOrNull { it.slide == slide }?.let { nn -> return nn.paragraphs.map { p -> SlidePara(nextKey++, p.startTag, p.box, p.text, p.marks, p.pPr, p.end, p.editable, p.original, p.typing) } }
+        // A slide linked to notes of its own (read or not) gets no second ones
+        if (notesMaster == null || hasNotes(slide) || slide in notesLinked) return null
         val taken = pack.names + newNotes.map { it.path }
         var n = 1
         while ("ppt/notesSlides/notesSlide$n.xml" in taken || !pack.isFree("ppt/notesSlides/notesSlide$n.xml")) n++
@@ -148,12 +153,14 @@ class PptxEdit private constructor(
         prefixes += "a"
         partSlide += slide
         notesParts += pi
-        newNotes += NewNotes(slide, pi, path)
+        newNotes += NewNotes(slide, pi, path, emptyList())
         val root = XmlScan.children(xml, 0, xml.length).first { it.local == "notes" }
         val paras = ArrayList<SlidePara>()
         readNotes(xml, root, "a", pi, slide, boxList, paras, HashMap()) { nextKey++ }
         val typing = RunStyle("<a:rPr lang=\"$l\" dirty=\"0\"/>")
-        return paras.map { SlidePara(it.key, it.startTag, it.box, it.text, it.marks, it.pPr, it.end, it.editable, it.original, typing) }
+        val list = paras.map { SlidePara(it.key, it.startTag, it.box, it.text, it.marks, it.pPr, it.end, it.editable, it.original, typing) }
+        newNotes[newNotes.size - 1] = NewNotes(slide, pi, path, list)
+        return list
     }
 
     // ---- Shapes: moved, sized, taken out; text boxes and pictures added ----
@@ -192,7 +199,8 @@ class PptxEdit private constructor(
         val r = prefixOf(xml, root, REL)
         val id = freeId(xml)
         val text = shape(p, a, r, id)
-        val at = tree.closeStart
+        // Before the tree's extension list, which must stay last
+        val at = XmlScan.children(xml, tree).lastOrNull()?.takeIf { it.local == "extLst" }?.start ?: tree.closeStart
         parts[pi] = path to (xml.substring(0, at) + text + xml.substring(at))
         return Triple(id, at, at + text.length)
     }
@@ -227,7 +235,8 @@ class PptxEdit private constructor(
     @Synchronized
     fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): ShapeRef {
         val pi = partOf(slide)
-        val rel = "rIdHp${addedShapes.size + 1}"
+        // (unique also against pictures added by Hramota before, already in the slide's links)
+        val rel = "rIdH" + java.util.UUID.randomUUID().toString().replace("-", "").take(12)
         val (id, start, end) = append(pi) { p, a, r, id ->
             r ?: throw IOException("No relationship prefix")
             "<$p:pic><$p:nvPicPr><$p:cNvPr id=\"$id\" name=\"Picture $id\"/><$p:cNvPicPr><$a:picLocks noChangeAspect=\"1\"/></$p:cNvPicPr><$p:nvPr/></$p:nvPicPr>" +
@@ -237,6 +246,12 @@ class PptxEdit private constructor(
         val ref = ShapeRef(slide, id.toString())
         addedShapes += AddedShape(ref, pi, start, end, Picture(bytes, if (png) "png" else "jpeg", rel))
         return ref
+    }
+
+    /** Whether an animation names the shape (it is not taken out: the animation would point at nothing). */
+    fun isAnimated(ref: ShapeRef): Boolean {
+        val xml = parts[partOf(ref.slide)].second
+        return Regex("""\bspid\s*=\s*["']${Regex.escape(ref.id)}["']""").containsMatchIn(xml)
     }
 
     /** Whether a shape is one added here (a picture: kept only while listed in [Shapes.pictures]). */
@@ -581,12 +596,14 @@ class PptxEdit private constructor(
             // Speaker notes of the slides shown (after all the slides' own parts)
             val partSlide = ArrayList<Int>((0 until shown).toList())
             val notesParts = HashSet<Int>()
+            val notesLinked = HashSet<Int>()
             for ((i, sh) in shownSlides.withIndex()) {
                 val dir = sh.path.substringBeforeLast('/', "")
                 val r = text("$dir/_rels/${sh.path.substringAfterLast('/')}.rels") ?: continue
                 val rroot = XmlScan.children(r, 0, r.length).firstOrNull() ?: continue
                 val target = XmlScan.children(r, rroot).firstOrNull { it.local == "Relationship" && it.attrs["Type"]?.endsWith("/notesSlide") == true && it.attrs["TargetMode"] != "External" }
                     ?.attrs?.get("Target") ?: continue
+                notesLinked += i
                 val notesPath = if (target.startsWith("/")) target.removePrefix("/") else java.io.File(dir, target).normalize().path.replace('\\', '/')
                 val nx = text(notesPath) ?: continue
                 val nroot = XmlScan.children(nx, 0, nx.length).firstOrNull { it.local == "notes" } ?: continue
@@ -609,7 +626,7 @@ class PptxEdit private constructor(
                 texts = raw.keys.filter { it.lowercase().endsWith(".rels") || it.lowercase() == "[content_types].xml" || it.lowercase() == "ppt/viewprops.xml" || it.lowercase().startsWith("ppt/slidelayouts/") && !it.lowercase().endsWith(".rels") }
                     .associateWith { text(it)!! },
             )
-            return PptxEdit(parts, digests, prefixes, boxes, paras, shown, pack, partSlide, notesParts, notesMaster)
+            return PptxEdit(parts, digests, prefixes, boxes, paras, shown, pack, partSlide, notesParts, notesMaster, notesLinked)
         }
 
         /** Reads the text of speaker notes (their body placeholder only: not the slide picture or the number). */

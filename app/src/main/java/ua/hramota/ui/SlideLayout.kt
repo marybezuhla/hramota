@@ -76,11 +76,12 @@ fun SlideLayoutScreen(state: SlideEditorState, slide: Int, source: () -> InputSt
     // The chosen shape while it is being dragged (points): shown at once, saved when the finger lifts
     var live by remember { mutableStateOf<Frame?>(null) }
     val index = state.order.indexOf(slide)
+    fun tell(message: Int) = android.widget.Toast.makeText(context, context.getString(message), android.widget.Toast.LENGTH_LONG).show()
     // The slide as it will be saved, drawn again after each change
     LaunchedEffect(state.paras, state.order, state.shapes) {
         delay(120)
         val d = state.preview(source)
-        if (d == null) { failed = true; return@LaunchedEffect }
+        if (d == null) { failed = true; if (deck != null) tell(R.string.slide_layout_failed); return@LaunchedEffect }
         deck = d
         picture = withContext(Dispatchers.Default) { SlidePages(d, appFonts(context)).render(index, 1600) }
     }
@@ -89,12 +90,12 @@ fun SlideLayoutScreen(state: SlideEditorState, slide: Int, source: () -> InputSt
         val d = deck ?: return@rememberLauncherForActivityResult
         scope.launch {
             val made = withContext(Dispatchers.IO) { cleanPicture { context.contentResolver.openInputStream(uri) } }
-            if (made == null) { failed = true; return@launch }
+            if (made == null) { tell(R.string.slide_picture_failed); return@launch }
             val (bytes, png, aspect) = made
             // Half the slide's width, in the middle, the picture's own proportions
             var w = d.width * 0.5f; var h = w * aspect
             if (h > d.height * 0.7f) { h = d.height * 0.7f; w = h / aspect }
-            state.addPicture(slide, bytes, png, longArrayOf(((d.width - w) / 2 * EMU).toLong(), ((d.height - h) / 2 * EMU).toLong(), (w * EMU).toLong(), (h * EMU).toLong()))
+            if (!state.addPicture(slide, bytes, png, longArrayOf(((d.width - w) / 2 * EMU).toLong(), ((d.height - h) / 2 * EMU).toLong(), (w * EMU).toLong(), (h * EMU).toLong()))) tell(R.string.slide_picture_failed)
         }
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
@@ -117,11 +118,14 @@ fun SlideLayoutScreen(state: SlideEditorState, slide: Int, source: () -> InputSt
                 picture?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
                 val outline = MaterialTheme.colorScheme.outline
                 val accent = MaterialTheme.colorScheme.primary
-                fun at(p: Offset) = frames.lastOrNull { f -> p.x in f.x * k..(f.x + f.w) * k && p.y in f.y * k..(f.y + f.h) * k }
+                // (a line has no height: it is found within a finger's width of it)
+                val slack = with(density) { 12.dp.toPx() }
+                fun at(p: Offset) = frames.lastOrNull { f -> p.x in f.x * k - slack..(f.x + f.w) * k + slack && p.y in f.y * k - slack..(f.y + f.h) * k + slack }
                 Canvas(
                     Modifier.fillMaxSize()
                         .pointerInput(frames, k) { detectTapGestures { p -> selected = at(p)?.id } }
-                        .pointerInput(frames, k, selected) {
+                        // (the choice of shape is read as it is: changing it does not restart a drag under way)
+                        .pointerInput(frames, k) {
                             var resize = false
                             detectDragGestures(
                                 onDragStart = { p ->
@@ -136,7 +140,8 @@ fun SlideLayoutScreen(state: SlideEditorState, slide: Int, source: () -> InputSt
                                     change.consume()
                                     val f = live ?: return@detectDragGestures
                                     val dx = drag.x / k; val dy = drag.y / k
-                                    live = if (resize) f.copy(w = (f.w + dx).coerceAtLeast(12f), h = (f.h + dy).coerceAtLeast(12f))
+                                    // (a straight line keeps no height or no width it did not have)
+                                    live = if (resize) f.copy(w = if (f.w == 0f) 0f else (f.w + dx).coerceAtLeast(12f), h = if (f.h == 0f) 0f else (f.h + dy).coerceAtLeast(12f))
                                     else f.copy(x = (f.x + dx).coerceIn(-f.w + 12f, d.width - 12f), y = (f.y + dy).coerceIn(-f.h + 12f, d.height - 12f))
                                 },
                                 onDragEnd = {
@@ -161,11 +166,13 @@ fun SlideLayoutScreen(state: SlideEditorState, slide: Int, source: () -> InputSt
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = {
                 val dd = deck ?: return@OutlinedButton
-                state.addTextBox(slide, longArrayOf((dd.width * 0.2f * EMU).toLong(), (dd.height * 0.4f * EMU).toLong(), (dd.width * 0.6f * EMU).toLong(), (dd.height * 0.15f * EMU).toLong()), lang)
+                scope.launch {
+                    if (!state.addTextBox(slide, longArrayOf((dd.width * 0.2f * EMU).toLong(), (dd.height * 0.4f * EMU).toLong(), (dd.width * 0.6f * EMU).toLong(), (dd.height * 0.15f * EMU).toLong()), lang)) tell(R.string.slide_layout_failed)
+                }
             }, enabled = deck != null) { Text(stringResource(R.string.slide_add_text)) }
             OutlinedButton(onClick = { pick.launch("image/*") }, enabled = deck != null) { Text(stringResource(R.string.slide_add_picture)) }
             OutlinedButton(onClick = {
-                selected?.let { state.removeShape(PptxEdit.ShapeRef(slide, it)) }
+                selected?.let { if (!state.removeShape(PptxEdit.ShapeRef(slide, it))) tell(R.string.slide_shape_animated) }
                 selected = null
             }, enabled = selected != null) { Text(stringResource(R.string.slide_remove_shape)) }
         }
@@ -183,7 +190,10 @@ internal fun cleanPicture(open: () -> InputStream?): Triple<ByteArray, Boolean, 
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
         var sample = 1
         while (bounds.outWidth / sample > 2560 || bounds.outHeight / sample > 2560) sample *= 2
-        val bmp = open()?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+        val decoded = open()?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+        // A photo turned as the camera says (the mark itself is not kept)
+        val turn = try { open()?.use { android.media.ExifInterface(it).rotationDegrees } ?: 0 } catch (e: Exception) { 0 }
+        val bmp = if (decoded != null && turn != 0) Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, android.graphics.Matrix().apply { postRotate(turn.toFloat()) }, true).also { if (it !== decoded) decoded.recycle() } else decoded
         if (bmp == null) null else {
             val png = bmp.hasAlpha()
             val out = java.io.ByteArrayOutputStream()

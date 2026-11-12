@@ -498,4 +498,6 @@
     <string name="unprotected_go">Yes, without a password</string>
     <string name="save_as_pptx">Save as PPTX</string>
     <string name="convert_note_ppt">This makes a new PPTX file you can edit; the old one stays as it is. Slides keep their text, shapes and pictures where they are. Animations, transitions, speaker notes, charts and embedded objects are not carried over, and titles become ordinary text boxes.</string>
+    <string name="slide_picture_failed">Could not add the picture.</string>
+    <string name="slide_shape_animated">This frame cannot be deleted: an animation refers to it.</string>
 </resources>
