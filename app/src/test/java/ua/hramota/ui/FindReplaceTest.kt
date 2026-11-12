@@ -21,7 +21,7 @@ class FindReplaceTest {
 
     @Test fun placesFound() {
         val texts = listOf(1L to "Кіт і кіт", 2L to "КІТ", 3L to "кит")
-        assertEquals(listOf(Found(1, 4, 7)), findAll(texts, "кіт", matchCase = true))
+        assertEquals(listOf(Found(1, 6, 9)), findAll(texts, "кіт", matchCase = true))
         assertEquals(3, findAll(texts, "кіт", matchCase = false).size)
         assertTrue(findAll(texts, "", matchCase = false).isEmpty())
         // Not overlapping

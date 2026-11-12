@@ -157,13 +157,14 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     fun replaceIn(sheet: Int, found: List<Found>, with: String): Int {
         val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return 0
         if (busy || found.isEmpty()) return 0
-        flush()
+        val d = draft
         val steps = ArrayList<CellStep>()
         var places = 0
         for ((k, list) in found.groupBy { it.key }) {
             val (row, col) = place(k)
             val key = CellKey(s, row, col)
-            if (edit.locked(key)) continue
+            // A cell being typed in is left alone (what was found is no longer what it holds)
+            if (edit.locked(key) || d != null && d.sheet == sheet && d.row == row && d.col == col) continue
             var text = edit.content(key)
             var n = 0
             for (f in list.sortedByDescending { it.start }) if (f.end <= text.length) { text = text.replaceRange(f.start, f.end, with); n++ }
@@ -313,7 +314,11 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
     // What is being typed counts: it goes in first
     val save = { state.flush(); onSave() }
     val close = { state.flush(); if (state.dirty) askClose = true else onClose() }
+    val find = remember { FindState() }
+    var replacedCount by remember { mutableStateOf<Int?>(null) }
     BackHandler { if (find.open) find.open = false else close() }
+    // What is being typed goes in before searching (places found refer to what the cells hold)
+    LaunchedEffect(find.open) { if (find.open) state.flush() }
     LaunchedEffect(state.version) { if (state.version > 0) state.refresh() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     state.notice?.let { msg ->
@@ -323,8 +328,6 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
             confirmButton = { TextButton(onClick = { state.notice = null }) { Text(stringResource(R.string.ok)) } },
         )
     }
-    val find = remember { FindState() }
-    var replacedCount by remember { mutableStateOf<Int?>(null) }
     // "Find and replace" on the sheet shown
     val target = remember(sheetIndex) {
         object : Replaceable {

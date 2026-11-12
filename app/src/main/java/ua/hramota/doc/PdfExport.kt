@@ -34,6 +34,8 @@ object PdfExport {
     /** Writes every page into a PDF. Returns false if stopped. Call off the main thread. */
     suspend fun write(pages: PrintPages, out: OutputStream): Boolean {
         allPages(pages)
+        // Laying out stopped early (the window closed, too little memory): no PDF with pages missing
+        if (!pages.whole) return false
         val doc = PdfDocument()
         try {
             for (i in 0 until pages.pageCount) {
@@ -66,14 +68,11 @@ object PdfExport {
             }
 
             override fun onWrite(range: Array<out PageRange>, destination: ParcelFileDescriptor, cancel: CancellationSignal, callback: WriteResultCallback) {
-                job = scope.launch(Dispatchers.Default) {
-                    val ok = try {
-                        FileOutputStream(destination.fileDescriptor).use { out ->
-                            if (pdf != null) withContext(Dispatchers.IO) { pdf()?.use { it.copyTo(out); true } ?: false }
-                            else write(pages as PrintPages, out)
-                        }
-                    } catch (e: Exception) { false }
-                    withContext(Dispatchers.Main) {
+                // The print window is answered exactly once, whatever happens (stopped, failed, done)
+                val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+                fun answer(ok: Boolean) {
+                    if (!answered.compareAndSet(false, true)) return
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
                         when {
                             cancel.isCanceled -> callback.onWriteCancelled()
                             ok -> callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
@@ -81,6 +80,16 @@ object PdfExport {
                         }
                     }
                 }
+                job = scope.launch(Dispatchers.Default) {
+                    val ok = try {
+                        FileOutputStream(destination.fileDescriptor).use { out ->
+                            if (pdf != null) withContext(Dispatchers.IO) { pdf()?.use { it.copyTo(out); true } ?: false }
+                            else write(pages as PrintPages, out)
+                        }
+                    } catch (e: Throwable) { false }
+                    answer(ok)
+                }
+                job?.invokeOnCompletion { answer(false) }
                 cancel.setOnCancelListener { job?.cancel() }
             }
 

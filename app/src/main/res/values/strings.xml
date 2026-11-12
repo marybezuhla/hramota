@@ -494,4 +494,8 @@
     <string name="slide_add_text">Text</string>
     <string name="slide_add_picture">Picture</string>
     <string name="slide_remove_shape">Delete</string>
+    <string name="unprotected_copy">This document is protected by a password. The printout or PDF will not be: anyone who gets it can read it.</string>
+    <string name="unprotected_go">Yes, without a password</string>
+    <string name="save_as_pptx">Save as PPTX</string>
+    <string name="convert_note_ppt">This makes a new PPTX file you can edit; the old one stays as it is. Slides keep their text, shapes and pictures where they are. Animations, transitions, speaker notes, charts and embedded objects are not carried over, and titles become ordinary text boxes.</string>
 </resources>

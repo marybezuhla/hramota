@@ -76,7 +76,10 @@ object OfficeCrypto {
         val xml = String(info, 8, info.size - 8, Charsets.UTF_8)
         // The XML is small and fixed in form: attributes of two elements
         val keyData = attrs(xml, "keyData") ?: throw IOException("No keyData")
-        val enc = attrs(xml, "encryptedKey") ?: throw IOException("No encryptedKey")
+        // The key kept for the password (a file may also have one for a certificate, which comes first)
+        val passwordPart = Regex("<(?:[\\w-]+:)?keyEncryptor\\s+uri\\s*=\\s*\"http://schemas.microsoft.com/office/2006/keyEncryptor/password\"\\s*>(.*?)</(?:[\\w-]+:)?keyEncryptor>", RegexOption.DOT_MATCHES_ALL)
+            .find(xml)?.groupValues?.get(1) ?: throw UnsupportedProtectionException()
+        val enc = attrs(passwordPart, "encryptedKey") ?: throw IOException("No encryptedKey")
         if (keyData["cipherAlgorithm"] != "AES" || enc["cipherAlgorithm"] != "AES") throw UnsupportedProtectionException()
         if (keyData["cipherChaining"] != "ChainingModeCBC" || enc["cipherChaining"] != "ChainingModeCBC") throw UnsupportedProtectionException()
         val hash = enc["hashAlgorithm"] ?: throw IOException("No hash")

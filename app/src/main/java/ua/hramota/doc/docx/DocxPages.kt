@@ -81,6 +81,9 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
     /** Stops laying out (the window was closed). */
     override fun close() { closed = true }
 
+    /** All the document's pages are laid out (not stopped by closing, nor cut short). */
+    override val whole: Boolean get() = done && !closed && failure == null
+
     override suspend fun render(index: Int, widthPx: Int): ImageBitmap? = withContext(Dispatchers.Default) {
         lock.withLock { draw(index, widthPx)?.asImageBitmap() }
     }
@@ -167,11 +170,14 @@ class DocxPages(doc: DocxDocument, fonts: Fonts, background: Boolean = false) : 
         lock.withLock {
             val page = page(index) ?: return@withLock
             canvas.save()
-            canvas.drawColor(Color.WHITE)
-            canvas.scale(1f / DocxLayout.U, 1f / DocxLayout.U)
-            painter.draw(canvas, page)
-            painter.draw(canvas, LaidOutPage(layout.headerFooter(index, count)))
-            canvas.restore()
+            try {
+                canvas.drawColor(Color.WHITE)
+                canvas.scale(1f / DocxLayout.U, 1f / DocxLayout.U)
+                painter.draw(canvas, page)
+                painter.draw(canvas, LaidOutPage(layout.headerFooter(index, count)))
+            } catch (e: OutOfMemoryError) {
+                throw java.io.IOException("Out of memory")
+            } finally { canvas.restore() }
         }
     }
 

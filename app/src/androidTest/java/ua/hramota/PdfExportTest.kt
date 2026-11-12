@@ -28,7 +28,7 @@ class PdfExportTest {
             (0 until r.pageCount).map { i -> r.openPage(i).use { it.width to it.height } }
         }
 
-    @Test fun wordPages() = runBlocking {
+    @Test fun wordPages(): Unit = runBlocking {
         val pages = DocxPages(DocxReader.read(BigDocs.docxProse(400).inputStream()), appFonts(context))
         val file = File(context.cacheDir, "export-word.pdf")
         assertTrue(file.outputStream().use { PdfExport.write(pages, it) })
@@ -39,7 +39,7 @@ class PdfExportTest {
         file.delete()
     }
 
-    @Test fun slides() = runBlocking {
+    @Test fun slides(): Unit = runBlocking {
         val deck = PptxReader.read(Templates.pptx("uk-UA").inputStream())
         val pages = SlidePages(deck, appFonts(context))
         val file = File(context.cacheDir, "export-slides.pdf")

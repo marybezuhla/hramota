@@ -26,6 +26,8 @@ interface PrintPages : Pages {
     fun pointSize(index: Int): Pair<Float, Float>
     /** Draws page [index] onto [canvas], whose units are points. */
     suspend fun drawInto(index: Int, canvas: android.graphics.Canvas)
+    /** Every page is there once laying out ended (false if it stopped early): a PDF is made only then. */
+    val whole: Boolean get() = !cutShort
 }
 
 /** A box on a page, in fractions of the page's width and height (0..1). */

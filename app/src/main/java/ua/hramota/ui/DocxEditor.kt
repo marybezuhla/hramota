@@ -405,7 +405,8 @@ fun DocxEditorScreen(
             if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
           }
         },
-        bottomBar = { if (!find.open) EditToolbar(state, enabled = !saving, onComment = { commenting = true }) },
+        // (also while finding: undo is there)
+        bottomBar = { EditToolbar(state, enabled = !saving, onComment = { commenting = true }) },
     ) { padding ->
         val listState = rememberLazyListState()
         LazyColumn(

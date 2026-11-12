@@ -137,7 +137,7 @@ class PdfEngineTest {
         } finally { saved.close() }
     }
 
-    @Test fun protectedPdfOpensWithItsPassword() = runBlocking {
+    @Test fun protectedPdfOpensWithItsPassword(): Unit = runBlocking {
         try {
             PdfiumPages.open(context, asset("protected.pdf")).close()
             fail("a protected file must ask for its password")

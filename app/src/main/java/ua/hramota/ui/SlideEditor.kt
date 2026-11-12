@@ -393,7 +393,7 @@ fun SlideEditorScreen(
           }
         },
         bottomBar = {
-          if (!find.open) {
+          run {
             val i = state.indexOf(state.focused)
             val active = !saving && i >= 0 && state.paras.getOrNull(i)?.editable == true
             Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
