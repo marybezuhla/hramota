@@ -77,7 +77,7 @@ class UkrainianText(private val dictionary: StressDictionary?) {
     private val WORD_ONE = Regex("""(?<![\p{L}'])(один|два)(?![\p{L}'])""", RegexOption.IGNORE_CASE)
     // (the words after it only looked at: a second «два» among them is matched too)
     private val TWO_BEFORE = Regex("""(?<![\p{L}'])(два)(?=((?:\s+[\p{L}']+){1,3}))""", RegexOption.IGNORE_CASE)
-    private val LETTERS = Regex("""[\p{L}']+""")
+    private val PLAIN_WORD = Regex("""[\p{L}']+""")
     // A number that names, not counts: «пункт 2 частини 1», «стаття 2 Конституції» (the next noun is a genitive)
     private val LABELS = setOf("пункт", "пункту", "пункті", "підпункт", "підпункту", "частина", "частини", "частині", "стаття", "статті", "статтю",
         "розділ", "розділу", "розділі", "підрозділ", "глава", "глави", "главі", "додаток", "додатку", "додатка", "сторінка", "сторінці", "сторінки",
@@ -134,11 +134,11 @@ class UkrainianText(private val dictionary: StressDictionary?) {
 
     /** «2 книги» — «дві книги»: «два» from a number takes the gender of its noun (an adjective may come between). */
     private fun agreeTwo(text: String): String = TWO_BEFORE.replace(text) { m ->
-        val original = LETTERS.findAll(m.groupValues[2]).map { it.value }.toList()
+        val original = PLAIN_WORD.findAll(m.groupValues[2]).map { it.value }.toList()
         val words = original.map { it.lowercase() }
         // «пункт 2 частини»: a number naming something, not counting
         // (the word before the whole number: «пункт двадцять два»)
-        val before = LETTERS.findAll(text.substring(0, m.range.first).takeLast(80)).map { it.value.lowercase() }.toList()
+        val before = PLAIN_WORD.findAll(text.substring(0, m.range.first).takeLast(80)).map { it.value.lowercase() }.toList()
             .lastOrNull { it !in NUMERALS }
         if (before != null && before in LABELS) return@replace m.value
         var k = 0
