@@ -825,9 +825,8 @@ open class ViewerActivity : ComponentActivity() {
             val newId = Library.fingerprint(this, android.net.Uri.fromFile(temp)) ?: return null
             library.update(newId) { entry.copy(id = newId, notes = emptyList()) }
             if (newId != id) library.update(id) { null }
-            // The cover goes with the document
-            java.io.File(Library.coversDir(this), "$id.png").takeIf { it.exists() }?.renameTo(java.io.File(Library.coversDir(this), "$newId.png"))
-            java.io.File(Library.coversDir(this), "$id.png${ua.hramota.data.Vault.SUFFIX}").takeIf { it.exists() }?.let { it.delete() }
+            // The cover goes with the document (sealed again under lock)
+            ua.hramota.data.Shelf.moveCover(this, id, newId)
             return newId
         } catch (e: Exception) {
             return null
