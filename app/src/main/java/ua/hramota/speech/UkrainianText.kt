@@ -74,7 +74,17 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         "тисячі", "тисяч", "мільйон", "мільйона", "мільйонів", "кома", "плюс", "мінус", "двадцять", "тридцять", "сорок", "п'ятдесят", "шістдесят",
         "сімдесят", "вісімдесят", "дев'яносто", "триста", "чотириста", "п'ятсот", "шістсот", "сімсот", "вісімсот", "дев'ятсот")
     private val KEEP = '\uE000'
-    private val WORD_ONE = Regex("""(?<![\p{L}'])один(?![\p{L}'])""", RegexOption.IGNORE_CASE)
+    private val WORD_ONE = Regex("""(?<![\p{L}'])(один|два)(?![\p{L}'])""", RegexOption.IGNORE_CASE)
+    // (the words after it only looked at: a second «два» among them is matched too)
+    private val TWO_BEFORE = Regex("""(?<![\p{L}'])(два)(?=((?:\s+[\p{L}']+){1,3}))""", RegexOption.IGNORE_CASE)
+    private val PLAIN_WORD = Regex("""[\p{L}']+""")
+    // A number that names, not counts: «пункт 2 частини 1», «стаття 2 Конституції» (the next noun is a genitive)
+    private val LABELS = setOf("пункт", "пункту", "пункті", "підпункт", "підпункту", "частина", "частини", "частині", "стаття", "статті", "статтю",
+        "розділ", "розділу", "розділі", "підрозділ", "глава", "глави", "главі", "додаток", "додатку", "додатка", "сторінка", "сторінці", "сторінки",
+        "рисунок", "рисунку", "малюнок", "малюнку", "таблиця", "таблиці", "том", "тому", "номер", "номера", "номері", "клас", "класу", "класі",
+        "абзац", "абзацу", "абзаці", "параграф", "параграфа", "параграфі", "схема", "схеми", "графік", "графіка", "крок", "кроку", "етап", "етапу",
+        "варіант", "варіанта", "варіанту", "версія", "версії", "рядок", "рядка", "рядку", "палата", "палати", "кімната", "кімнати", "квартира", "квартири",
+        "будинок", "будинку", "корпус", "корпусу", "поверх", "поверху", "аудиторія", "аудиторії", "група", "групи", "групі", "курс", "курсу", "рівень", "рівня")
     private val ONE_BEFORE = Regex("""(?<![\p{L}'])(один)(\s+)([\p{L}']{3,})""", RegexOption.IGNORE_CASE)
 
     private fun agree(text: String): String = ONE_BEFORE.replace(text) { m ->
@@ -90,6 +100,56 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         // (only before a word the dictionary knows as a noun-like word: «один з них» stays)
         if (dictionary != null && dictionary.lookup(noun).isEmpty()) return@replace m.value
         (if (one[0].isUpperCase()) form.replaceFirstChar { it.uppercase() } else form) + m.groupValues[2] + m.groupValues[3]
+    }
+
+    private fun known(w: String) = dictionary != null && dictionary.lookup(w).isNotEmpty()
+
+    /** A plural adjective («нові», «сині»): its masculine form is a word. */
+    private fun adjectivePlural(w: String): Boolean {
+        if (!w.endsWith("і") && !w.endsWith("ї")) return false
+        val s = w.dropLast(1)
+        return known(s + "ий") || known(s + "ій") || known(s + "їй")
+    }
+
+    /**
+     * A feminine noun in the plural («книги», «гривні», «лінії»), told by its feminine singular forms: the
+     * dictionary has no genders, but only a feminine noun has «книгою», «гривнею», «лінією» («столи»,
+     * «коні», «дні» have none). Masculine nouns in -а/-я («судді») are listed.
+     */
+    private fun femininePlural(w: String): Boolean {
+        val (singular, instrumental) = when {
+            w.endsWith("ії") -> w.dropLast(2).let { listOf(it + "ія") to listOf(it + "ією") }
+            w.endsWith("ї") -> w.dropLast(1).let { listOf(it + "я") to listOf(it + "єю") }
+            w.endsWith("и") -> w.dropLast(1).let { listOf(it + "а") to listOf(it + "ою") }
+            w.endsWith("і") -> w.dropLast(1).let { listOf(it + "я", it + "а") to listOf(it + "ею", it + "ою") }
+            else -> return false
+        }
+        if (singular.any { it in MASCULINE_O_A }) return false
+        // The same stem with a masculine «-ом/-ем» («варіантом», «другом», «балом»): not told apart, left as «два»
+        val stem = if (w.endsWith("ії")) w.dropLast(2) else w.dropLast(1)
+        val masculine = if (w.endsWith("ії")) known(stem + "ій") && known(stem + "ієм") else known(stem + "ом") || known(stem + "ем") || known(stem + "єм")
+        if (masculine) return false
+        return instrumental.any(::known)
+    }
+
+    /** «2 книги» — «дві книги»: «два» from a number takes the gender of its noun (an adjective may come between). */
+    private fun agreeTwo(text: String): String = TWO_BEFORE.replace(text) { m ->
+        val original = PLAIN_WORD.findAll(m.groupValues[2]).map { it.value }.toList()
+        val words = original.map { it.lowercase() }
+        // «пункт 2 частини»: a number naming something, not counting
+        // (the word before the whole number: «пункт двадцять два»)
+        val before = PLAIN_WORD.findAll(text.substring(0, m.range.first).takeLast(80)).map { it.value.lowercase() }.toList()
+            .lastOrNull { it !in NUMERALS }
+        if (before != null && before in LABELS) return@replace m.value
+        var k = 0
+        while (k < words.size - 1 && k < 2 && adjectivePlural(words[k])) k++
+        // Still an adjective after two: not sure which word is the noun
+        if (adjectivePlural(words[k]) && k > 0) return@replace m.value
+        // A name («2 Конституції») is not counted
+        if (original[k][0].isUpperCase()) return@replace m.value
+        if (!femininePlural(words[k])) return@replace m.value
+        val two = m.groupValues[1]
+        if (two[0].isUpperCase()) "Дві" else "дві"
     }
 
     /** Words whose stress depends on the next one: «черго́вий лікар» (next in turn, on duty for the owner), «чергови́й» alone (the one on duty). */
@@ -117,10 +177,10 @@ class UkrainianText(private val dictionary: StressDictionary?) {
         }
         for ((r, w) in ABBREVIATIONS) t = r.replace(t, w)
         t = Regex("""\b\p{Lu}{2,6}\b""").replace(t) { m -> if (m.value in SPELLED) spell(m.value) else m.value }
-        // «один» written as a word stays as written («один одного», «один удома»): only a number agrees with its noun
+        // «один», «два» written as words stay as written («один одного», «один удома»): only a number agrees with its noun
         t = WORD_ONE.replace(t) { it.value.dropLast(1) + KEEP + it.value.last() }
         t = UkrainianNumbers.expand(t)
-        t = agree(t).replace(KEEP.toString(), "")
+        t = agreeTwo(agree(t)).replace(KEEP.toString(), "")
         t = t.replace('’', '\'').replace('ʼ', '\'').replace('`', '\'').replace('‘', '\'')
         val words = WORD.findAll(t).toList()
         val sb = StringBuilder()
