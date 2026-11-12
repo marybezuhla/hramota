@@ -139,7 +139,7 @@ object DocReader {
 }
 
 /** A minimal reader of OLE compound files (version 3 and 4): directory, FAT, mini stream; every offset checked. */
-internal class OleFile(private val f: ByteArray) {
+internal class OleFile(private val f: ByteArray, private val maxStream: Long = DocReader.MAX_FILE) {
     private val shift: Int
     private val sectorSize: Int
     private val fat: IntArray
@@ -228,7 +228,7 @@ internal class OleFile(private val f: ByteArray) {
         var length = 0
         val seen = java.util.BitSet(fat.size)
         while (s >= 0 && s < fat.size && !seen[s] && length.toLong() * sectorSize < size) { seen.set(s); length++; s = fat[s] }
-        val total = minOf(length.toLong() * sectorSize, size, DocReader.MAX_FILE).toInt()
+        val total = minOf(length.toLong() * sectorSize, size, maxStream).toInt()
         val out = ByteArray(total)
         s = start
         var at = 0
@@ -258,7 +258,7 @@ internal class OleFile(private val f: ByteArray) {
 
     fun stream(name: String): ByteArray? {
         val e = top[name] ?: return null
-        if (e.size > DocReader.MAX_FILE) throw IOException("Stream too large")
+        if (e.size > maxStream) throw IOException("Stream too large")
         return if (e.size < miniCutoff) miniChain(e.start, e.size) else chain(e.start, e.size)
     }
 }

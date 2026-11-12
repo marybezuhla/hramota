@@ -17,6 +17,19 @@ interface Pages {
     val problem: String? get() = null
 }
 
+/**
+ * Pages that can be drawn at their own size for printing or a PDF: as shapes and text, not as a
+ * picture, so the text stays text and sharp at any size.
+ */
+interface PrintPages : Pages {
+    /** Width and height of page [index] in points (1/72 inch). */
+    fun pointSize(index: Int): Pair<Float, Float>
+    /** Draws page [index] onto [canvas], whose units are points. */
+    suspend fun drawInto(index: Int, canvas: android.graphics.Canvas)
+    /** Every page is there once laying out ended (false if it stopped early): a PDF is made only then. */
+    val whole: Boolean get() = !cutShort
+}
+
 /** A box on a page, in fractions of the page's width and height (0..1). */
 data class PageBox(val left: Float, val top: Float, val right: Float, val bottom: Float)
 

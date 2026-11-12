@@ -97,6 +97,9 @@ open class ViewerActivity : ComponentActivity() {
         val remember = ua.hramota.data.Settings.get(this).state.value.rememberRecent
         // The document as Hramota knows it (by content), found before it is shown
         var docId by mutableStateOf<String?>(null)
+        // Opened with a password: shown, printed, but not edited (a save would leave it without its protection)
+        // and nothing of it is kept outside the file (no cover picture, no title from its text)
+        var protectedDoc by mutableStateOf(false)
         var startPosition by mutableIntStateOf(0)
         // Where the reader is now (a page, or a paragraph while reading as text) and of how many
         var shown: Pair<Int, Int>? = null
@@ -120,7 +123,9 @@ open class ViewerActivity : ComponentActivity() {
             AppTheme { settings ->
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val entries by library.entries.collectAsStateWithLifecycle()
-                    val state by produceState<ViewerState>(ViewerState.Loading, uri) {
+                    // A protected document's password: in memory only, while this window is open (kept when it is made again)
+                    var password by held::password
+                    val state by produceState<ViewerState>(ViewerState.Loading, uri, password) {
                         // An open PDF is closed if the window goes away before it is shown
                         var opened: java.io.Closeable? = null
                         // Locked storage closed: ask once; if declined, the file still opens, only nothing is remembered
@@ -145,19 +150,36 @@ open class ViewerActivity : ComponentActivity() {
                         try {
                         value = withContext(Dispatchers.IO) {
                             try {
+                                // Word, Excel and PowerPoint with a password: decrypted in memory (never written anywhere)
+                                val decrypted = if (format == Format.DOCX || format == Format.XLSX || format == Format.PPTX) {
+                                    val head = contentResolver.openInputStream(uri)?.use { i -> ByteArray(8).also { var n = 0; while (n < 8) { val k = i.read(it, n, 8 - n); if (k < 0) break; n += k } } }
+                                    if (head != null && ua.hramota.doc.OfficeCrypto.mayBeProtected(head)) {
+                                        val all = contentResolver.openInputStream(uri)?.use { ua.hramota.doc.OfficeCrypto.readAll(it) } ?: return@withContext ViewerState.Failed
+                                        if (ua.hramota.doc.OfficeCrypto.isProtected(all)) {
+                                            val typed = password ?: return@withContext ViewerState.Password()
+                                            try { ua.hramota.doc.OfficeCrypto.decrypt(all, typed) }
+                                            catch (e: ua.hramota.doc.WrongPasswordException) { return@withContext ViewerState.Password(wrong = true) }
+                                            catch (e: ua.hramota.doc.UnsupportedProtectionException) { return@withContext ViewerState.Password(supported = false) }
+                                        } else null
+                                    } else null
+                                } else null
+                                protectedDoc = decrypted != null
+                                fun input(): java.io.InputStream? = decrypted?.inputStream() ?: contentResolver.openInputStream(uri)
                                 when {
-                                    format == Format.PDF -> openPdf(uri) { opened = it }
+                                    format == Format.PDF -> try { openPdf(uri, password) { opened = it }.also { if (password != null) protectedDoc = true } } catch (e: PdfPasswordException) {
+                                        if (password != null) ViewerState.Password(wrong = true) else ViewerState.Password()
+                                    }
                                     format == Format.DOCX -> {
-                                        val doc = contentResolver.openInputStream(uri)?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        val doc = input()?.use { DocxReader.read(it) } ?: return@withContext ViewerState.Failed
                                         val reading = doc.readingText()
                                         // The first page shows at once; the rest is laid out while reading
                                         val pages = DocxPages(doc, appFonts(applicationContext), background = true).also { opened = it }
                                         ViewerState.Paged(pages, reading, doc.inspection)
                                     }
                                     format == Format.DOC -> openDoc(uri) { opened = it }
-                                    format == Format.XLSX -> ViewerState.Sheets(contentResolver.openInputStream(uri)?.use { XlsxReader.read(it) } ?: return@withContext ViewerState.Failed)
+                                    format == Format.XLSX -> ViewerState.Sheets(input()?.use { XlsxReader.read(it) } ?: return@withContext ViewerState.Failed)
                                     format == Format.PPTX || format == Format.PPT -> {
-                                        val deck = contentResolver.openInputStream(uri)?.use { if (format == Format.PPT) PptReader.read(it) else PptxReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        val deck = (if (format == Format.PPT) contentResolver.openInputStream(uri) else input())?.use { if (format == Format.PPT) PptReader.read(it) else PptxReader.read(it) } ?: return@withContext ViewerState.Failed
                                         ViewerState.Paged(SlidePages(deck, appFonts(applicationContext)), deck.paragraphs { getString(R.string.slide_n, it) }, deck.inspection)
                                     }
                                     format == Format.EPUB || format == Format.FB2 -> ViewerState.Reader(
@@ -171,9 +193,10 @@ open class ViewerActivity : ComponentActivity() {
                                     else -> ViewerState.Unsupported(format)
                                 }
                             } catch (e: PdfPasswordException) {
-                                ViewerState.Password
+                                ViewerState.Password()
                             } catch (e: EncryptedDocumentException) {
-                                ViewerState.Password
+                                // Old Word, Excel and PowerPoint protection: not read here
+                                ViewerState.Password(supported = false)
                             } catch (e: Exception) {
                                 ViewerState.Failed
                             } catch (e: OutOfMemoryError) {
@@ -191,7 +214,7 @@ open class ViewerActivity : ComponentActivity() {
                     // A file named by a code (as messengers name attachments) is remembered by its first line instead
                     LaunchedEffect(state, docId) {
                         val id = docId ?: return@LaunchedEffect
-                        if (!CODE_NAME.matches(name.substringBeforeLast('.', name))) return@LaunchedEffect
+                        if (protectedDoc || !CODE_NAME.matches(name.substringBeforeLast('.', name))) return@LaunchedEffect
                         val first = when (val st = state) {
                             is ViewerState.Paged -> st.reading?.firstOrNull { it.text.isNotBlank() }?.text
                             is ViewerState.Reader -> st.book.title.takeIf { it.isNotBlank() }
@@ -206,6 +229,7 @@ open class ViewerActivity : ComponentActivity() {
                     // on the shelf instead of the file's name ("Sanderson_Z-imli-narodzheni.844650.fb2")
                     LaunchedEffect(state, docId) {
                         val id = docId ?: return@LaunchedEffect
+                        if (protectedDoc) return@LaunchedEffect
                         val own = when (val st = state) {
                             is ViewerState.Reader -> st.book.title
                             is ViewerState.Paged -> st.inspection?.title?.takeUnless { generatedTitle(it) }
@@ -232,7 +256,7 @@ open class ViewerActivity : ComponentActivity() {
                     // A document just made opens ready to edit (once: not again when the window is made again)
                     LaunchedEffect(state) {
                         // Only when Hramota itself asked (another app cannot open a file straight into editing)
-                        if (!intent.getBooleanExtra(EXTRA_EDIT, false) || intent.getStringExtra(EXTRA_TOKEN) != TOKEN || held.autoEdited) return@LaunchedEffect
+                        if (!intent.getBooleanExtra(EXTRA_EDIT, false) || intent.getStringExtra(EXTRA_TOKEN) != TOKEN || held.autoEdited || protectedDoc) return@LaunchedEffect
                         when {
                             format == Format.DOCX && state is ViewerState.Paged -> { held.autoEdited = true; startEditing(uri) }
                             format == Format.XLSX && state is ViewerState.Sheets -> { held.autoEdited = true; startSheetEditing(uri, (state as ViewerState.Sheets).workbook) }
@@ -241,7 +265,7 @@ open class ViewerActivity : ComponentActivity() {
                     }
                     // A presentation's first slide becomes its cover on the shelf (other documents get a drawn one)
                     LaunchedEffect(state, docId) {
-                        if (format != Format.PPTX && format != Format.PPT && format != Format.ODP) return@LaunchedEffect
+                        if (protectedDoc || format != Format.PPTX && format != Format.PPT && format != Format.ODP) return@LaunchedEffect
                         val pages = (state as? ViewerState.Paged)?.pages ?: return@LaunchedEffect
                         val id = docId ?: return@LaunchedEffect
                         if (ua.hramota.data.Shelf.hasCover(applicationContext, id)) return@LaunchedEffect
@@ -287,14 +311,14 @@ open class ViewerActivity : ComponentActivity() {
                     convertAsk?.let { kind ->
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { convertAsk = null },
-                            title = { androidx.compose.material3.Text(getString(if (kind == "docx") R.string.save_as_docx else R.string.save_as_xlsx)) },
-                            text = { androidx.compose.material3.Text(getString(if (kind == "docx") R.string.convert_note_doc else R.string.convert_note_xls)) },
+                            title = { androidx.compose.material3.Text(getString(when (kind) { "docx" -> R.string.save_as_docx; "pptx" -> R.string.save_as_pptx; else -> R.string.save_as_xlsx })) },
+                            text = { androidx.compose.material3.Text(getString(when (kind) { "docx" -> R.string.convert_note_doc; "pptx" -> R.string.convert_note_ppt; else -> R.string.convert_note_xls })) },
                             confirmButton = {
                                 androidx.compose.material3.TextButton(onClick = {
                                     convertAsk = null
                                     held.converting = true
                                     val base = name.substringBeforeLast('.', name)
-                                    if (kind == "docx") saveAsDocx.launch("$base.docx") else saveAsXlsx.launch("$base.xlsx")
+                                    when (kind) { "docx" -> saveAsDocx.launch("$base.docx"); "pptx" -> saveAsPptx.launch("$base.pptx"); else -> saveAsXlsx.launch("$base.xlsx") }
                                 }) { androidx.compose.material3.Text(getString(R.string.convert_go)) }
                             },
                             dismissButton = { androidx.compose.material3.TextButton(onClick = { convertAsk = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
@@ -336,13 +360,22 @@ open class ViewerActivity : ComponentActivity() {
                         )
                     }
                     if (held.opening) androidx.compose.ui.window.Dialog(onDismissRequest = {}) { androidx.compose.material3.CircularProgressIndicator() }
+                    held.unprotectedAsk?.let { go ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { held.unprotectedAsk = null },
+                            text = { androidx.compose.material3.Text(getString(R.string.unprotected_copy)) },
+                            confirmButton = { androidx.compose.material3.TextButton(onClick = { held.unprotectedAsk = null; go() }) { androidx.compose.material3.Text(getString(R.string.unprotected_go)) } },
+                            dismissButton = { androidx.compose.material3.TextButton(onClick = { held.unprotectedAsk = null }) { androidx.compose.material3.Text(getString(R.string.cancel)) } },
+                        )
+                    }
                     val editor = held.editor
                     // A save finished (perhaps while the window was being made again): said and acted on here
                     held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
                     held.slides?.let { slideEditor ->
                         val pages = (state as? ViewerState.Paged)?.pages
                         ua.hramota.ui.SlideEditorScreen(name, slideEditor, held.saving, onSave = { saveEdits(uri, docId, name) }, onClose = { held.slides = null },
-                            thumbnail = pages?.let { pg -> { i: Int, w: Int -> pg.render(i, w) } }, aspect = pages?.let { 1f / it.aspect(0) } ?: (16f / 9f))
+                            thumbnail = pages?.let { pg -> { i: Int, w: Int -> pg.render(i, w) } }, aspect = pages?.let { 1f / it.aspect(0) } ?: (16f / 9f),
+                            source = { contentResolver.openInputStream(uri) })
                         return@Surface
                     }
                     held.sheet?.let { sheetEditor ->
@@ -376,20 +409,38 @@ open class ViewerActivity : ComponentActivity() {
                             val e = entries[id]
                             listOfNotNull<Pair<String, () -> Unit>>(
                                 // Word documents can be edited: text, bold and other marks, headings, lists
-                                if (format == Format.DOCX && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
+                                if (format == Format.DOCX && state is ViewerState.Paged && !protectedDoc) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
                                 // Excel workbooks: cells and formulas
-                                (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
+                                (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX && !protectedDoc }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
                                 // Old Word and Excel files: kept as new ones, which can then be edited
                                 if (format == Format.DOC && state is ViewerState.Paged) getString(R.string.save_as_docx) to { convertAsk = "docx"; Unit } else null,
                                 if (format == Format.XLS && state is ViewerState.Sheets) getString(R.string.save_as_xlsx) to { convertAsk = "xlsx"; Unit } else null,
+                                if (format == Format.PPT && state is ViewerState.Paged) getString(R.string.save_as_pptx) to { convertAsk = "pptx"; Unit } else null,
                                 // PowerPoint: the slides' text
-                                if (format == Format.PPTX && state is ViewerState.Paged) getString(R.string.edit_open) to { startSlideEditing(uri); Unit } else null,
+                                if (format == Format.PPTX && state is ViewerState.Paged && !protectedDoc) getString(R.string.edit_open) to { startSlideEditing(uri); Unit } else null,
                                 // Word comments: read, answered with new ones, removed (in the editing view)
-                                (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 }?.let { n ->
+                                (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 && !protectedDoc }?.let { n ->
                                     getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
                                 },
+                                // Printing (through the phone's print window) and a PDF of the pages where the person chooses
+                                // (a PDF opened with its password is not printed: the print window could not open it)
+                                (state as? ViewerState.Paged)?.pages?.takeIf { ua.hramota.doc.PdfExport.printable(it, format == Format.PDF) && !(format == Format.PDF && protectedDoc) }?.let { pg ->
+                                    getString(R.string.print) to {
+                                        val go = { ua.hramota.doc.PdfExport.print(this@ViewerActivity, held.scope, name, pg, if (format == Format.PDF) ({ contentResolver.openInputStream(uri) }) else null) }
+                                        // What is printed of a protected document is no longer protected: asked first
+                                        if (protectedDoc) held.unprotectedAsk = go else go()
+                                        Unit
+                                    }
+                                },
+                                ((state as? ViewerState.Paged)?.pages as? ua.hramota.doc.PrintPages)?.let { pg ->
+                                    getString(R.string.save_as_pdf) to {
+                                        val go = { pendingPdf = pg; savePdf.launch(name.substringBeforeLast('.', name) + ".pdf") }
+                                        if (protectedDoc) held.unprotectedAsk = go else go()
+                                        Unit
+                                    }
+                                },
                                 // The cover on the shelf: its title and look (and, if wanted, the file's name)
-                                if (state !is ViewerState.Loading && state !is ViewerState.Failed && state !is ViewerState.Password) getString(R.string.cover_menu) to { held.coverAsk = true; Unit } else null,
+                                if (state !is ViewerState.Loading && state !is ViewerState.Failed && state !is ViewerState.Password && !protectedDoc) getString(R.string.cover_menu) to { held.coverAsk = true; Unit } else null,
                                 // On the shelf = kept inside Hramota; taking it off keeps bookmarks and notes
                                 if (e?.copy == null) getString(R.string.shelf_save) to {
                                     if (library.get(id) == null) library.update(id) { LibraryEntry(id, name, format.label, uri.toString(), openedAt = System.currentTimeMillis()) }
@@ -401,7 +452,7 @@ open class ViewerActivity : ComponentActivity() {
                                 } else if (!ownCopy) getString(R.string.shelf_drop_copy) to { confirmDrop = id; Unit } else null,
                                 // Notes as text, sent where the person chooses
                                 // A PDF's notes written into the file itself (or a copy), for other apps to see
-                                ((state as? ViewerState.Paged)?.pages as? PdfiumPages)?.takeIf { e?.notes?.isNotEmpty() == true }?.let { pdf ->
+                                ((state as? ViewerState.Paged)?.pages as? PdfiumPages)?.takeIf { e?.notes?.isNotEmpty() == true && !protectedDoc }?.let { pdf ->
                                     getString(R.string.pdf_save_notes) to { savingNotes = pdf; Unit }
                                 },
                                 (state as? ViewerState.Reader)?.book?.takeIf { e?.notes?.isNotEmpty() == true }?.let { book ->
@@ -435,6 +486,7 @@ open class ViewerActivity : ComponentActivity() {
                         },
                         onRemoveNote = { at -> docId?.let { library.removeNote(it, at) } },
                         onReadSettings = { change -> ua.hramota.data.Settings.get(this@ViewerActivity).update(change) },
+                        onPassword = { password = it },
                     )
                 }
             }
@@ -485,6 +537,43 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
     private var currentId: String? = null
+
+    // The pages waiting for the place of their PDF
+    private var pendingPdf: ua.hramota.doc.PrintPages? = null
+    private val savePdf = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/pdf")) { target ->
+        val pages = pendingPdf
+        pendingPdf = null
+        if (target == null) return@registerForActivityResult
+        val app = applicationContext
+        // The window was made again meanwhile: the file just made is removed, and that is said
+        if (pages == null) {
+            lifecycleScope.launch(Dispatchers.IO) { try { EditSaving.removeIfEmpty(app, target) } catch (e: Exception) {} }
+            android.widget.Toast.makeText(app, app.getString(R.string.pdf_not_saved), android.widget.Toast.LENGTH_LONG).show()
+            return@registerForActivityResult
+        }
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        // (in the window's holder: turning the screen does not stop it halfway)
+        held.scope.launch {
+            held.opening = true
+            var wasEmpty = false
+            var ok = false
+            try {
+                ok = withContext(Dispatchers.IO) {
+                    try {
+                        // Only into a file just made (one chosen from those already there is not written over)
+                        wasEmpty = EditSaving.isEmpty(app, target)
+                        if (!wasEmpty) false
+                        else app.contentResolver.openOutputStream(target, "wt")?.use { ua.hramota.doc.PdfExport.write(pages, it) } == true
+                    } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false }
+                }
+            } finally {
+                held.opening = false
+                // A file this made and could not finish is removed (even half written)
+                if (!ok && wasEmpty) withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { try { EditSaving.remove(app, target) } catch (e: Exception) {} }
+            }
+            android.widget.Toast.makeText(app, app.getString(if (ok) R.string.pdf_saved else R.string.pdf_not_saved), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     // A book's notes waiting for the file the person chooses (kept when the screen turns meanwhile)
     private var pendingNotes: String?
@@ -712,6 +801,7 @@ open class ViewerActivity : ComponentActivity() {
     private val saveEditCopy = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target -> onCopyTarget(target) }
     private val saveAsDocx = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target -> convertInto(target, "docx") }
     private val saveAsXlsx = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { target -> convertInto(target, "xlsx") }
+    private val saveAsPptx = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.presentationml.presentation")) { target -> convertInto(target, "pptx") }
 
     /** Writes this old Word or Excel file as a new DOCX or XLSX into [target], checks it opens, and opens it. */
     private fun convertInto(target: android.net.Uri?, kind: String) {
@@ -732,13 +822,16 @@ open class ViewerActivity : ComponentActivity() {
                     // Part of the document was not read (too long): a new file without it would lose it
                     if (!doc.complete) { incomplete = true; throw java.io.IOException("Not read whole") }
                     ua.hramota.doc.docx.DocxWriter.write(doc, out, java.util.Locale.getDefault().stripExtensions().toLanguageTag())
+                } else if (kind == "pptx") {
+                    val deck = PptReader.read(source)
+                    ua.hramota.doc.slides.PptxWriter.write(deck, out, java.util.Locale.getDefault().stripExtensions().toLanguageTag())
                 } else {
                     val wb = XlsReader.read(source, withHidden = true)
                     if (!wb.complete) { incomplete = true; throw java.io.IOException("Not read whole") }
                     ua.hramota.doc.sheet.XlsxWriter.write(wb, out)
                 }
             }
-            override fun check(made: java.io.InputStream) { if (kind == "docx") DocxReader.read(made) else XlsxReader.read(made) }
+            override fun check(made: java.io.InputStream) { when (kind) { "docx" -> DocxReader.read(made); "pptx" -> PptxReader.read(made); else -> XlsxReader.read(made) } }
         }
         held.saving = true
         // The storage stays open meanwhile: locking would empty the folder the work is done in
@@ -871,10 +964,11 @@ open class ViewerActivity : ComponentActivity() {
         return android.graphics.Color.argb(255, (c.red * 255).toInt(), (c.green * 255).toInt(), (c.blue * 255).toInt())
     }
 
-    private suspend fun openPdf(uri: android.net.Uri, onOpen: (java.io.Closeable) -> Unit): ViewerState {
+    private suspend fun openPdf(uri: android.net.Uri, password: String?, onOpen: (java.io.Closeable) -> Unit): ViewerState {
         val fd = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
         return try {
-            val pages = PdfiumPages.open(this, fd) { contentResolver.openFileDescriptor(uri, "r") }.also(onOpen)
+            // (a protected PDF is not handed to the phone's own engine for pages: it would ask nothing and show nothing)
+            val pages = PdfiumPages.open(this, fd, password, if (password == null) ({ contentResolver.openFileDescriptor(uri, "r") }) else null).also(onOpen)
             ViewerState.Paged(pages, inspection = pages.inspection)
         } catch (e: PdfEngineUnavailableException) {
             val again = contentResolver.openFileDescriptor(uri, "r") ?: return ViewerState.Failed
@@ -948,6 +1042,10 @@ open class ViewerActivity : ComponentActivity() {
         var saving by mutableStateOf(false)
         /** An editor being opened (a large file takes a moment): shown, and not opened twice. */
         var opening by mutableStateOf(false)
+        /** The password typed for this window's document (memory only; gone with the window). */
+        var password by mutableStateOf<String?>(null)
+        /** Printing or a PDF of a protected document waits for "yes, without its password". */
+        var unprotectedAsk by mutableStateOf<(() -> Unit)?>(null)
         var outcome by mutableStateOf<EditSaving.Outcome?>(null)
         /** Why the edits went into a copy (what is said when it is saved). */
         var copyReason: EditSaving.Result? = null

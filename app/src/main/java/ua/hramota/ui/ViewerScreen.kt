@@ -110,7 +110,8 @@ import ua.hramota.doc.Pages
 sealed interface ViewerState {
     data object Loading : ViewerState
     data object Failed : ViewerState
-    data object Password : ViewerState
+    /** Protected by a password: asked for ([wrong]: the one typed did not open it); [supported] false: a protection Hramota cannot open. */
+    data class Password(val wrong: Boolean = false, val supported: Boolean = true) : ViewerState
     data class Unsupported(val format: Format) : ViewerState
     data class Text(val paragraphs: List<Paragraph>, val format: Format) : ViewerState
     /** A table of plain cells (CSV); the first row is shown as the header. */
@@ -148,9 +149,11 @@ fun ViewerScreen(
     onRemoveNote: (Long) -> Unit = {},
     /** Which document this window shows, for reading aloud (two files of the same name stay apart). */
     documentId: String = name,
+    /** A password typed for a protected document. */
+    onPassword: (String) -> Unit = {},
 ) {
     // A book takes the colours of its paper, the bars too
-    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(documentId = documentId, name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings, notes = notes, onNote = onNote, onRemoveNote = onRemoveNote) }
+    BookTheme(state is ViewerState.Reader, readSettings) { ViewerContent(documentId = documentId, name = name, state = state, onBack = onBack, startInReading = startInReading, bookmarks = bookmarks, onToggleBookmark = onToggleBookmark, startInOverview = startInOverview, startSearch = startSearch, showInspector = showInspector, startPosition = startPosition, onPosition = onPosition, menu = menu, readSettings = readSettings, onReadSettings = onReadSettings, notes = notes, onNote = onNote, onRemoveNote = onRemoveNote, onPassword = onPassword) }
 }
 
 @Composable
@@ -177,6 +180,7 @@ private fun ViewerContent(
     notes: List<ua.hramota.data.Note> = emptyList(),
     onNote: (ua.hramota.data.Note) -> Unit = {},
     onRemoveNote: (Long) -> Unit = {},
+    onPassword: (String) -> Unit = {},
 ) {
     var reading by rememberSaveable { mutableStateOf(startInReading) }
     var overview by rememberSaveable { mutableStateOf(startInOverview) }
@@ -428,7 +432,7 @@ private fun ViewerContent(
                     Text(stringResource(R.string.loading), modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 ViewerState.Failed -> Message(stringResource(R.string.open_failed), null)
-                ViewerState.Password -> Message(stringResource(R.string.password_title), stringResource(R.string.password_body))
+                is ViewerState.Password -> if (state.supported) PasswordPrompt(state.wrong, onPassword) else Message(stringResource(R.string.password_title), stringResource(R.string.password_unsupported))
                 is ViewerState.Unsupported -> Message(
                     stringResource(R.string.unsupported_title),
                     stringResource(R.string.unsupported_body, state.format.label.ifEmpty { name.substringAfterLast('.', "?").uppercase() }),
@@ -802,5 +806,31 @@ private fun PageNotesSheet(
                 }
             }
         }
+    }
+}
+
+/** Asks for the password of a protected document. It is kept only in memory, while the window is open. */
+@Composable
+private fun PasswordPrompt(wrong: Boolean, onPassword: (String) -> Unit) {
+    var typed by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Exception) {} }
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(stringResource(R.string.password_title), style = MaterialTheme.typography.titleMedium)
+        Text(
+            stringResource(if (wrong) R.string.password_wrong else R.string.password_body),
+            color = if (wrong) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+        )
+        androidx.compose.material3.OutlinedTextField(
+            typed, { typed = it }, singleLine = true, label = { Text(stringResource(R.string.password_field)) },
+            visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Done, autoCorrectEnabled = false),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (typed.isNotEmpty()) onPassword(typed) }),
+            trailingIcon = { androidx.compose.material3.TextButton(onClick = { visible = !visible }) { Text(stringResource(if (visible) R.string.password_hide else R.string.password_show)) } },
+            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        )
+        androidx.compose.material3.Button(onClick = { onPassword(typed) }, enabled = typed.isNotEmpty(), modifier = Modifier.padding(top = 16.dp)) { Text(stringResource(R.string.password_open)) }
     }
 }

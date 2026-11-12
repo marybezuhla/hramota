@@ -64,8 +64,14 @@ sealed interface SlideShape {
     ) : SlideShape
 }
 
-/** One slide: its background and shapes in drawing order (back to front). */
-class Slide(val background: Int, val shapes: List<SlideShape>)
+/**
+ * A shape placed directly on a slide (not one of the layout's): its id in the slide's file, its kind
+ * ("text", "picture", "group", "table", "line") and where it is, in points. For moving and sizing.
+ */
+data class Frame(val id: String, val kind: String, val x: Float, val y: Float, val w: Float, val h: Float, val rotation: Float = 0f)
+
+/** One slide: its background and shapes in drawing order (back to front), and its own shapes' places. */
+class Slide(val background: Int, val shapes: List<SlideShape>, val frames: List<Frame> = emptyList())
 
 /** A presentation: slide size in points, slides, pictures by key. */
 class Deck(

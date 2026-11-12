@@ -29,7 +29,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.Executors
 
-/** The PDF needs a password (not supported yet). */
+/** The PDF needs a password (or the one given does not open it). */
 class PdfPasswordException : IOException("Password required")
 
 /** The isolated engine could not be started at all (not a problem with the file). */
@@ -282,7 +282,7 @@ class PdfiumPages private constructor(
          * Starts a fresh isolated engine process and opens the PDF there. Call off the main thread.
          * Throws [PdfPasswordException] for protected files, IOException if it cannot be opened.
          */
-        suspend fun open(context: Context, pfd: ParcelFileDescriptor, reopen: (() -> ParcelFileDescriptor?)? = null): PdfiumPages {
+        suspend fun open(context: Context, pfd: ParcelFileDescriptor, password: String? = null, reopen: (() -> ParcelFileDescriptor?)? = null): PdfiumPages {
             val app = context.applicationContext
             val connected = CompletableDeferred<IBinder>()
             val connection = object : ServiceConnection {
@@ -304,7 +304,7 @@ class PdfiumPages private constructor(
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                     throw IOException("PDF engine did not start in time")
                 }
-                val result = call(binder, PdfEngineService.OPEN, { d -> d.writeFileDescriptor(pfd.fileDescriptor); d.writeString(null) }) { it.readLong() }
+                val result = call(binder, PdfEngineService.OPEN, { d -> d.writeFileDescriptor(pfd.fileDescriptor); d.writeString(password) }) { it.readLong() }
                     ?: throw IOException("PDF engine stopped")
                 if (result == -4L) throw PdfPasswordException()
                 if (result <= 0L) throw IOException("Cannot open PDF ($result)")

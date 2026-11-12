@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -72,13 +73,14 @@ import ua.hramota.doc.docx.edit.RunStyle
 import ua.hramota.doc.slides.edit.PptxEdit
 import ua.hramota.doc.slides.edit.SlidePara
 import java.io.InputStream
+import kotlinx.coroutines.launch
 import java.io.OutputStream
 
 /** Before each paragraph's text: its deletion (Backspace at the very start) joins it to the one before. */
 private const val MARK = '​'
 
 /** A presentation's text being edited: paragraphs of every text box, and what was done, to undo and redo. */
-class SlideEditorState(val edit: PptxEdit) {
+class SlideEditorState(val edit: PptxEdit) : Replaceable {
     var paras by mutableStateOf(edit.paragraphs)
         private set
     /** The slides in the order they will be saved (numbers as [PptxEdit] gives them). */
@@ -86,7 +88,10 @@ class SlideEditorState(val edit: PptxEdit) {
         private set
     var dirty by mutableStateOf(false)
         private set
-    private class Step(val paras: List<SlidePara>, val order: List<Int>)
+    /** Shapes moved, sized, taken out; pictures added (see [PptxEdit.Shapes]). */
+    var shapes by mutableStateOf(PptxEdit.Shapes())
+        private set
+    private class Step(val paras: List<SlidePara>, val order: List<Int>, val shapes: PptxEdit.Shapes)
     private val undoStack = ArrayList<Step>()
     private val redoStack = ArrayList<Step>()
     var canUndo by mutableStateOf(false)
@@ -99,21 +104,111 @@ class SlideEditorState(val edit: PptxEdit) {
     var selection by mutableStateOf(TextRange.Zero)
     var pending by mutableStateOf<RunStyle?>(null)
     var moveTo by mutableStateOf<Pair<Long, Int>?>(null)
+    /** With [moveTo]: the end of the text to select (a place found). */
+    var selectTill: Int? = null
+
+    override fun searchable(): List<Pair<Long, String>> = paras.filter { it.editable }.map { it.key to it.text }
+
+    override fun show(f: Found) { selectTill = f.end; moveTo = f.key to f.start }
+
+    private fun replaced(p: SlidePara, start: Int, end: Int, with: String): SlidePara {
+        val style = p.marks.getOrNull(start) ?: p.marks.getOrNull(start - 1) ?: p.typing
+        val marks = ArrayList<RunStyle>(p.text.length - (end - start) + with.length)
+        marks.addAll(p.marks.subList(0, start)); repeat(with.length) { marks += style }; marks.addAll(p.marks.subList(end, p.text.length))
+        return p.changed(text = p.text.replaceRange(start, end, with), marks = marks)
+    }
+
+    override fun replace(f: Found, with: String): Boolean {
+        val i = indexOf(f.key); if (i < 0) return false
+        val p = paras[i]
+        if (!p.editable || f.end > p.text.length || '\n' in with) return false
+        val list = paras.toMutableList()
+        list[i] = replaced(p, f.start, f.end, with)
+        commit(list)
+        show(Found(f.key, f.start, f.start + with.length))
+        return true
+    }
+
+    override fun replaceAll(found: List<Found>, with: String): Int {
+        if ('\n' in with || found.isEmpty()) return 0
+        val list = paras.toMutableList()
+        var n = 0
+        for ((key, places) in found.groupBy { it.key }) {
+            val i = list.indexOfFirst { it.key == key }
+            if (i < 0 || !list[i].editable) continue
+            var p = list[i]
+            for (f in places.sortedByDescending { it.start }) { if (f.end <= p.text.length) { p = replaced(p, f.start, f.end, with); n++ } }
+            list[i] = p
+        }
+        if (n > 0) commit(list)
+        return n
+    }
 
     fun indexOf(key: Long?) = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
-    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order) {
+    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order, newShapes: PptxEdit.Shapes = shapes) {
         val now = System.currentTimeMillis()
         if (!(typingIn != null && typingIn == lastKey && now - lastTyped < 1500)) {
-            undoStack += Step(paras, order); if (undoStack.size > 200) undoStack.removeAt(0)
+            undoStack += Step(paras, order, shapes); if (undoStack.size > 200) undoStack.removeAt(0)
         }
         lastTyped = now; lastKey = typingIn ?: -1L
-        redoStack.clear(); paras = list; order = newOrder; dirty = true
+        redoStack.clear(); paras = list; order = newOrder; shapes = newShapes; dirty = true
         canUndo = true; canRedo = false
     }
 
-    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order); paras = p.paras; order = p.order; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
-    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order); paras = n.paras; order = n.order; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order, shapes); paras = p.paras; order = p.order; shapes = p.shapes; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
+    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order, shapes); paras = n.paras; order = n.order; shapes = n.shapes; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+
+    // ---- Shapes on a slide ----
+
+    /** Moves or sizes a shape: x, y, width, height in EMU. */
+    fun placeShape(ref: PptxEdit.ShapeRef, rect: LongArray) = commit(paras, newShapes = shapes.copy(placed = shapes.placed + (ref to rect)))
+
+    /** Takes a shape out (with its text); false for one an animation names (the animation would point at nothing). */
+    fun removeShape(ref: PptxEdit.ShapeRef): Boolean {
+        if (edit.isAnimated(ref)) return false
+        val list = paras.filterNot { p -> edit.boxes[p.box].let { it.slide == ref.slide && it.shape == ref.id && it.kind != "notes" } }
+        if (focused?.let { k -> list.none { it.key == k } } == true) focused = null
+        commit(list, newShapes = shapes.copy(removed = shapes.removed + ref, pictures = shapes.pictures - ref))
+        return true
+    }
+
+    /** Adds a text box at [rect] (EMU) on [slide], ready to type into. */
+    suspend fun addTextBox(slide: Int, rect: LongArray, lang: String): Boolean {
+        // (off the main thread: the file may be being written for the slide's picture meanwhile)
+        val (_, list) = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addTextBox(slide, rect, lang) } } catch (e: java.io.IOException) { return false }
+        commit(arranged(paras + list, order))
+        list.firstOrNull()?.let { moveTo = it.key to 0 }
+        return true
+    }
+
+    /** Adds a picture (PNG or JPEG bytes) at [rect] (EMU) on [slide]. */
+    suspend fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): Boolean {
+        val ref = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addPicture(slide, bytes, png, rect) } } catch (e: java.io.IOException) { return false }
+        commit(paras, newShapes = shapes.copy(pictures = shapes.pictures + ref))
+        return true
+    }
+
+    /** Adds empty speaker notes to [slide]; false when the presentation cannot have them. */
+    suspend fun addNotes(slide: Int, lang: String): Boolean {
+        val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addNotes(slide, lang) } ?: return false
+        commit(arranged(paras + list, order))
+        list.firstOrNull()?.let { moveTo = it.key to 0 }
+        return true
+    }
+
+    /** Whether a slide has speaker notes (now, with what was undone left out). */
+    fun hasNotes(slide: Int) = paras.any { edit.boxes[it.box].let { b -> b.slide == slide && b.kind == "notes" } }
+
+    /** The presentation as it would be saved now, read again (for the picture of a slide while placing shapes). */
+    suspend fun preview(source: () -> InputStream?): ua.hramota.doc.slides.Deck? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val list = paras; val o = order; val sh = shapes
+        try {
+            val out = java.io.ByteArrayOutputStream()
+            source()?.use { edit.save(list, o, it, out, sh) } ?: return@withContext null
+            ua.hramota.doc.slides.PptxReader.read(out.toByteArray().inputStream())
+        } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
+    }
 
     /** Which slide a paragraph is on. */
     fun slideOf(p: SlidePara) = edit.boxes[p.box].slide
@@ -143,8 +238,8 @@ class SlideEditorState(val edit: PptxEdit) {
     }
 
     /** Adds an empty slide after [after] (at the end when null); false if the presentation has no layout for it. */
-    fun addSlide(after: Int?, lang: String): Boolean {
-        val (id, list) = try { edit.addSlide(after ?: order.lastOrNull(), lang) } catch (e: java.io.IOException) { return false }
+    suspend fun addSlide(after: Int?, lang: String): Boolean {
+        val (id, list) = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { edit.addSlide(after ?: order.lastOrNull(), lang) } } catch (e: java.io.IOException) { return false }
         val at = after?.let { order.indexOf(it) + 1 } ?: order.size
         val o = order.toMutableList().apply { add(at.coerceIn(0, size), id) }
         commit(arranged(paras + list, o), newOrder = o)
@@ -230,9 +325,10 @@ class SlideEditorState(val edit: PptxEdit) {
     fun maker(): EditSaving.Maker {
         val list = paras
         val slides = order
+        val sh = shapes
         return object : EditSaving.Maker {
             override val ext = "pptx"
-            override fun write(source: InputStream, out: OutputStream) = edit.save(list, slides, source, out)
+            override fun write(source: InputStream, out: OutputStream) = edit.save(list, slides, source, out, sh)
             override fun check(made: InputStream) { ua.hramota.doc.slides.PptxReader.read(made, withMedia = false) }
         }
     }
@@ -273,19 +369,36 @@ fun SlideEditorScreen(
     /** A slide's picture at a width in pixels (the presentation as opened), or null. */
     thumbnail: (suspend (Int, Int) -> ImageBitmap?)? = null,
     aspect: Float = 16f / 9f,
+    /** The file as opened (read again to show slides as they will be saved), for placing shapes. */
+    source: (() -> InputStream?)? = null,
 ) {
+    // Placing shapes on one slide: a screen of its own
+    var placing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Int?>(null) }
+    placing?.let { slide ->
+        if (source != null && slide in state.order) { SlideLayoutScreen(state, slide, source, onDone = { placing = null }); return }
+    }
     var askClose by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
-    BackHandler { if (state.dirty) askClose = true else onClose() }
+    var noNotes by remember { mutableStateOf(false) }
+    val find = remember { FindState() }
+    var replacedCount by remember { mutableStateOf<Int?>(null) }
+    BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
     Scaffold(
         topBar = {
+          Column {
             TopAppBar(
                 title = { Text(name.substringBeforeLast('.', name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = { if (state.dirty) askClose = true else onClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.edit_close)) } },
-                actions = { TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) } },
+                actions = {
+                    IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
+                    TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
+                },
             )
+            if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
+          }
         },
         bottomBar = {
+          run {
             val i = state.indexOf(state.focused)
             val active = !saving && i >= 0 && state.paras.getOrNull(i)?.editable == true
             Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
@@ -301,15 +414,30 @@ fun SlideEditorScreen(
                     }
                 }
             }
+          }
         },
     ) { padding ->
         val list = state.paras
         val order = state.order
         val lang = remember { java.util.Locale.getDefault().stripExtensions().toLanguageTag() }
         var noLayout by remember { mutableStateOf(false) }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
         // Each slide in order: its heading (number, picture, what can be done with it), then its text boxes
         val bySlide = remember(list) { list.groupBy(state::slideOf) }
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        // A place found (or a new slide's text) is brought into view
+        LaunchedEffect(state.moveTo) {
+            val key = state.moveTo?.first ?: return@LaunchedEffect
+            var at = 0
+            for (slide in order) {
+                at++ // the slide's heading
+                val ps = bySlide[slide].orEmpty()
+                val k = ps.indexOfFirst { it.key == key }
+                if (k >= 0) { at += k; if (listState.layoutInfo.visibleItemsInfo.none { it.index == at }) listState.scrollToItem(at); return@LaunchedEffect }
+                at += ps.size
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
             for ((n, slide) in order.withIndex()) {
                 item(key = "slide-$slide") {
                     SlideHeading(
@@ -318,7 +446,9 @@ fun SlideEditorScreen(
                         empty = bySlide[slide].isNullOrEmpty(),
                         onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },
                         onRemove = { state.removeSlide(slide) },
-                        onAddAfter = { if (!state.addSlide(slide, lang)) noLayout = true },
+                        onAddAfter = { scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } },
+                        onPlace = if (source != null && !saving) ({ placing = slide }) else null,
+                        onNotes = if (!saving && !state.hasNotes(slide)) ({ scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }; Unit }) else null,
                     )
                 }
                 val ps = bySlide[slide].orEmpty()
@@ -327,7 +457,7 @@ fun SlideEditorScreen(
                     Column {
                         val firstOfBox = i == 0 || ps[i - 1].box != p.box
                         if (firstOfBox) Text(
-                            stringResource(when (box.kind) { "title" -> R.string.slide_box_title; "subtitle" -> R.string.slide_box_subtitle; "table" -> R.string.slide_box_table; else -> R.string.slide_box_text }),
+                            stringResource(when (box.kind) { "title" -> R.string.slide_box_title; "subtitle" -> R.string.slide_box_subtitle; "table" -> R.string.slide_box_table; "notes" -> R.string.slide_box_notes; else -> R.string.slide_box_text }),
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
                         )
                         SlideParagraph(state, p, title = box.kind == "title", readOnly = saving, onLocked = { locked = true })
@@ -336,7 +466,7 @@ fun SlideEditorScreen(
             }
             item(key = "add") {
                 androidx.compose.material3.OutlinedButton(
-                    onClick = { if (!state.addSlide(null, lang)) noLayout = true }, enabled = !saving,
+                    onClick = { scope.launch { if (!state.addSlide(null, lang)) noLayout = true } }, enabled = !saving,
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null)
@@ -344,6 +474,12 @@ fun SlideEditorScreen(
                 }
             }
         }
+        replacedCount?.let { n ->
+            AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
+                confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
+        }
+        if (noNotes) AlertDialog(onDismissRequest = { noNotes = false }, text = { Text(stringResource(R.string.slide_notes_failed)) },
+            confirmButton = { TextButton(onClick = { noNotes = false }) { Text(stringResource(R.string.ok)) } })
         if (noLayout) AlertDialog(onDismissRequest = { noLayout = false }, text = { Text(stringResource(R.string.slide_add_failed)) },
             confirmButton = { TextButton(onClick = { noLayout = false }) { Text(stringResource(R.string.ok)) } })
     }
@@ -363,6 +499,7 @@ private fun SlideHeading(
     number: Int, first: Boolean, last: Boolean, enabled: Boolean, canRemove: Boolean, linked: Boolean,
     picture: (suspend (Int) -> ImageBitmap?)?, slide: Int, aspect: Float, empty: Boolean,
     onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onAddAfter: () -> Unit,
+    onPlace: (() -> Unit)? = null, onNotes: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.padding(top = if (first) 0.dp else 20.dp)) {
@@ -373,6 +510,8 @@ private fun SlideHeading(
             androidx.compose.foundation.layout.Box {
                 IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.slide_more)) }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    onPlace?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_place)) }, onClick = { menu = false; go() }) }
+                    onNotes?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_notes)) }, onClick = { menu = false; go() }) }
                     androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; onAddAfter() })
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text(stringResource(if (linked) R.string.slide_remove_linked else R.string.slide_remove)) },
@@ -409,8 +548,10 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
     LaunchedEffect(state.moveTo) {
         val (key, at) = state.moveTo ?: return@LaunchedEffect
         if (key != p.key) return@LaunchedEffect
-        value = TextFieldValue(MARK + p.text, TextRange(at + 1))
-        state.focused = p.key; state.selection = TextRange(at, at); state.moveTo = null
+        val till = (state.selectTill ?: at).coerceIn(at, p.text.length)
+        state.selectTill = null
+        value = TextFieldValue(MARK + p.text, TextRange(at + 1, till + 1))
+        state.focused = p.key; state.selection = TextRange(at, till); state.moveTo = null
         try { focus.requestFocus() } catch (_: Exception) {}
     }
     BasicTextField(
