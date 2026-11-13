@@ -714,4 +714,10 @@
     <string name="shelf_search_hint">Search all documents on the shelf</string>
     <string name="shelf_search_preparing">Getting search ready: %1$d of %2$d</string>
     <string name="shelf_search_page">Page %1$d</string>
+    <string name="revisions_accept">Accept all changes (new file)…</string>
+    <string name="revisions_reject">Reject all changes (new file)…</string>
+    <string name="revisions_accepted_suffix">changes accepted</string>
+    <string name="revisions_rejected_suffix">changes rejected</string>
+    <string name="revisions_saved">Saved in a new file.</string>
+    <string name="revisions_not_saved">Could not save the new file.</string>
 </resources>

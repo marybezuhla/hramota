@@ -470,6 +470,13 @@ open class ViewerActivity : ComponentActivity() {
                                         Unit
                                     }
                                 },
+                                // Tracked changes: all accepted or all rejected, into a new file
+                                (state as? ViewerState.Paged)?.inspection?.takeIf { format == Format.DOCX && it.trackedChanges && !protectedDoc }?.let {
+                                    getString(R.string.revisions_accept) to { pendingRevisions = uri to true; saveRevisions.launch(name.substringBeforeLast('.', name) + " (" + getString(R.string.revisions_accepted_suffix) + ").docx"); Unit }
+                                },
+                                (state as? ViewerState.Paged)?.inspection?.takeIf { format == Format.DOCX && it.trackedChanges && !protectedDoc }?.let {
+                                    getString(R.string.revisions_reject) to { pendingRevisions = uri to false; saveRevisions.launch(name.substringBeforeLast('.', name) + " (" + getString(R.string.revisions_rejected_suffix) + ").docx"); Unit }
+                                },
                                 // A PDF form: filled in and signed, into a copy (a protected PDF is not: its copy would lose the protection)
                                 ((state as? ViewerState.Paged)?.pages as? PdfiumPages)?.takeIf { format == Format.PDF && !protectedDoc }?.let { pdf ->
                                     getString(R.string.form_menu) to {
@@ -583,6 +590,31 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
     private var currentId: String? = null
+
+    // A Word file whose tracked changes are to be accepted (true) or rejected, waiting for the new file's place
+    private var pendingRevisions: Pair<android.net.Uri, Boolean>? = null
+    private val saveRevisions = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { target ->
+        val (source, accept) = pendingRevisions ?: return@registerForActivityResult
+        pendingRevisions = null
+        if (target == null) return@registerForActivityResult
+        val app = applicationContext
+        lifecycleScope.launch {
+            var wasEmpty = false
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    wasEmpty = EditSaving.isEmpty(app, target)
+                    if (!wasEmpty) return@withContext false
+                    val bytes = java.io.ByteArrayOutputStream().also { out -> app.contentResolver.openInputStream(source)!!.use { ua.hramota.doc.docx.edit.Revisions.write(it, out, accept) } }.toByteArray()
+                    // The new file must open before it is kept
+                    ua.hramota.doc.docx.DocxReader.read(bytes.inputStream())
+                    app.contentResolver.openOutputStream(target, "wt")!!.use { it.write(bytes) }
+                    true
+                } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false }
+            }
+            if (!ok && wasEmpty) withContext(Dispatchers.IO) { try { EditSaving.remove(app, target) } catch (e: Exception) {} }
+            android.widget.Toast.makeText(app, app.getString(if (ok) R.string.revisions_saved else R.string.revisions_not_saved), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     // A filled form waiting for the place of its copy: the document, the values and the signature
     private var pendingForm: Triple<PdfiumPages, Map<String, String>, ua.hramota.pdf.PdfSignature?>? = null

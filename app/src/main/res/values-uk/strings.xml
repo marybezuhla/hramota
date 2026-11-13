@@ -724,4 +724,10 @@
     <string name="shelf_search_hint">Шукати в усіх документах полиці</string>
     <string name="shelf_search_preparing">Готую пошук: %1$d з %2$d</string>
     <string name="shelf_search_page">Сторінка %1$d</string>
+    <string name="revisions_accept">Прийняти всі зміни (новий файл)…</string>
+    <string name="revisions_reject">Відхилити всі зміни (новий файл)…</string>
+    <string name="revisions_accepted_suffix">зміни прийнято</string>
+    <string name="revisions_rejected_suffix">зміни відхилено</string>
+    <string name="revisions_saved">Збережено в новий файл.</string>
+    <string name="revisions_not_saved">Не вдалося зберегти новий файл.</string>
 </resources>
