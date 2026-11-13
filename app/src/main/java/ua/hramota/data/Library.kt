@@ -336,6 +336,10 @@ class Library private constructor(private val context: Context) {
         }
         writer.submit {}.get()
         Recents.convert(context, seal)
+        // The notebook and one's handwriting samples follow the storage too
+        for (dir in listOf(notebookDir(context), notebookMediaDir(context))) for (f in dir.listFiles().orEmpty()) if (f.isFile) Shelf.convertFile(key, f, seal)
+        for (f in context.filesDir.listFiles().orEmpty()) if (f.name.removeSuffix(Vault.SUFFIX) == ua.hramota.ink.MyInk.FILE) Shelf.convertFile(key, f, seal)
+        ua.hramota.notebook.Notebook.reload(context)
         // Earlier versions kept by unfinished saves follow the storage too
         for (r in ua.hramota.EditSaving.Rescue.left(context)) try { r.convert(key, seal) } catch (_: Exception) {}
     }
@@ -360,6 +364,9 @@ class Library private constructor(private val context: Context) {
         /** Copies put aside by «delete all», emptied when Hramota starts. */
         fun trashDir(context: Context) = File(context.filesDir, "documents-deleted")
         fun copiesDir(context: Context) = File(context.filesDir, "documents").apply { mkdirs() }
+        /** The notebook's entries and its index; their pictures in [notebookMediaDir]. */
+        fun notebookDir(context: Context) = File(context.filesDir, "notebook").apply { mkdirs() }
+        fun notebookMediaDir(context: Context) = File(context.filesDir, "notebook-media").apply { mkdirs() }
 
         /**
          * A fingerprint of the content: its size and the first and last megabyte, hashed together.

@@ -48,7 +48,8 @@ class InkState {
     internal var drawing by mutableIntStateOf(0)
     /** A stylus has touched this page: from then on, fingers and the palm do not write. */
     var stylusSeen by mutableStateOf(false)
-        internal set
+    /** Called after each change by hand (a stroke written or erased). */
+    var onChange: (() -> Unit)? = null
     var tool by mutableStateOf(InkTool.PEN)
     var color by mutableIntStateOf(INK)
     var width by mutableStateOf(2.2f)
@@ -66,13 +67,17 @@ class InkState {
         if (tool == InkTool.ERASER) { erase(points); return }
         undone.clear()
         strokes += Stroke(points, color, if (tool == InkTool.MARKER) width * 5 else width, tool, stylus)
+        onChange?.invoke()
     }
+
+    /** Shows [list] (after an undo in the editor, say), without counting as a change by hand. */
+    fun show(list: List<Stroke>) { if (strokes.toList() != list) { strokes.clear(); strokes.addAll(list); undone.clear() } }
 
     /** Takes out whole strokes the eraser went over. */
     private fun erase(path: List<InkPoint>) {
         val r = 10f
         val hit = strokes.filter { s -> s.points.any { a -> path.any { b -> (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) < r * r } } }
-        if (hit.isNotEmpty()) { strokes.removeAll(hit.toSet()); undone.clear() }
+        if (hit.isNotEmpty()) { strokes.removeAll(hit.toSet()); undone.clear(); onChange?.invoke() }
     }
 }
 

@@ -19,9 +19,9 @@ object Reflow {
         Line(Lookalikes.fix(g.joinToString(" ") { it.text.trim() }.trim()), box)
     }.filter { it.text.isNotEmpty() }
 
-    fun paragraphs(ocr: List<OcrLine>): List<String> = paragraphs(lines(ocr))
+    fun paragraphs(ocr: List<OcrLine>): List<String> = ofLines(lines(ocr))
 
-    fun paragraphs(lines: List<Line>): List<String> {
+    fun ofLines(lines: List<Line>): List<String> {
         if (lines.isEmpty()) return emptyList()
         val out = ArrayList<String>()
         val sb = StringBuilder(lines[0].text)

@@ -82,6 +82,7 @@ object Vault {
         openState.value = false
         Library.get(context).reload()
         Recents.get(context).reload()
+        ua.hramota.notebook.Notebook.reload(context)
         return true
     }
 
@@ -94,7 +95,7 @@ object Vault {
     fun reset(context: Context) {
         key = null
         Shelf.CoverMemory.clear()
-        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue")))
+        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue"), Library.notebookDir(context), Library.notebookMediaDir(context)))
             dir.listFiles().orEmpty().filter { it.name.endsWith(SUFFIX) }.forEach { it.delete() }
         context.getSharedPreferences("recents", Context.MODE_PRIVATE).edit().clear().commit()
         File(context.filesDir, FILE).delete()
@@ -102,6 +103,7 @@ object Vault {
         openState.value = false
         Library.get(context).reload()
         Recents.get(context).reload()
+        ua.hramota.notebook.Notebook.reload(context)
     }
 
     /** Asks for the fingerprint, face or screen lock and opens the storage. */
@@ -126,6 +128,7 @@ object Vault {
         withContext(Dispatchers.IO) { Library.get(activity).reloadWith { key = SecretKeySpec(raw, "AES") } }
         raw.fill(0)
         Recents.get(activity).reload()
+        ua.hramota.notebook.Notebook.reload(activity)
         openState.value = true
         return Outcome.OPEN
     }
@@ -204,7 +207,7 @@ object Vault {
     private const val AUTH_SECONDS = 15
 
     /** The phone's own lock screen asks for the owner (PIN, pattern, password, fingerprint or face). */
-    private suspend fun confirm(activity: ComponentActivity, title: String, subtitle: String): Boolean = suspendCancellableCoroutine { cont ->
+    suspend fun confirm(activity: ComponentActivity, title: String, subtitle: String): Boolean = suspendCancellableCoroutine { cont ->
         val intent: Intent? = activity.getSystemService(KeyguardManager::class.java)?.let {
             @Suppress("DEPRECATION") it.createConfirmDeviceCredentialIntent(title, subtitle)
         }
@@ -220,25 +223,35 @@ object Vault {
     }
 
     /** Reads a small file, sealed or plain (whichever is there). */
-    fun readSmall(context: Context, name: String): ByteArray? {
-        val sealed = File(context.filesDir, name + SUFFIX)
+    fun readSmall(context: Context, name: String): ByteArray? = readIn(context.filesDir, name)
+
+    /** As [readSmall], in a folder of the app's own (the notebook's, say). */
+    fun readIn(dir: File, name: String): ByteArray? {
+        val sealed = File(dir, name + SUFFIX)
         if (sealed.exists()) {
             val k = key ?: return null
             return Sealed.open(k, AtomicFile(sealed).readFully(), name)
         }
-        val plain = File(context.filesDir, name)
+        val plain = File(dir, name)
         return if (plain.exists()) AtomicFile(plain).readFully() else null
     }
 
     /** Writes a small file sealed when the storage is locked, plain otherwise; never while it cannot be opened. */
-    fun writeSmall(context: Context, name: String, bytes: ByteArray) {
+    fun writeSmall(context: Context, name: String, bytes: ByteArray) = writeIn(context, context.filesDir, name, bytes)
+
+    /** As [writeSmall], in a folder of the app's own; [name] is the file's own name (no folders in it). */
+    fun writeIn(context: Context, dir: File, name: String, bytes: ByteArray) {
         val on = sealing(context)
         val k = key
         if (on && k == null) throw IOException("Locked")
-        val target = AtomicFile(File(context.filesDir, if (on) name + SUFFIX else name))
+        dir.mkdirs()
+        val target = AtomicFile(File(dir, if (on) name + SUFFIX else name))
         val out = target.startWrite()
         try { out.write(if (on) Sealed.seal(k!!, bytes, name) else bytes); target.finishWrite(out) } catch (e: Exception) { target.failWrite(out); throw e }
         // Only one form of a file stays
-        File(context.filesDir, if (on) name else name + SUFFIX).delete()
+        File(dir, if (on) name else name + SUFFIX).delete()
     }
+
+    /** Deletes a small file in whichever form it is. */
+    fun deleteIn(dir: File, name: String) { File(dir, name).delete(); File(dir, name + SUFFIX).delete() }
 }

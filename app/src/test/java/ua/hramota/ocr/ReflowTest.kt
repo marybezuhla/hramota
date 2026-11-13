@@ -20,7 +20,7 @@ class ReflowTest {
         )
         assertEquals(
             listOf("Перший абзац тягнеться через увесь рядок і закінчується тут.", "Другий абзац має відступ і слово, яке розірвано переносом, а далі текст."),
-            Reflow.paragraphs(lines),
+            Reflow.ofLines(lines),
         )
     }
 
@@ -31,6 +31,6 @@ class ReflowTest {
             line("сторінки і ще трохи.", 100, 160, 900),
             line("Після проміжку новий абзац, хоч і без відступу", 100, 230, 900),
         )
-        assertEquals(3, Reflow.paragraphs(lines).size)
+        assertEquals(3, Reflow.ofLines(lines).size)
     }
 }
