@@ -711,4 +711,7 @@
     <string name="sign_place">Where to sign</string>
     <string name="sign_place_hint">Tap where the signature goes; set its size below.</string>
     <string name="sign_size">Size</string>
+    <string name="shelf_search_hint">Search all documents on the shelf</string>
+    <string name="shelf_search_preparing">Getting search ready: %1$d of %2$d</string>
+    <string name="shelf_search_page">Page %1$d</string>
 </resources>

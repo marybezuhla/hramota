@@ -87,7 +87,10 @@ fun HomeScreen(
     /** Documents Hramota remembers (their marks and notes are shown in the notebook). */
     documents: List<ua.hramota.data.LibraryEntry> = emptyList(),
     onOpenDocument: (ua.hramota.data.LibraryEntry) -> Unit = {},
+    /** A place found by searching the shelf: the document, and the page (PDF) to open at. */
+    onOpenFound: (ua.hramota.data.LibraryEntry, Int, Boolean) -> Unit = { e, _, _ -> onOpenShelf(e) },
 ) {
+    var searching by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // Nearly the whole screen for the shelf and the recent files: the tabs and settings in one row at the
     // top; opening, making and comparing files behind one round button within reach of the thumb
     // Three tabs: recent files, the shelf of kept documents, the notebook
@@ -106,6 +109,7 @@ fun HomeScreen(
                         .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 14.dp, vertical = 12.dp))
             }
           }
+            if (tab == 1 && shelf.isNotEmpty()) TextButton(onClick = { searching = !searching }) { Text(if (searching) "✕" else "🔍", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (tab == 0 && recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false) }
             androidx.compose.material3.IconButton(onClick = onSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -113,6 +117,8 @@ fun HomeScreen(
         }
         if (tab == 2) {
             ua.hramota.notebook.NotebookHome(Modifier.weight(1f).fillMaxWidth(), documents, onOpenDocument)
+        } else if (tab == 1 && searching) {
+            ShelfSearchBox(shelf, Modifier.weight(1f).fillMaxWidth(), onOpenFound)
         } else if (tab == 1) {
             Shelf(shelf, shelves, onOpenShelf, onShelfAction, onPutShelf, onRemoveShelf, onSetShelves, Modifier.weight(1f).fillMaxWidth(), startShelf)
         } else if (recents.isEmpty()) {

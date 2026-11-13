@@ -276,6 +276,8 @@ class MainActivity : ComponentActivity() {
                         documents = known.values.toList(),
                         // A document with marks: its kept copy, or where it was opened from
                         onOpenDocument = { e -> if (e.kept) openShelf(e) else e.uri?.let { openViewer(Uri.parse(it), e.title) } },
+                        // A PDF opens at the page found (that is where reading goes on from)
+                        onOpenFound = { e, place, pages -> if (pages && place >= 0) library.setPosition(e.id, place, e.total); openShelf(e) },
                     )
                 }
             }

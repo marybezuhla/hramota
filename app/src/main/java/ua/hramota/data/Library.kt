@@ -337,7 +337,7 @@ class Library private constructor(private val context: Context) {
         writer.submit {}.get()
         Recents.convert(context, seal)
         // The notebook and one's handwriting samples follow the storage too
-        for (dir in listOf(notebookDir(context), notebookMediaDir(context))) for (f in dir.listFiles().orEmpty()) if (f.isFile) Shelf.convertFile(key, f, seal)
+        for (dir in listOf(notebookDir(context), notebookMediaDir(context), ShelfSearch.dir(context))) for (f in dir.listFiles().orEmpty()) if (f.isFile) Shelf.convertFile(key, f, seal)
         for (f in context.filesDir.listFiles().orEmpty()) if (f.name.removeSuffix(Vault.SUFFIX) == ua.hramota.ink.MyInk.FILE) Shelf.convertFile(key, f, seal)
         ua.hramota.notebook.Notebook.reload(context)
         // Earlier versions kept by unfinished saves follow the storage too

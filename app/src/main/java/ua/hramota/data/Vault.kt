@@ -95,7 +95,7 @@ object Vault {
     fun reset(context: Context) {
         key = null
         Shelf.CoverMemory.clear()
-        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue"), Library.notebookDir(context), Library.notebookMediaDir(context)))
+        for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue"), Library.notebookDir(context), Library.notebookMediaDir(context), ShelfSearch.dir(context)))
             dir.listFiles().orEmpty().filter { it.name.endsWith(SUFFIX) }.forEach { it.delete() }
         context.getSharedPreferences("recents", Context.MODE_PRIVATE).edit().clear().commit()
         File(context.filesDir, FILE).delete()
