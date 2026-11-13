@@ -48,7 +48,7 @@ jobs:
         env:
           HOURS: ${{ inputs.hours || (github.ref_name == 'rukopys-smoke' && '0.03' || '4.5') }}
           REF: ${{ github.ref_name }}
-          LINES: ${{ inputs.lines || (github.ref_name == 'rukopys-smoke' && '3000' || '150000') }}
+          LINES: ${{ inputs.lines || (github.ref_name == 'rukopys-smoke' && '3000' || '120000') }}
         run: |
           # At most 5 hours: the job must end with time to keep what it made
           HOURS=$(python3 -c "import sys; print(min(5.0, float(sys.argv[1])))" "$HOURS")
