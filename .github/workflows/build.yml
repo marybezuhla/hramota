@@ -59,6 +59,10 @@ jobs:
           cmp x/lib/libpdfium.so "$GITHUB_WORKSPACE/pdfium/lib/x86_64/libpdfium.so"
           echo "PDFium matches the attested $REL build"
 
+      # Text recognition models: exactly the files described in SOURCES.json
+      - name: Verify OCR models
+        run: (cd app/src/main/assets/ocr && sha256sum -c SHA256SUMS)
+
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin

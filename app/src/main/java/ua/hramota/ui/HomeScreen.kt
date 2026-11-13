@@ -66,6 +66,7 @@ fun HomeScreen(
     onOpenFile: () -> Unit,
     onCompare: () -> Unit,
     onCreate: () -> Unit = {},
+    onScan: () -> Unit = {},
     onOpenRecent: (RecentFile) -> Unit,
     onRemove: (RecentFile) -> Unit,
     onClear: () -> Unit,
@@ -142,6 +143,7 @@ fun HomeScreen(
                 DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.open_file)) }, onClick = { actions = false; onOpenFile() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.create_new)) }, onClick = { actions = false; onCreate() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.scan)) }, onClick = { actions = false; onScan() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.compare_versions)) }, onClick = { actions = false; onCompare() })
                 }
             }

@@ -141,6 +141,11 @@
             android:documentLaunchMode="always"
             android:autoRemoveFromRecents="true"
             android:label="@string/compare_title" />
+        <!-- Pages photographed or picked, their text recognised on the phone -->
+        <activity
+            android:name=".ocr.ScanActivity"
+            android:exported="false"
+            android:label="@string/scan" />
         <!-- Samples of one's own handwriting, kept on the phone -->
         <activity
             android:name=".ink.MyHandwritingActivity"

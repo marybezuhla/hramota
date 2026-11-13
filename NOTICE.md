@@ -26,6 +26,14 @@
 - **eSpeak NG** 1.52.0 (GPL-3.0 або новіша), зібраний із сирцевого коду [espeak-ng/espeak-ng](https://github.com/espeak-ng/espeak-ng/tree/4870adfa25b1a32b4361592f1be8a40337c58d6c) у `.github/workflows/espeak.yml`; готові бібліотеки й дані — у `espeak/` із сумами `SHA256SUMS`.
 - **ONNX Runtime** 1.22.0 (MIT, Microsoft).
 
+## Розпізнавання тексту (`app/src/main/assets/ocr`)
+
+Моделі PP-OCRv5 mobile від PaddlePaddle ([PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), Apache 2.0): виявлення тексту, розпізнавання східнослов'янських і латинських літер. Перетворені в ONNX без зміни ваг (`scripts/ocr_models.py`; джерела й ревізії — у `SOURCES.json`, суми — у `SHA256SUMS`, їх перевіряє кожна збірка). Ті самі файли, що й у Писанці; код розпізнавання (`ua.hramota.ocr`) перенесено з Писанки того ж автора.
+
+## Рукопис (`rukopys/`)
+
+Код і модель розпізнавання рукопису — Apache 2.0, власні дані — CC BY 4.0 (див. `rukopys/README.md`).
+
 ## Тестові файли DOC (`app/src/test/resources/legacy`)
 
 Зразки документів Word 97–2003 (у тому числі пошкоджені, з фазингу) з тестових даних [Apache POI](https://github.com/apache/poi) (`test-data/document`), ліцензія Apache 2.0. Використовуються лише в тестах, у застосунок не входять.

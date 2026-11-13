@@ -1,0 +1,51 @@
+{
+ "license": "Apache-2.0 (PaddlePaddle PaddleOCR)",
+ "converted_with": "paddle2onnx 2.1.0, paddlepaddle 3.3.1, opset 14 (scripts/ocr_models.py)",
+ "models": {
+  "det": {
+   "repo": "PaddlePaddle/PP-OCRv5_mobile_det",
+   "revision": "0d63e78e2b680928f6b1747d76a08db6e645efb7"
+  },
+  "rec_cyrillic": {
+   "repo": "PaddlePaddle/eslav_PP-OCRv5_mobile_rec",
+   "revision": "7553801264d3379d8d2e854971989e5e26c22e03"
+  },
+  "rec_latin": {
+   "repo": "PaddlePaddle/latin_PP-OCRv5_mobile_rec",
+   "revision": "ab2cd5cc5fa6309be2e5acdfe66eca2c2c127d57"
+  }
+ },
+ "check": {
+  "det_inputs": [
+   "['DynamicDimension.0', 3, 'DynamicDimension.1', 'DynamicDimension.2']"
+  ],
+  "cyrillic": [
+   {
+    "input": "Привіт, світе! Їжак ґудзик",
+    "recognized": "Привіт, світе! Їжак ґудзик ",
+    "rec_input": "['DynamicDimension.0', 3, 48, 'DynamicDimension.1']",
+    "rec_output": "(50, 519)"
+   },
+   {
+    "input": "Київ 2026, тел. 067",
+    "recognized": "Київ 2026, тел. 067",
+    "rec_input": "['DynamicDimension.0', 3, 48, 'DynamicDimension.1']",
+    "rec_output": "(37, 519)"
+   }
+  ],
+  "latin": [
+   {
+    "input": "Hello, world! Kyiv",
+    "recognized": "Hello, world! Kyiv",
+    "rec_input": "['DynamicDimension.0', 3, 48, 'DynamicDimension.1']",
+    "rec_output": "(35, 838)"
+   },
+   {
+    "input": "Zażółć gęślą jaźń",
+    "recognized": "Zażółć gęślą jaźń",
+    "rec_input": "['DynamicDimension.0', 3, 48, 'DynamicDimension.1']",
+    "rec_output": "(33, 838)"
+   }
+  ]
+ }
+}

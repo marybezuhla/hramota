@@ -4,4 +4,6 @@
     <files-path name="documents" path="documents/" />
     <!-- A sealed copy opened for reading: plain only while the viewer shows it -->
     <cache-path name="open" path="open/" />
+    <!-- Pages photographed by the phone's camera app for the scanner; deleted when the scanner closes -->
+    <cache-path name="scan" path="scan/" />
 </paths>
