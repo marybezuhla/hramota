@@ -145,7 +145,8 @@ object OdpReader {
         val line = if (g["stroke"] != null && g["stroke"] != "none") color(g["stroke-color"]) ?: 0xFF000000.toInt() else null
         when (e.name) {
             "frame" -> {
-                e.child("image")?.attr("href")?.removePrefix("./")?.let { href ->
+                // (a table carries a preview picture of itself as well: the table is drawn instead)
+                if (e.child("table") == null) e.child("image")?.attr("href")?.removePrefix("./")?.takeIf { h -> listOf(".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp").any { h.lowercase().endsWith(it) } }?.let { href ->
                     val bytes = pkg.media[href]
                     if (bytes != null) { media[href] = bytes; out += SlideShape.Picture(x, y, w, h, 0f, href); return }
                 }
