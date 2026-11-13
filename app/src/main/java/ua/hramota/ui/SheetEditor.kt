@@ -3,6 +3,7 @@ package ua.hramota.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -24,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
@@ -38,6 +40,7 @@ import ua.hramota.doc.sheet.Sheet
 import ua.hramota.doc.sheet.SheetRow
 import ua.hramota.doc.sheet.Workbook
 import ua.hramota.doc.sheet.edit.CellKey
+import ua.hramota.doc.sheet.edit.CellLook
 import ua.hramota.doc.sheet.edit.Input
 import ua.hramota.doc.sheet.edit.Value
 import ua.hramota.doc.sheet.edit.XlsxEdit
@@ -71,6 +74,11 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
 
     private sealed class Step
     private class CellStep(val key: CellKey, val before: Input?, val after: Input?) : Step()
+    /** Looks of cells changed (several at once when sorting): before and after. */
+    private class LookStep(val looks: List<Triple<CellKey, CellLook?, CellLook?>>) : Step()
+    private class WidthStep(val sheet: Int, val col: Int, val before: Float?, val after: Float?) : Step()
+    /** Sorting: cells and looks moved together, one step. */
+    private class SortStep(val cells: CellsStep, val looks: LookStep) : Step()
     /** Several cells changed at once ("replace all"): one step. */
     private class CellsStep(val steps: List<CellStep>) : Step()
     /** Rows inserted or deleted: the whole workbook before and after (a few kept, they can be large). */
@@ -198,6 +206,9 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             is CellStep -> edit.set(st.key, st.before)
             is CellsStep -> for (c in st.steps.asReversed()) edit.set(c.key, c.before)
             is RowStep -> { edit.restore(st.before); original = st.shownBefore }
+            is LookStep -> for ((k, b, _) in st.looks) edit.setLook(k, b)
+            is WidthStep -> edit.setWidth(st.sheet, st.col, st.before)
+            is SortStep -> { for (c in st.cells.steps.asReversed()) edit.set(c.key, c.before); for ((k, b, _) in st.looks.looks) edit.setLook(k, b) }
         }
         redoStack += st
         changed()
@@ -211,6 +222,9 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             is CellStep -> edit.set(st.key, st.after)
             is CellsStep -> for (c in st.steps) edit.set(c.key, c.after)
             is RowStep -> { edit.restore(st.after); original = st.shownAfter }
+            is LookStep -> for ((k, _, a) in st.looks) edit.setLook(k, a)
+            is WidthStep -> edit.setWidth(st.sheet, st.col, st.after)
+            is SortStep -> { for (c in st.cells.steps) edit.set(c.key, c.after); for ((k, _, a) in st.looks.looks) edit.setLook(k, a) }
         }
         undoStack += st
         changed()
@@ -243,6 +257,119 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             push(RowStep(before, edit.snapshot(), shownBefore, original))
             changed()
         } } finally { busy = false }
+    }
+
+    /** Changes how a cell looks (bold, fill, number format, alignment); false when the workbook cannot take new looks. */
+    fun look(sheet: Int, row: Int, col: Int, change: CellLook): Boolean {
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return false
+        if (busy) return false
+        flush()
+        val key = CellKey(s, row, col)
+        val before = edit.look(key)
+        val after = (before ?: CellLook()).then(change)
+        if (!edit.setLook(key, after)) { notice = R.string.sheet_no_styles; return false }
+        push(LookStep(listOf(Triple(key, before, after))))
+        changed()
+        return true
+    }
+
+    /** The look shown for a cell: the file's, with changes made here. */
+    fun currentLook(sheet: Int, row: Int, col: Int): ua.hramota.doc.sheet.CellStyle {
+        val sh = workbook.sheets.getOrNull(sheet) ?: return ua.hramota.doc.sheet.CellStyle.DEFAULT
+        val r = sh.row(row) ?: return ua.hramota.doc.sheet.CellStyle.DEFAULT
+        val k = r.find(col)
+        return if (k < 0) ua.hramota.doc.sheet.CellStyle.DEFAULT else sh.style(r, k)
+    }
+
+    /** Sets a column's width in characters (as Excel counts them). */
+    fun width(sheet: Int, col: Int, chars: Float) {
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
+        if (busy) return
+        val before = edit.widthChanges[s to col]
+        edit.setWidth(s, col, chars)
+        push(WidthStep(s, col, before, chars))
+        changed()
+    }
+
+    /** A column's width in characters as shown now. */
+    fun widthChars(sheet: Int, col: Int): Float = (workbook.sheets.getOrNull(sheet)?.width(col) ?: 48f) / 5.25f
+
+    /** The block of filled rows around [row] (no empty row inside it), and its columns. */
+    private fun block(sh: ua.hramota.doc.sheet.Sheet, row: Int): IntArray? {
+        fun filled(r: Int) = sh.row(r)?.let { x -> (x.cols.indices).any { sh.text(x, it).isNotBlank() } } == true
+        if (!filled(row)) return null
+        var top = row; while (top > 0 && filled(top - 1)) top--
+        var bottom = row; while (filled(bottom + 1)) bottom++
+        val left = (top..bottom).minOf { r -> sh.row(r)?.cols?.firstOrNull() ?: Int.MAX_VALUE }
+        val right = (top..bottom).maxOf { r -> sh.row(r)?.cols?.lastOrNull() ?: -1 }
+        return intArrayOf(top, left, bottom, right)
+    }
+
+    /**
+     * Sorts the block of rows around [row] by column [col] (numbers before text, text in Ukrainian
+     * order), the first row kept as headings if [headings]. Cells move with their looks. Refused
+     * ([notice]) when the block holds formulas or merged cells: they would refer to other cells after.
+     */
+    fun sort(sheet: Int, row: Int, col: Int, descending: Boolean, headings: Boolean) {
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
+        if (busy) return
+        flush()
+        val sh = workbook.sheets.getOrNull(sheet) ?: return
+        val b = block(sh, row) ?: return
+        val first = if (headings && b[2] > b[0]) b[0] + 1 else b[0]
+        if (b[2] - first < 1) return
+        if (sh.merges.any { m -> m.bottom >= first && m.top <= b[2] && m.right >= b[1] && m.left <= b[3] }) { notice = R.string.sort_refused; return }
+        val cols = b[1]..b[3]
+        val contents = (first..b[2]).map { r -> cols.map { c -> edit.content(CellKey(s, r, c)) } }
+        if (contents.any { line -> line.any { it.startsWith("=") } } || (first..b[2]).any { r -> cols.any { c -> edit.locked(CellKey(s, r, c)) } }) { notice = R.string.sort_refused; return }
+        // Each cell's look goes with it: a change made here, else the file's
+        val looks = (first..b[2]).map { r -> cols.map { c -> CellKey(s, r, c).let { key -> edit.look(key) ?: edit.style(key)?.let { CellLook(style = it.toString()) } } } }
+        val collator = java.text.Collator.getInstance(java.util.Locale.forLanguageTag("uk")).apply { strength = java.text.Collator.SECONDARY }
+        val k = col - b[1]
+        fun num(t: String) = ua.hramota.doc.sheet.edit.Formula.parseNumber(t.replace(',', '.').replace(" ", "").replace("\u00A0", ""))
+        val order = contents.indices.sortedWith { x, y ->
+            val a = contents[x].getOrElse(k) { "" }; val bb = contents[y].getOrElse(k) { "" }
+            // Empty cells go last either way
+            if (a.isEmpty() != bb.isEmpty()) return@sortedWith if (a.isEmpty()) 1 else -1
+            val na = num(a); val nb = num(bb)
+            val c = when { na != null && nb != null -> na.compareTo(nb); na != null -> -1; nb != null -> 1; else -> collator.compare(a, bb) }
+            if (descending) -c else c
+        }
+        if (order == contents.indices.toList()) return
+        val cellSteps = ArrayList<CellStep>(); val lookSteps = ArrayList<Triple<CellKey, CellLook?, CellLook?>>()
+        for ((to, from) in order.withIndex()) {
+            if (to == from) continue
+            for ((j, c) in cols.withIndex()) {
+                val key = CellKey(s, first + to, c)
+                put(sheet, key, contents[from][j])?.let { cellSteps += it }
+                val before = edit.look(key)
+                val after = looks[from][j]
+                if (after != null && edit.setLook(key, after) || after == null && before != null && edit.setLook(key, null)) lookSteps += Triple(key, before, after)
+            }
+        }
+        push(SortStep(CellsStep(cellSteps), LookStep(lookSteps)))
+        changed()
+    }
+
+    /** A filter shown here only (not written into the file): the column and the values kept. */
+    class Filter(val sheet: Int, val top: Int, val bottom: Int, val col: Int, val keep: Set<String>)
+    var filter by mutableStateOf<Filter?>(null)
+        private set
+
+    /** The values of the column [col] in the block around [row], with how many of each. */
+    fun columnValues(sheet: Int, row: Int, col: Int): List<Pair<String, Int>> {
+        val sh = workbook.sheets.getOrNull(sheet) ?: return emptyList()
+        val b = block(sh, row) ?: return emptyList()
+        return (b[0] + 1..b[2]).map { r -> sh.row(r)?.let { x -> x.find(col).takeIf { it >= 0 }?.let { sh.text(x, it) } } ?: "" }
+            .groupingBy { it }.eachCount().toList().sortedBy { it.first }
+    }
+
+    fun setFilter(sheet: Int, row: Int, col: Int, keep: Set<String>?) {
+        if (keep == null) { filter = null; version++; return }
+        val sh = workbook.sheets.getOrNull(sheet) ?: return
+        val b = block(sh, row) ?: return
+        filter = Filter(sheet, b[0] + 1, b[2], col, keep)
+        version++
     }
 
     private fun refusalText(r: XlsxEdit.RowRefusal) = when (r) {
@@ -292,7 +419,51 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             }
             sh.withRows(rows.values.toList())
         }
-        return Workbook(sheets, original.inspection)
+        return Workbook(sheets.mapIndexed { i, sh -> dressed(i, sh) }, original.inspection)
+    }
+
+    /** Looks, widths and the filter put on a shown sheet. */
+    private fun dressed(i: Int, sh: Sheet): Sheet {
+        val s = shownSheets.getOrNull(i) ?: return sh
+        val looks = edit.lookChanges.filterKeys { it.sheet == s }
+        val widths = edit.widthChanges.filterKeys { it.first == s }.map { it.key.second to ua.hramota.doc.sheet.storedWidth(it.value.toDouble()) }.toMap()
+        val f = filter?.takeIf { it.sheet == i }
+        if (looks.isEmpty() && widths.isEmpty() && f == null) return sh
+        val styles = ArrayList(sh.styles)
+        val made = HashMap<Pair<Int, CellLook>, Int>()
+        val rows = sh.rows.associateByTo(java.util.TreeMap()) { it.index }
+        for ((key, look) in looks) {
+            val old = rows[key.row]
+            val k = old?.find(key.col) ?: -1
+            val base = look.style?.toIntOrNull() ?: edit.style(key) ?: (if (k >= 0) old!!.styles[k] else 0)
+            val index = made.getOrPut(base to look.copy(style = null)) {
+                val b = original.sheets.getOrNull(i)?.styles?.getOrNull(base) ?: ua.hramota.doc.sheet.CellStyle.DEFAULT
+                styles += b.copy(
+                    bold = look.bold ?: b.bold, italic = look.italic ?: b.italic,
+                    fill = look.fill?.let { if (it == 0) null else it } ?: b.fill,
+                    format = look.format ?: b.format, align = look.align?.takeIf { it != "general" } ?: if (look.align == "general") null else b.align,
+                )
+                styles.size - 1
+            }
+            if (old != null && k >= 0) {
+                val st = old.styles.copyOf(); st[k] = index
+                rows[key.row] = SheetRow(old.index, old.cols, st, old.numbers, old.texts)
+            } else {
+                // An empty cell with a look: shown as one
+                val map = java.util.TreeMap<Int, Triple<Int, Double, String?>>()
+                if (old != null) for (j in old.cols.indices) map[old.cols[j]] = Triple(old.styles[j], old.numbers[j], old.texts[j])
+                map[key.col] = Triple(index, 0.0, "")
+                val cols = map.keys.toIntArray()
+                rows[key.row] = SheetRow(key.row, cols, IntArray(cols.size) { map[cols[it]]!!.first }, DoubleArray(cols.size) { map[cols[it]]!!.second }, Array(cols.size) { map[cols[it]]!!.third })
+            }
+        }
+        val hidden = HashSet<Int>()
+        if (f != null) for (r in f.top..f.bottom) {
+            val x = rows[r]
+            val v = x?.find(f.col)?.takeIf { it >= 0 }?.let { sh.text(x, it) } ?: ""
+            if (v !in f.keep) hidden += r
+        }
+        return sh.shown(rows.values.toList(), styles, widths, hidden)
     }
 
     companion object { private const val MAX_ROW_STEPS = 10 }
@@ -321,6 +492,16 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
     LaunchedEffect(find.open) { if (find.open) state.flush() }
     LaunchedEffect(state.version) { if (state.version > 0) state.refresh() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // The cell a tool was chosen for: its look, its column's width, a filter on its column
+    var formatting by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    var sizing by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    var filtering by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    formatting?.let { (sh, r, c) -> CellFormatDialog(state.currentLook(sh, r, c), onDismiss = { formatting = null }) { look -> formatting = null; state.look(sh, r, c, look) } }
+    sizing?.let { (sh, _, c) -> ColumnWidthDialog(ua.hramota.doc.sheet.columnName(c), state.widthChars(sh, c), onDismiss = { sizing = null }) { w -> sizing = null; state.width(sh, c, w) } }
+    filtering?.let { (sh, r, c) ->
+        val values = remember(sh, r, c) { state.columnValues(sh, r, c) }
+        FilterDialog(ua.hramota.doc.sheet.columnName(c), values, onDismiss = { filtering = null }) { keep -> filtering = null; state.setFilter(sh, r, c, if (keep.size == values.size) null else keep) }
+    }
     state.notice?.let { msg ->
         AlertDialog(
             onDismissRequest = { state.notice = null },
@@ -337,6 +518,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
             override fun replaceAll(found: List<Found>, with: String) = state.replaceIn(sheetIndex, found, with)
         }
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
     Scaffold(
         topBar = {
           androidx.compose.foundation.layout.Column {
@@ -356,6 +538,13 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                 },
             )
             if (find.open) FindBar(find, target, state.version to sheetIndex, enabled = !saving && !state.busy) { n -> if (n != 1) replacedCount = n }
+            // A filter shows only some rows: said, with the way back (it is not written into the file)
+            if (state.filter != null) androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(stringResource(R.string.sheet_filter_on), style = MaterialTheme.typography.bodySmall, modifier = androidx.compose.ui.Modifier.weight(1f))
+                    TextButton(onClick = { state.filter?.let { f -> state.setFilter(f.sheet, f.top, f.col, null) } }) { Text(stringResource(R.string.sheet_filter_off)) }
+                }
+            }
           }
         },
     ) { padding ->
@@ -366,6 +555,17 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     content = state::content, commit = state::commit, enabled = !saving && !state.busy,
                     draft = state::draft, leave = state::flush, discard = state::discard, version = state.version,
                     rows = { sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } },
+                    cellActions = { sheet, row, col ->
+                        val ctx = context
+                        listOfNotNull(
+                            ctx.getString(R.string.sheet_format) to { formatting = Triple(sheet, row, col) },
+                            ctx.getString(R.string.sheet_width) to { sizing = Triple(sheet, row, col) },
+                            ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) },
+                            ctx.getString(R.string.sheet_sort_down) to { state.sort(sheet, row, col, descending = true, headings = true) },
+                            ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },
+                            if (state.filter != null) ctx.getString(R.string.sheet_filter_off) to { state.setFilter(sheet, row, col, null) } else null,
+                        )
+                    },
                 ),
                 startCell = startCell,
             )

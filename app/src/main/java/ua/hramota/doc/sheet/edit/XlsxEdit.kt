@@ -23,6 +23,23 @@ sealed class Input {
     data class Formula(val text: String) : Input()
 }
 
+/**
+ * A change to how a cell looks; null fields stay as the cell has them. [fill] is ARGB, 0 for no
+ * fill; [format] a number format code ("0.00", "0%", "dd.mm.yyyy"); [align] "left", "center",
+ * "right" or "general"; [style] puts another cell's whole look first (a cell moved by sorting).
+ */
+data class CellLook(
+    val bold: Boolean? = null,
+    val italic: Boolean? = null,
+    val fill: Int? = null,
+    val format: String? = null,
+    val align: String? = null,
+    val style: String? = null,
+) {
+    fun then(o: CellLook) = CellLook(o.bold ?: bold, o.italic ?: italic, o.fill ?: fill, o.format ?: format, o.align ?: align, o.style ?: style)
+    val isEmpty get() = this == CellLook()
+}
+
 /** A cell in a workbook: sheet number (in the workbook's order), row and column from 0. */
 data class CellKey(val sheet: Int, val row: Int, val col: Int)
 
@@ -37,6 +54,9 @@ class XlsxEdit private constructor(
     private val typesXml: String?,
     private val digests: Map<String, ByteArray>,
     private val calcChain: String?,
+    /** The workbook's styles part (cell looks), if it has one. */
+    private val stylesPath: String?,
+    private val stylesXml: String?,
     /** Parts that may point at rows (charts, pivot tables, slicers): while there are any, rows are not inserted or deleted. */
     private val rowBlockers: Boolean,
 ) {
@@ -55,7 +75,7 @@ class XlsxEdit private constructor(
     }
 
     /** What undo needs to go back to: the parts and the typed cells. */
-    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>)
+    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>, internal val looks: Map<CellKey, CellLook> = emptyMap(), internal val widths: Map<Pair<Int, Int>, Float> = emptyMap())
 
     @Volatile private var layout: Layout = first
     val sheets: List<SheetPart> get() = layout.sheets
@@ -99,6 +119,28 @@ class XlsxEdit private constructor(
         parsedInputs.remove(cell)
         if (input is Input.Formula) parsedInputs[cell] = Formula.parse(input.text)
     }
+
+    private val looks = HashMap<CellKey, CellLook>()
+    /** Column widths set here, in characters (as Excel keeps them): (sheet, column) to width. */
+    private val widths = HashMap<Pair<Int, Int>, Float>()
+
+    /** Looks changed here, cell by cell (a copy). */
+    val lookChanges: Map<CellKey, CellLook> @Synchronized get() = HashMap(looks)
+    val widthChanges: Map<Pair<Int, Int>, Float> @Synchronized get() = HashMap(widths)
+
+    /** Sets how a cell looks (null: as the file has it). False when the workbook has no styles to add to. */
+    @Synchronized
+    fun setLook(cell: CellKey, look: CellLook?): Boolean {
+        if (stylesXml == null) return false
+        if (look == null || look.isEmpty) looks.remove(cell) else looks[cell] = look
+        return true
+    }
+
+    fun look(cell: CellKey): CellLook? = synchronized(this) { looks[cell] }
+
+    /** Sets a column's width in characters (null: as the file has it). */
+    @Synchronized
+    fun setWidth(sheet: Int, col: Int, chars: Float?) { if (chars == null) widths.remove(sheet to col) else widths[sheet to col] = chars.coerceIn(0.5f, 255f) }
 
     /** True when the cell holds what is not changed here: part of an array formula or a data table. */
     fun locked(cell: CellKey): Boolean {
@@ -216,6 +258,8 @@ class XlsxEdit private constructor(
     fun recalc(): Map<CellKey, Value> {
         // What was typed, taken at once: the screen can go on changing cells while this works
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
+        val lookNow: Map<CellKey, CellLook> = synchronized(this) { HashMap(looks) }
+        val widthNow: Map<Pair<Int, Int>, Float> = synchronized(this) { HashMap(widths) }
         return recalcOf(snapshot)
     }
 
@@ -331,11 +375,13 @@ class XlsxEdit private constructor(
     /** About how much text the workbook's sheets hold (undo of row changes keeps copies of it). */
     val size: Long get() = layout.sheets.sumOf { it.xml.length.toLong() }
 
-    @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs))
+    @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs), HashMap(looks), HashMap(widths))
 
     @Synchronized fun restore(s: Snapshot) {
         layout = s.layout
         inputs.clear(); inputs.putAll(s.inputs)
+        looks.clear(); looks.putAll(s.looks)
+        widths.clear(); widths.putAll(s.widths)
         parsedInputs.clear()
         for ((k, i) in inputs) if (i is Input.Formula) parsedInputs[k] = Formula.parse(i.text)
     }
@@ -387,6 +433,9 @@ class XlsxEdit private constructor(
                 val key = if (k.sheet != sheet) k else move.row(k.row)?.let { k.copy(row = it) } ?: continue
                 newInputs[key] = if (i is Input.Formula) Input.Formula(Formula.moveRows(i.text, k.sheet == sheet, name, move) ?: throw Refused(RowRefusal.FORMULAS)) else i
             }
+            val newLooks = HashMap<CellKey, CellLook>()
+            for ((k, v) in looks) { val key = if (k.sheet != sheet) k else move.row(k.row)?.let { k.copy(row = it) } ?: continue; newLooks[key] = v }
+            looks.clear(); looks.putAll(newLooks)
             layout = Layout(newSheets, wb, overrides, forced, true)
             // The old parts stay only for undo: their worked-out lists are made again if needed
             l.calc = null
@@ -612,11 +661,31 @@ class XlsxEdit private constructor(
         val sheets = l.sheets
         val parts = HashMap<String, String>(l.overrides)
         var formulasChanged = l.moved
+        // New looks: each distinct (look the cell had, change) becomes one new entry of the styles
+        val styleOf = HashMap<CellKey, String>()
+        if (lookNow.isNotEmpty() && stylesXml != null && stylesPath != null) {
+            val added = LinkedHashMap<Pair<String, CellLook>, Int>()
+            for ((k, look) in lookNow) {
+                val sh = sheets.getOrNull(k.sheet) ?: continue
+                val base = look.style ?: sh.styleOf(k.row, k.col) ?: "0"
+                val rest = look.copy(style = null)
+                if (rest.isEmpty) { styleOf[k] = base; continue }
+                styleOf[k] = "\u0000" + added.getOrPut(base to rest) { added.size }
+            }
+            if (added.isNotEmpty()) {
+                val (xml, first) = Styles.add(stylesXml, added.keys.toList())
+                parts[stylesPath] = xml
+                for ((k, v) in styleOf) if (v.startsWith("\u0000")) styleOf[k] = (first + v.substring(1).toInt()).toString()
+            }
+        }
         for ((si, sh) in sheets.withIndex()) {
-            val mine = values.keys.filter { it.sheet == si }
-            if (mine.isEmpty()) continue
+            val mine = (values.keys.filter { it.sheet == si } + styleOf.keys.filter { it.sheet == si }).distinct()
+            val ownWidths = widthNow.filterKeys { it.first == si }.mapKeys { it.key.second }
+            if (mine.isEmpty() && ownWidths.isEmpty()) continue
             if (mine.any { k -> inputs[k] is Input.Formula || sh.cell(k.row, k.col)?.f != null && k in inputs }) formulasChanged = true
-            parts[sh.path] = writeSheet(si, sh, mine, values, inputs)
+            var xml = if (mine.isEmpty()) (parts[sh.path] ?: sh.xml) else writeSheet(si, sh, mine, values, inputs, styleOf)
+            if (ownWidths.isNotEmpty()) xml = Styles.widths(xml, ownWidths)
+            parts[sh.path] = xml
         }
         // Nothing changed (all undone): the file is written as it was
         if (parts.isEmpty() && !l.moved) { copy(source, out, emptyMap(), emptySet()); return }
@@ -632,7 +701,7 @@ class XlsxEdit private constructor(
         copy(source, out, parts, dropped)
     }
 
-    private fun writeSheet(si: Int, sh: SheetPart, keys: List<CellKey>, values: Map<CellKey, Value>, inputs: Map<CellKey, Input>): String {
+    private fun writeSheet(si: Int, sh: SheetPart, keys: List<CellKey>, values: Map<CellKey, Value>, inputs: Map<CellKey, Input>, styleOf: Map<CellKey, String> = emptyMap()): String {
         val p = sh.p
         val byRow = keys.groupBy { it.row }
         // A shared formula touched anywhere is written out cell by cell in its whole group
@@ -665,7 +734,7 @@ class XlsxEdit private constructor(
                 val k = CellKey(si, r, c)
                 val raw = sh.cell(r, c)
                 if (raw == null && existingCols[c] == null) grew = true
-                val xml = cellXml(x, p, r, c, raw, inputs[k], values[k], raw?.si in unshare, if (raw == null) sh.styleOf(r, c) else null)
+                val xml = cellXml(x, p, r, c, raw, inputs[k], values[k], raw?.si in unshare, if (raw == null) sh.styleOf(r, c) else null, styleOf[k])
                 if (xml == null) cells.remove(c) else cells[c] = xml
             }
             val start = if (rowElem != null) x.substring(rowElem.start, rowElem.openEnd).let { if (rowElem.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }
@@ -700,9 +769,17 @@ class XlsxEdit private constructor(
     }
 
     /** A cell written anew; null when it is to go (cleared, with no style to keep). */
-    private fun cellXml(x: String, p: String, row: Int, col: Int, raw: RawCell?, input: Input?, value: Value?, unshared: Boolean, inherited: String? = null): String? {
+    private fun cellXml(x: String, p: String, row: Int, col: Int, raw: RawCell?, input: Input?, value: Value?, unshared: Boolean, inherited: String? = null, restyled: String? = null): String? {
         val ref = columnName(col) + (row + 1)
-        val s = (raw?.s ?: inherited)?.takeIf { it != "0" || raw?.s != null }?.let { " s=\"${XmlScan.escape(it)}\"" } ?: ""
+        val s = (restyled ?: raw?.s ?: inherited)?.takeIf { it != "0" || raw?.s != null || restyled != null }?.let { " s=\"${XmlScan.escape(it)}\"" } ?: ""
+        // Only the look changed: the cell as it is, with its new style
+        if (restyled != null && input == null && value == null) {
+            if (raw == null) return "<${p}c r=\"$ref\"$s/>"
+            val tag = x.substring(raw.elem.start, raw.elem.openEnd)
+            val newTag = (if (Regex("\\ss=\"[^\"]*\"").containsMatchIn(tag)) tag.replace(Regex("\\ss=\"[^\"]*\""), s) else tag.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1$s"))
+                .let { if (raw.elem.attrs["r"] != null) it else it.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1 r=\"$ref\"") }
+            return newTag + x.substring(raw.elem.openEnd, raw.elem.end)
+        }
         fun v(text: String) = "<${p}v>${XmlScan.escape(text)}</${p}v>"
         fun stored(d: Double): String = if (d == Math.floor(d) && Math.abs(d) < 1e15) d.toLong().toString() else d.toString()
         fun withValue(f: String, value: Value?): String = when (value) {
@@ -725,7 +802,7 @@ class XlsxEdit private constructor(
                     if (raw.elem.attrs["r"] != null) it else it.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1 r=\"$ref\"")
                 }
                 val f = if (unshared || raw.fElem == null) "<${p}f>${XmlScan.escape(raw.f ?: return keep)}</${p}f>" else x.substring(raw.fElem.start, raw.fElem.end)
-                if (value == null) return if (unshared) withValue(f, rawValue(raw)) else keep
+                if (value == null) return if (unshared) withValue(f, rawValue(raw)) else if (restyled != null) withValue(f, rawValue(raw)) else keep
                 withValue(f, value)
             }
         }
@@ -831,7 +908,7 @@ class XlsxEdit private constructor(
                     if (ROW_BLOCKERS.any { lower.startsWith(it) }) blockers = true
                     if (lower.endsWith(".xml") && (lower.startsWith("xl/worksheets/") || lower.startsWith("xl/tables/") || lower == "xl/workbook.xml" || lower == "xl/sharedstrings.xml") ||
                         lower.startsWith("xl/worksheets/_rels/") && lower.endsWith(".rels") ||
-                        lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml") {
+                        lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml" || lower.startsWith("xl/") && lower.endsWith("styles.xml") && lower.count { it == '/' } == 1) {
                         val b = readAll(zip, MAX_PART)
                         total += b.size
                         if (total > MAX_TOTAL / 4) throw IOException("Too large to edit")
@@ -884,7 +961,8 @@ class XlsxEdit private constructor(
                 parts += part
             }
             if (parts.isEmpty()) throw IOException("No sheets")
-            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, blockers)
+            val stylesPath = relTargets.values.firstOrNull { it.second.endsWith("/styles") }?.first
+            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, stylesPath, stylesPath?.let(::text), blockers)
         }
 
         private fun sheet(name: String, path: String, visible: Boolean, xml: String, budget: Int): SheetPart {

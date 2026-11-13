@@ -82,6 +82,30 @@ class XlsxEditTest {
         assertTrue(part(saved, "xl/workbook.xml")!!.contains("fullCalcOnLoad=\"1\""))
     }
 
+    @Test fun looksAndWidthsAreWrittenAndOtherLooksStay() {
+        val path = "sheets/01-budget.xlsx"
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes(path)))
+        val before = XlsxReader.read(ByteArrayInputStream(bytes(path))).sheets[0]
+        assertTrue(edit.setLook(CellKey(0, 3, 0), ua.hramota.doc.sheet.edit.CellLook(bold = true, fill = 0xFFFFF2CC.toInt())))
+        assertTrue(edit.setLook(CellKey(0, 3, 1), ua.hramota.doc.sheet.edit.CellLook(format = "0%", align = "center")))
+        // An empty cell gets a look of its own
+        assertTrue(edit.setLook(CellKey(0, 25, 2), ua.hramota.doc.sheet.edit.CellLook(italic = true)))
+        edit.setWidth(0, 0, 30f)
+        val saved = save(path, edit, "looks-budget")
+        val sheet = XlsxReader.read(ByteArrayInputStream(saved)).sheets[0]
+        val r = sheet.row(3)!!
+        val a = sheet.style(r, r.find(0))
+        assertTrue(a.bold); assertEquals(0xFFFFF2CC.toInt(), a.fill)
+        val b = sheet.style(r, r.find(1))
+        assertEquals("0%", b.format); assertEquals("center", b.align)
+        assertTrue(sheet.style(sheet.row(25)!!, sheet.row(25)!!.find(2)).italic)
+        assertEquals(30 * 7 * 0.75f, sheet.width(0), 0.5f)
+        // The cells' text is as it was, and another cell's look too
+        assertEquals(before.text(before.row(3)!!, before.row(3)!!.find(0)), sheet.text(r, r.find(0)))
+        val other = before.row(5)!!
+        assertEquals(before.style(other, 0), sheet.style(sheet.row(5)!!, 0))
+    }
+
     @Test fun brokenFormulasAreRefusedAndCommaFormsAccepted() {
         val edit = XlsxEdit.open(ByteArrayInputStream(bytes("sheets/01-budget.xlsx")))
         assertNull(edit.parse("=SUM(A1", false))

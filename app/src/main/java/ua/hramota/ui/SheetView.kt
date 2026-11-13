@@ -482,6 +482,8 @@ class SheetEditing(
     val discard: (() -> Unit)? = null,
     /** Changes with every change to the workbook: the field reads the cell again (after undo, say). */
     val version: Int = 0,
+    /** More for the chosen cell (its look, the column's width, sorting, a filter): label and action. */
+    val cellActions: ((sheet: Int, row: Int, col: Int) -> List<Pair<String, () -> Unit>>)? = null,
 )
 
 /** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */
@@ -529,6 +531,13 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                         androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_above)) }, onClick = { act(false, false) })
                         androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_below)) }, onClick = { act(false, true) })
                         androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_delete, row + 1), color = MaterialTheme.colorScheme.error) }, onClick = { act(true, false) })
+                        editing.cellActions?.invoke(sheet, row, col)?.forEach { (label, go) ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = {
+                                menu = false
+                                if (value.text != editing.content(sheet, row, col) && !put()) return@DropdownMenuItem
+                                go()
+                            })
+                        }
                     }
                 }
             }

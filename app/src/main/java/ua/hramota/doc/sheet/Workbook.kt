@@ -102,6 +102,15 @@ class Sheet(
         return Sheet(name, moved, styles, widths, defaultWidth, h, defaultHeight, merged, frozenRows, frozenCols, date1904, hidden)
     }
 
+    /**
+     * The sheet as the editor shows it: other rows and looks, column widths changed (points), and
+     * rows a filter leaves out shown with no height.
+     */
+    fun shown(newRows: List<SheetRow> = rows, newStyles: List<CellStyle> = styles, newWidths: Map<Int, Float> = emptyMap(), hiddenRows: Set<Int> = emptySet()): Sheet {
+        val h = if (hiddenRows.isEmpty()) heights else HashMap(heights).also { m -> for (r in hiddenRows) m[r] = 0f }
+        return Sheet(name, newRows, newStyles, if (newWidths.isEmpty()) widths else widths + newWidths, defaultWidth, h, defaultHeight, merges, frozenRows, frozenCols, date1904, hidden)
+    }
+
     /** The same sheet with other rows (after editing): sizes, styles and merges stay. */
     fun withRows(newRows: List<SheetRow>) = Sheet(name, newRows, styles, widths, defaultWidth, heights, defaultHeight, merges, frozenRows, frozenCols, date1904, hidden)
 }
