@@ -21,7 +21,7 @@ class SocialTest {
         // A flag or a family emoji is one character to a person
         assertEquals(2, SocialText.graphemes("🇺🇦👨‍👩‍👧"))
         // On X a link is 23
-        assertEquals(6 + 23, SocialText.length("Ось: https://example.com/very/long/address/indeed", x))
+        assertEquals(5 + 23, SocialText.length("Ось: https://example.com/very/long/address/indeed", x))
     }
 
     @Test fun aLongTextBecomesAThread() {

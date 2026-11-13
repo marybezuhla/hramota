@@ -528,8 +528,8 @@
     <string name="scan_camera">Photograph a page</string>
     <string name="scan_photos">Pick photos</string>
     <string name="scan_privacy">Hramota has no camera permission: the phone\'s camera app takes the picture. Nothing goes to the gallery or the internet; the pictures are deleted when the scanner closes.</string>
-    <string name="scan_camera_more">+ Photograph</string>
-    <string name="scan_photos_more">+ Photos</string>
+    <string name="scan_camera_more">+ Photo</string>
+    <string name="scan_photos_more">+ From photos</string>
     <string name="scan_save_docx">Save as Word</string>
     <string name="scan_save_pdf">Save as PDF</string>
     <string name="scan_page">Page %1$d</string>

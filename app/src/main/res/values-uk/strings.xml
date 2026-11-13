@@ -538,7 +538,7 @@
     <string name="scan_camera">Сфотографувати сторінку</string>
     <string name="scan_photos">Вибрати фото</string>
     <string name="scan_privacy">Грамота не має дозволу на камеру: знімок робить камера телефона. Нічого не потрапляє в галерею чи інтернет; знімки видаляються, щойно сканер закрито.</string>
-    <string name="scan_camera_more">+ Сфотографувати</string>
+    <string name="scan_camera_more">+ Знімок</string>
     <string name="scan_photos_more">+ Фото</string>
     <string name="scan_save_docx">Зберегти як Word</string>
     <string name="scan_save_pdf">Зберегти як PDF</string>
