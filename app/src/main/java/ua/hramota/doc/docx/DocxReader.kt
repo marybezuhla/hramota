@@ -35,11 +35,18 @@ data class HeadersFooters(
     val isEmpty get() = headers.values.all { it.isEmpty() } && footers.values.all { it.isEmpty() }
 }
 
+/**
+ * How text flows around a floating picture: on which sides ([textSide]: "bothSides", "left",
+ * "right", "largest"), where the picture is placed across ([align], or [offsetX] in points from the
+ * column) and down from its paragraph ([offsetY]), and the gaps around it, in points.
+ */
+data class ImageWrap(val textSide: String, val align: String?, val offsetX: Float?, val offsetY: Float, val distL: Float, val distR: Float, val distB: Float)
+
 /** A piece of a paragraph. */
 sealed interface Inline {
     data class Text(val text: String, val props: RunProps) : Inline
-    /** A picture, its size in points; [rel] points at the file inside the package. */
-    data class Image(val rel: String, val width: Float, val height: Float) : Inline
+    /** A picture, its size in points; [rel] points at the file inside the package. [wrap]: text flows around it. */
+    data class Image(val rel: String, val width: Float, val height: Float, val wrap: ImageWrap? = null) : Inline
     data object Tab : Inline
     data object LineBreak : Inline
     data object PageBreak : Inline
@@ -473,8 +480,24 @@ object DocxReader {
             val cx = ext.attr("cx")?.toLongOrNull() ?: return null
             val cy = ext.attr("cy")?.toLongOrNull() ?: return null
             val embed = relPrefix + (holder.find("blip")?.attr("embed") ?: return null)
+            // A floating picture with text around it (square, tight or through, as Word lays them out)
+            val wrap = if (holder.name != "anchor" || holder.attr("behindDoc") == "1") null else {
+                val w = holder.child("wrapSquare") ?: holder.child("wrapTight") ?: holder.child("wrapThrough")
+                w?.let { ww ->
+                    fun emu(n: String) = (holder.attr(n)?.toLongOrNull() ?: 0L).coerceIn(0L, 12700L * 200) / 12700f
+                    val ph = holder.child("positionH")
+                    val pv = holder.child("positionV")
+                    ImageWrap(
+                        textSide = ww.attr("wrapText") ?: "bothSides",
+                        align = ph?.child("align")?.text?.trim(),
+                        offsetX = ph?.child("posOffset")?.text?.trim()?.toLongOrNull()?.let { (it / 12700f).coerceIn(-1584f, 1584f) },
+                        offsetY = pv?.takeIf { it.attr("relativeFrom") == "paragraph" || it.attr("relativeFrom") == "line" }?.child("posOffset")?.text?.trim()?.toLongOrNull()?.let { (it / 12700f).coerceIn(0f, 1584f) } ?: 0f,
+                        distL = emu("distL"), distR = emu("distR"), distB = emu("distB"),
+                    )
+                }
+            }
             // Sizes in EMU (12 700 per point), no larger than the largest page
-            return Inline.Image(embed, (cx / 12700f).coerceIn(0f, 1584f), (cy / 12700f).coerceIn(0f, 1584f))
+            return Inline.Image(embed, (cx / 12700f).coerceIn(0f, 1584f), (cy / 12700f).coerceIn(0f, 1584f), wrap)
         }
 
         fun table(t: XmlNode, depth: Int): Block.Table {

@@ -35,6 +35,8 @@ sealed interface PageItem {
     }
     class Fill(val rect: RectF, val color: Int) : PageItem
     class Rule(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val width: Float) : PageItem
+    /** A floating picture, drawn by [picture] at the size asked (in pixels). */
+    class Image(val rect: RectF, val picture: (Int, Int) -> Bitmap?) : PageItem
 }
 
 class LaidOutPage(val items: List<PageItem>)
@@ -125,10 +127,14 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         var y = top
         var firstPage = true
         var pendingAfter = 0f
+        // A floating picture's room still taken below its paragraph: the side, how much, down to where on the page
+        var floatSide: Region? = null
+        var floatBottom = 0f
         fun newPage() {
             val page = LaidOutPage(items)
             pages += page; onPage(page)
             items = ArrayList(); y = top; firstPage = false; pendingAfter = 0f
+            floatSide = null
         }
         fun atTop() = items.isEmpty()
 
@@ -141,7 +147,12 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             when (block) {
                 is Block.Para -> {
                     if (block.props.pageBreakBefore == true && !atTop()) newPage()
-                    val p = ahead.para(index)
+                    var p = ahead.para(index)
+                    // A picture from above still beside this paragraph: laid out again, narrower there
+                    floatSide?.let { fs ->
+                        if (y >= floatBottom) floatSide = null
+                        else if (p.float == null) p = paragraph(block, contentWidth, floats = true, around = Region(fs.right, fs.extra, floatBottom - y - gap(pendingAfter, p.before)))
+                    }
                     // "Don't add space between paragraphs of the same style" works on both sides of the gap
                     val nextBlock = blocks.getOrNull(index + 1)?.first as? Block.Para
                     val sameAsPrev = prev?.props?.styleId == block.props.styleId
@@ -174,6 +185,12 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                         }
                         val sliceH = (line until line + fit).sumOf { p.lineHeight(it).toDouble() }.toFloat()
                         p.shading?.let { items += PageItem.Fill(RectF(left + p.shadeLeft, y, left + contentWidth - p.shadeRight, y + sliceH), it) }
+                        // The paragraph's floating picture, beside its first lines
+                        if (line == 0) p.float?.let { f ->
+                            val top = y + f.y
+                            items += PageItem.Image(RectF(left + f.x, top, left + f.x + f.w, top + f.h)) { pw, ph -> pictures(f.picture.rel, pw, ph) }
+                            floatSide = f.region; floatBottom = y + f.region.until
+                        }
                         items += PageItem.Text(p.source, line, line + fit - 1, left + p.x, y)
                         y += sliceH
                         line += fit
@@ -186,6 +203,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 is Block.Table -> {
                     prev = null
                     y = min(y + pendingAfter, bottom); pendingAfter = 0f
+                    // A table goes below a floating picture beside it (tables do not flow around pictures here)
+                    if (floatSide != null) { y = min(max(y, floatBottom), bottom); floatSide = null }
                     for (r in block.rows.indices) {
                         if (stop()) return pages
                         val row = ahead.row(index, r)
@@ -245,7 +264,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         private fun compute(u: Int): Any {
             val i = unitBlock[u]
             return when (val b = blocks[i].first) {
-                is Block.Para -> paragraph(b, contentWidth)
+                is Block.Para -> paragraph(b, contentWidth, floats = true)
                 is Block.Table -> tableRow(b.rows[u - firstUnit[i]], tables[i]!!)
             }
         }
@@ -302,13 +321,25 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
 
     /** A paragraph laid out at a width, with its spacing in layout units. */
     /** A measured paragraph: where each line starts ([tops], with the bottom last), not the layout itself. */
-    inner class Para(val source: TextSource, val tops: FloatArray, val x: Float, val before: Float, val after: Float, val widow: Boolean, val shading: Int?, val shadeLeft: Float, val shadeRight: Float) {
+    inner class Para(val source: TextSource, val tops: FloatArray, val x: Float, val before: Float, val after: Float, val widow: Boolean, val shading: Int?, val shadeLeft: Float, val shadeRight: Float,
+        /** Its own floating picture: where (from the column's left and the paragraph's first line), and the room it takes. */
+        val float: Floating? = null) {
         val lines: Int get() = tops.size - 1
         fun lineHeight(i: Int): Float = tops[i + 1] - tops[i]
         val height: Float get() = tops[lines]
     }
 
-    fun paragraph(b: Block.Para, width: Float, fields: IntArray? = null): Para {
+    /** A floating picture: drawn at ([x], [y]) from the column's left and the text's top; text kept aside until [until]. */
+    class Floating(val picture: Inline.Image, val x: Float, val y: Float, val w: Float, val h: Float, val region: Region)
+
+    /** Room taken at one side of the column ([right] or left) by [extra], from a paragraph's text top down to [until]. */
+    class Region(val right: Boolean, val extra: Float, val until: Float)
+
+    /**
+     * A paragraph laid out at [width]. With [floats], a picture floating in it is placed at its side
+     * with the text flowing beside it; [around] is room a picture from an earlier paragraph still takes.
+     */
+    fun paragraph(b: Block.Para, width: Float, fields: IntArray? = null, floats: Boolean = false, around: Region? = null): Para {
         val pp = b.props
         val l = tw(pp.left ?: 0)
         val r = tw(pp.right ?: 0)
@@ -319,16 +350,43 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val layoutWidth = max(U, width - baseX - r).roundToInt()
         val before = tw(if (pp.beforeAuto == true) 280 else pp.before ?: 0)
         val after = tw(if (pp.afterAuto == true) 280 else pp.after ?: 0)
-        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields) }
-        val measured = source.fresh()
+        // The paragraph's own floating picture (the first; any others stay in the text)
+        val pic = if (floats) b.inlines.firstOrNull { it is Inline.Image && it.wrap != null } as Inline.Image? else null
+        var floating: Floating? = null
+        var region = around
+        if (pic != null) {
+            val wrap = pic.wrap!!
+            var w = pic.width * U; var h = pic.height * U
+            if (w <= 0f || h <= 0f) { w = width / 2; h = width / 3 }
+            // At most most of the column: text needs room beside it
+            if (w > width * 0.8f) { h *= width * 0.8f / w; w = width * 0.8f }
+            val right = when {
+                wrap.textSide == "left" -> true
+                wrap.textSide == "right" -> false
+                wrap.align != null -> wrap.align == "right" || wrap.align == "outside"
+                wrap.offsetX != null -> wrap.offsetX * U + w / 2 > width / 2
+                else -> false
+            }
+            val gap = (if (right) wrap.distL else wrap.distR).coerceAtLeast(9f) * U
+            val y = wrap.offsetY * U
+            region = Region(right, w + gap, y + h + wrap.distB * U)
+            floating = Floating(pic, if (right) width - w else 0f, y, w, h, region)
+        }
+        val skip = pic
+        val first = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields, skip, null) }.fresh()
+        // Lines beside the picture are made narrower: laid out once to see where lines fall, then again
+        val beside = region?.let { r -> (0 until first.lineCount).count { first.getLineTop(it) < r.until } }?.takeIf { it > 0 }
+        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields, skip, beside?.let { region!! to it }) }
+        val measured = if (beside == null) first else source.fresh()
         val n = measured.lineCount
         val tops = FloatArray(n + 1) { if (it < n) measured.getLineTop(it).toFloat() else measured.getLineBottom(n - 1).toFloat() }
         source.text = measured.text.toString()
         source.starts = IntArray(n + 1) { if (it < n) measured.getLineStart(it) else measured.getLineEnd(n - 1) }
-        return Para(source, tops, baseX, before, after, pp.widowControl != false, pp.shading, l, r)
+        return Para(source, tops, baseX, before, after, pp.widowControl != false, pp.shading, l, r, floating)
     }
 
-    private fun build(b: Block.Para, width: Float, baseX: Float, firstIndent: Float, restIndent: Float, layoutWidth: Int, fields: IntArray? = null): StaticLayout {
+    private fun build(b: Block.Para, width: Float, baseX: Float, firstIndent: Float, restIndent: Float, layoutWidth: Int, fields: IntArray? = null,
+                      skip: Inline.Image? = null, beside: Pair<Region, Int>? = null): StaticLayout {
         val pp = b.props
         val l = tw(pp.left ?: 0)
         val f = tw(pp.firstLine ?: 0)
@@ -369,7 +427,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                 Inline.PageBreak -> Unit
                 // The page's number (or the number of pages), as on the page drawn
                 is Inline.Field -> { text.append(((if (i.total) fields?.getOrNull(1) else fields?.getOrNull(0)?.plus(1)) ?: 1).toString()); runSpans(start, i.props) }
-                is Inline.Image -> {
+                is Inline.Image -> if (i !== skip) {
                     var w = i.width * U
                     var h = i.height * U
                     if (w <= 0f || h <= 0f) { w = width / 2; h = width / 3 }
@@ -418,7 +476,17 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
             .setUseLineSpacingFromFallbacks(false)
             .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
-            .setIndents(intArrayOf(firstIndent.roundToInt(), restIndent.roundToInt()), null)
+            .let { bl ->
+                if (beside == null) bl.setIndents(intArrayOf(firstIndent.roundToInt(), restIndent.roundToInt()), null)
+                else {
+                    // The first lines beside a floating picture: narrower on its side
+                    val (reg, n) = beside
+                    val extra = reg.extra.roundToInt().coerceAtMost(layoutWidth - U.roundToInt() * 40).coerceAtLeast(0)
+                    val lefts = IntArray(n + 1) { i -> (if (i == 0) firstIndent else restIndent).roundToInt() + if (i < n && !reg.right) extra else 0 }
+                    val rights = IntArray(n + 1) { i -> if (i < n && reg.right) extra else 0 }
+                    bl.setIndents(lefts, rights)
+                }
+            }
         if (pp.align == "both" || pp.align == "distribute") builder.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
         return builder.build()
     }
@@ -569,6 +637,7 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         is PageItem.Text -> PageItem.Text(source, first, last, x + dx, y + dy)
         is PageItem.Fill -> PageItem.Fill(RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy), color)
         is PageItem.Rule -> PageItem.Rule(x1 + dx, y1 + dy, x2 + dx, y2 + dy, width)
+        is PageItem.Image -> PageItem.Image(RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy), picture)
     }
 
     /** Where a table's columns are: computed once per table. */
@@ -696,12 +765,18 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
 /** Draws laid-out pages; one per document, so paints are never shared between windows. */
 class PagePainter {
     private val fill = Paint()
+    private val imagePaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val rule = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF000000.toInt(); style = Paint.Style.STROKE }
 
     fun draw(canvas: Canvas, page: LaidOutPage) {
         for (item in page.items) when (item) {
             is PageItem.Fill -> { fill.color = item.color; canvas.drawRect(item.rect, fill) }
             is PageItem.Rule -> { rule.strokeWidth = item.width; canvas.drawLine(item.x1, item.y1, item.x2, item.y2, rule) }
+            is PageItem.Image -> {
+                val scale = canvas.matrix.let { m -> FloatArray(9).also(m::getValues)[0] }
+                val bitmap = item.picture((item.rect.width() * scale).roundToInt().coerceAtLeast(1), (item.rect.height() * scale).roundToInt().coerceAtLeast(1))
+                if (bitmap != null) canvas.drawBitmap(bitmap, null, item.rect, imagePaint) else { fill.color = 0xFFE8E8E8.toInt(); canvas.drawRect(item.rect, fill) }
+            }
             is PageItem.Text -> {
                 val l = item.layout
                 val top = l.getLineTop(item.first).toFloat()

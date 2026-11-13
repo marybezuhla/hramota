@@ -91,7 +91,25 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
     /** Shapes moved, sized, taken out; pictures added (see [PptxEdit.Shapes]). */
     var shapes by mutableStateOf(PptxEdit.Shapes())
         private set
-    private class Step(val paras: List<SlidePara>, val order: List<Int>, val shapes: PptxEdit.Shapes)
+    /** Comments added to slides here, by slide (written into the file when it is saved). */
+    var comments by mutableStateOf<Map<Int, List<String>>>(emptyMap())
+        private set
+    private class Step(val paras: List<SlidePara>, val order: List<Int>, val shapes: PptxEdit.Shapes, val comments: Map<Int, List<String>>)
+
+    /** The editor's comments handed to the presentation (after any change, undo or redo). */
+    private fun syncComments(before: Map<Int, List<String>>) {
+        for (slide in before.keys + comments.keys) edit.setComments(slide, comments[slide].orEmpty())
+    }
+
+    fun addComment(slide: Int, text: String) {
+        if (text.isBlank()) return
+        commit(paras, newComments = comments + (slide to comments[slide].orEmpty() + text.trim()))
+    }
+
+    fun removeComment(slide: Int, index: Int) {
+        val list = comments[slide].orEmpty().toMutableList().apply { if (index in indices) removeAt(index) }
+        commit(paras, newComments = if (list.isEmpty()) comments - slide else comments + (slide to list))
+    }
     private val undoStack = ArrayList<Step>()
     private val redoStack = ArrayList<Step>()
     var canUndo by mutableStateOf(false)
@@ -146,18 +164,20 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
 
     fun indexOf(key: Long?) = if (key == null) -1 else paras.indexOfFirst { it.key == key }
 
-    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order, newShapes: PptxEdit.Shapes = shapes) {
+    private fun commit(list: List<SlidePara>, typingIn: Long? = null, newOrder: List<Int> = order, newShapes: PptxEdit.Shapes = shapes, newComments: Map<Int, List<String>> = comments) {
         val now = System.currentTimeMillis()
         if (!(typingIn != null && typingIn == lastKey && now - lastTyped < 1500)) {
-            undoStack += Step(paras, order, shapes); if (undoStack.size > 200) undoStack.removeAt(0)
+            undoStack += Step(paras, order, shapes, comments); if (undoStack.size > 200) undoStack.removeAt(0)
         }
         lastTyped = now; lastKey = typingIn ?: -1L
-        redoStack.clear(); paras = list; order = newOrder; shapes = newShapes; dirty = true
+        val before = comments
+        redoStack.clear(); paras = list; order = newOrder; shapes = newShapes; comments = newComments; dirty = true
+        if (before !== newComments) syncComments(before)
         canUndo = true; canRedo = false
     }
 
-    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order, shapes); paras = p.paras; order = p.order; shapes = p.shapes; lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
-    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order, shapes); paras = n.paras; order = n.order; shapes = n.shapes; lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
+    fun undo() { val p = undoStack.removeLastOrNull() ?: return; redoStack += Step(paras, order, shapes, comments); val before = comments; paras = p.paras; order = p.order; shapes = p.shapes; comments = p.comments; syncComments(before); lastKey = -1; canUndo = undoStack.isNotEmpty(); canRedo = true; dirty = true }
+    fun redo() { val n = redoStack.removeLastOrNull() ?: return; undoStack += Step(paras, order, shapes, comments); val before = comments; paras = n.paras; order = n.order; shapes = n.shapes; comments = n.comments; syncComments(before); lastKey = -1; canUndo = true; canRedo = redoStack.isNotEmpty(); dirty = true }
 
     // ---- Shapes on a slide ----
 
@@ -380,6 +400,7 @@ fun SlideEditorScreen(
     var askClose by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
     var noNotes by remember { mutableStateOf(false) }
+    var commenting by remember { mutableStateOf<Int?>(null) }
     val find = remember { FindState() }
     var replacedCount by remember { mutableStateOf<Int?>(null) }
     BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
@@ -449,6 +470,9 @@ fun SlideEditorScreen(
                         onAddAfter = { scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } },
                         onPlace = if (source != null && !saving) ({ placing = slide }) else null,
                         onNotes = if (!saving && !state.hasNotes(slide)) ({ scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }; Unit }) else null,
+                        onComment = if (!saving) ({ commenting = slide }) else null,
+                        comments = state.comments[slide].orEmpty(),
+                        onRemoveComment = { i -> state.removeComment(slide, i) },
                     )
                 }
                 val ps = bySlide[slide].orEmpty()
@@ -478,6 +502,9 @@ fun SlideEditorScreen(
             AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
                 confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
         }
+        commenting?.let { slide ->
+            CommentDialog("", onDismiss = { commenting = null }) { text -> commenting = null; state.addComment(slide, text) }
+        }
         if (noNotes) AlertDialog(onDismissRequest = { noNotes = false }, text = { Text(stringResource(R.string.slide_notes_failed)) },
             confirmButton = { TextButton(onClick = { noNotes = false }) { Text(stringResource(R.string.ok)) } })
         if (noLayout) AlertDialog(onDismissRequest = { noLayout = false }, text = { Text(stringResource(R.string.slide_add_failed)) },
@@ -500,6 +527,7 @@ private fun SlideHeading(
     picture: (suspend (Int) -> ImageBitmap?)?, slide: Int, aspect: Float, empty: Boolean,
     onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onAddAfter: () -> Unit,
     onPlace: (() -> Unit)? = null, onNotes: (() -> Unit)? = null,
+    onComment: (() -> Unit)? = null, comments: List<String> = emptyList(), onRemoveComment: (Int) -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.padding(top = if (first) 0.dp else 20.dp)) {
@@ -512,6 +540,7 @@ private fun SlideHeading(
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     onPlace?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_place)) }, onClick = { menu = false; go() }) }
                     onNotes?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_notes)) }, onClick = { menu = false; go() }) }
+                    onComment?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.cell_note_add)) }, onClick = { menu = false; go() }) }
                     androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; onAddAfter() })
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text(stringResource(if (linked) R.string.slide_remove_linked else R.string.slide_remove)) },
@@ -523,6 +552,11 @@ private fun SlideHeading(
         if (picture != null) {
             val img by produceState<ImageBitmap?>(null, slide) { value = picture(720) }
             img?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(aspect).border(1.dp, MaterialTheme.colorScheme.outlineVariant)) }
+        }
+        // Comments added here (written into the presentation when it is saved)
+        for ((i, c) in comments.withIndex()) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            Text("💬 $c", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            TextButton(onClick = { onRemoveComment(i) }, enabled = enabled) { Text(stringResource(R.string.comment_delete)) }
         }
         if (empty) Text(stringResource(R.string.slide_no_text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
     }

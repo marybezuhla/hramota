@@ -324,6 +324,72 @@ internal class Pack(
         }
     }
 
+    /**
+     * Comments added to slides: for each (slide part, the words) appended to the slide's comments part
+     * (PowerPoint's older kind, made with its link when the slide has none), by [author] in the list of
+     * comment authors (made with its link when the presentation has none). No date is written.
+     */
+    fun linkComments(items: List<Pair<String, List<String>>>, author: String, changed: MutableMap<String, String>, created: MutableSet<String>) {
+        val ctName = texts.keys.firstOrNull { it.equals("[Content_Types].xml", ignoreCase = true) } ?: throw IOException("No content types")
+        val ctAdd = StringBuilder()
+        // The list of authors
+        val authorsName = texts.keys.firstOrNull { it.equals("ppt/commentAuthors.xml", ignoreCase = true) } ?: "ppt/commentAuthors.xml"
+        var authors = changed[authorsName] ?: texts[authorsName]
+        if (authors == null) {
+            authors = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<p:cmAuthorLst xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"$R\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"></p:cmAuthorLst>"
+            created += authorsName
+            addLink("ppt/presentation.xml", { ids -> var n = 1; while ("rIdHc$n" in ids) n++; "<Relationship Id=\"rIdHc$n\" Type=\"$R/commentAuthors\" Target=\"commentAuthors.xml\"/>" }, changed, created)
+            ctAdd.append("<Override PartName=\"/$authorsName\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml\"/>")
+        }
+        val aRoot = XmlScan.children(authors, 0, authors.length).firstOrNull { it.local == "cmAuthorLst" } ?: throw IOException("Bad comment authors")
+        val ap = aRoot.name.substringBefore(':', "").let { if (it.isEmpty() || it == aRoot.name) "" else "$it:" }
+        val list = XmlScan.children(authors, aRoot).filter { it.local == "cmAuthor" }
+        val mine = list.firstOrNull { it.attrs["name"] == author }
+        val authorId = mine?.attrs?.get("id")?.toLongOrNull() ?: ((list.mapNotNull { it.attrs["id"]?.toLongOrNull() }.maxOrNull() ?: -1) + 1)
+        var lastIdx = mine?.attrs?.get("lastIdx")?.toLongOrNull() ?: 0L
+        for ((slide, words) in items) {
+            val dir = slide.substringBeforeLast('/')
+            val relsName = changed.keys.firstOrNull { it.equals(relsOf(slide), ignoreCase = true) } ?: texts.keys.firstOrNull { it.equals(relsOf(slide), ignoreCase = true) } ?: relsOf(slide)
+            val path = rels(relsName, changed[relsName] ?: texts[relsName]).firstOrNull { it.type == "$R/comments" && it.target != null }?.target
+            val name = path?.let { p -> texts.keys.firstOrNull { it.equals(p, ignoreCase = true) } ?: p }
+            var xml = name?.let { changed[it] ?: texts[it] }
+            if (path != null && xml == null) throw IOException("Comments not readable")
+            val target = name ?: run {
+                var n = 1
+                while (!isFree("ppt/comments/comment$n.xml") || "ppt/comments/comment$n.xml" in created) n++
+                "ppt/comments/comment$n.xml"
+            }
+            if (xml == null) {
+                xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<p:cmLst xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"$R\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"></p:cmLst>"
+                created += target
+                addLink(slide, { ids -> var n = 1; while ("rIdHc$n" in ids) n++; "<Relationship Id=\"rIdHc$n\" Type=\"$R/comments\" Target=\"${XmlScan.escape(relative(dir, target))}\"/>" }, changed, created)
+                ctAdd.append("<Override PartName=\"/${XmlScan.escape(target)}\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.comments+xml\"/>")
+            }
+            val root = XmlScan.children(xml, 0, xml.length).firstOrNull { it.local == "cmLst" } ?: throw IOException("Bad comments")
+            val p = root.name.substringBefore(':', "").let { if (it.isEmpty() || it == root.name) "" else "$it:" }
+            // Placed one under another at the slide's top left, as PowerPoint places them
+            val add = words.withIndex().joinToString("") { (i, w) ->
+                lastIdx++
+                "<${p}cm authorId=\"$authorId\" idx=\"$lastIdx\"><${p}pos x=\"10\" y=\"${10 + i * 140}\"/><${p}text>${XmlScan.escape(w)}</${p}text></${p}cm>"
+            }
+            changed[target] = if (root.selfClosing || root.empty) xml.substring(0, root.start) + xml.substring(root.start, root.openEnd).removeSuffix("/>").trimEnd().let { if (root.selfClosing) "$it>" else it } + add + "</${root.name}>" + xml.substring(root.end)
+                else xml.substring(0, root.closeStart) + add + xml.substring(root.closeStart)
+        }
+        // The author with the last number used
+        val entry = "<${ap}cmAuthor id=\"$authorId\" name=\"${XmlScan.escape(author)}\" initials=\"H\" lastIdx=\"$lastIdx\" clrIdx=\"$authorId\"/>"
+        changed[authorsName] = when {
+            mine != null -> authors.substring(0, mine.start) + entry + authors.substring(mine.end)
+            aRoot.selfClosing || aRoot.empty -> authors.substring(0, aRoot.start) + authors.substring(aRoot.start, aRoot.openEnd).removeSuffix("/>").trimEnd().let { if (aRoot.selfClosing) "$it>" else it } + entry + "</${aRoot.name}>" + authors.substring(aRoot.end)
+            else -> authors.substring(0, aRoot.closeStart) + entry + authors.substring(aRoot.closeStart)
+        }
+        if (ctAdd.isNotEmpty()) {
+            val ct = changed[ctName] ?: texts[ctName]!!
+            val root = XmlScan.children(ct, 0, ct.length).first()
+            val prefix = root.name.substringBefore(':', "").let { if (it.isEmpty()) "" else "$it:" }
+            changed[ctName] = ct.substring(0, root.closeStart) + ctAdd.toString().replace("<Override", "<${prefix}Override") + ct.substring(root.closeStart)
+        }
+    }
+
     /** New speaker notes: for each (slide, notes part, notes master) the notes' links, the slide's link to them, their type. */
     fun linkNotes(notes: List<Triple<String, String, String>>, changed: MutableMap<String, String>, created: MutableSet<String>) {
         for ((slide, path, master) in notes) {

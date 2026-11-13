@@ -209,7 +209,7 @@ class XlsxEditTest {
         val back = XlsxReader.read(ByteArrayInputStream(out)).sheets[0]
         assertEquals("10", back.text(back.row(0)!!, 0))
         assertEquals(-1, back.row(0)!!.find(1))
-        assertTrue(back.row(0)!!.find(3) >= 0)
+        assertTrue(sheet.contains("<c r=\"D1\"><f>SUM(A1:A10)</f>"))
 
         val del = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
         assertNull(del.moveColumns(0, 0, -1))
@@ -217,6 +217,31 @@ class XlsxEditTest {
         val d = save("docs-edit/rows.xlsx", del, "columns-deleted")
         assertTrue(part(d, "xl/worksheets/sheet2.xml")!!.contains("#REF!+1"))
         assertTrue(part(d, "xl/worksheets/sheet1.xml")!!.contains("<mergeCell ref=\"C3:D5\"/>"))
+    }
+
+    @Test fun notesAreAddedToCells() {
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
+        edit.setNote(CellKey(0, 1, 1), "Перевірити <суму> & дату")
+        // Rows are not moved under a note added here
+        assertEquals(XlsxEdit.RowRefusal.SHEET, edit.moveRows(0, 0, 1))
+        val out = save("docs-edit/rows.xlsx", edit, "notes-added")
+        assertTrue(part(out, "xl/comments1.xml")!!.contains("Перевірити &lt;суму&gt; &amp; дату"))
+        assertTrue(part(out, "xl/drawings/vmlDrawing1.vml")!!.contains("<x:Row>1</x:Row>"))
+        assertTrue(part(out, "xl/worksheets/sheet1.xml")!!.contains("legacyDrawing"))
+        assertTrue(part(out, "[Content_Types].xml")!!.contains("Extension=\"vml\""))
+        val back = XlsxReader.read(ByteArrayInputStream(out))
+        assertEquals("Hramota: Перевірити <суму> & дату", back.comments[0]?.get(1 to 1))
+        // A second note into the comments the file now has, and the first one replaced
+        val again = XlsxEdit.open(ByteArrayInputStream(out))
+        again.setNote(CellKey(0, 1, 1), "Інше")
+        again.setNote(CellKey(0, 3, 0), "Ще одне")
+        val out2 = ByteArrayOutputStream().also { again.save(ByteArrayInputStream(out), it) }.toByteArray()
+        File("build/edited").apply { mkdirs() }.let { File(it, "notes-added-again.xlsx").writeBytes(out2) }
+        val back2 = XlsxReader.read(ByteArrayInputStream(out2)).comments[0]!!
+        assertEquals("Hramota: Інше", back2[1 to 1])
+        assertEquals("Hramota: Ще одне", back2[3 to 0])
+        assertEquals(2, back2.size)
+        assertEquals(2, Regex("<v:shape ").findAll(part(out2, "xl/drawings/vmlDrawing1.vml")!!).count())
     }
 
     @Test fun rowsAreNotMovedUnderTables() {

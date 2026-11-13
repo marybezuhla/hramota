@@ -45,6 +45,27 @@ class PptxEditTest {
         assertEquals(part(bytes(), "ppt/slides/slide1.xml"), part(out, "ppt/slides/slide1.xml"))
     }
 
+    @Test fun commentsAreAddedToSlides() {
+        val edit = PptxEdit.open(ByteArrayInputStream(bytes()))
+        edit.setComments(0, listOf("Перший <коментар>", "Другий & ще"))
+        edit.setComments(2, listOf("Третій"))
+        val out = ByteArrayOutputStream().also { edit.save(edit.paragraphs, ByteArrayInputStream(bytes()), it) }.toByteArray()
+        File("build/edited").apply { mkdirs() }.let { File(it, "slides-comments.pptx").writeBytes(out) }
+        val deck = PptxReader.read(ByteArrayInputStream(out))
+        assertEquals(listOf("Hramota: Перший <коментар>", "Hramota: Другий & ще"), deck.comments[0])
+        assertEquals(listOf("Hramota: Третій"), deck.comments[2])
+        assertTrue(part(out, "ppt/commentAuthors.xml")!!.contains("lastIdx=\"3\""))
+        // No date is written with them
+        assertTrue(!part(out, "ppt/comments/comment1.xml")!!.contains("dt="))
+        // Added to again: into the same parts, the numbers going on
+        val again = PptxEdit.open(ByteArrayInputStream(out))
+        again.setComments(0, listOf("Ще один"))
+        val out2 = ByteArrayOutputStream().also { again.save(again.paragraphs, ByteArrayInputStream(out), it) }.toByteArray()
+        assertEquals(3, PptxReader.read(ByteArrayInputStream(out2)).comments[0]?.size)
+        assertTrue(part(out2, "ppt/commentAuthors.xml")!!.contains("lastIdx=\"4\""))
+        assertEquals(1, Regex("<p:cmAuthor ").findAll(part(out2, "ppt/commentAuthors.xml")!!).count())
+    }
+
     /** The test presentation with slide 2 changed by [change]. */
     private fun withSlide2(change: (String) -> String): ByteArray {
         val out = ByteArrayOutputStream()

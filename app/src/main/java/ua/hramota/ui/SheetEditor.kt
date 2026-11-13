@@ -76,6 +76,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     private class CellStep(val key: CellKey, val before: Input?, val after: Input?) : Step()
     /** Looks of cells changed (several at once when sorting): before and after. */
     private class LookStep(val looks: List<Triple<CellKey, CellLook?, CellLook?>>) : Step()
+    private class NoteStep(val key: CellKey, val before: String?, val after: String?) : Step()
     private class WidthStep(val sheet: Int, val col: Int, val before: Float?, val after: Float?) : Step()
     /** Sorting: cells and looks moved together, one step. */
     private class SortStep(val cells: CellsStep, val looks: LookStep) : Step()
@@ -208,6 +209,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             is RowStep -> { edit.restore(st.before); original = st.shownBefore }
             is LookStep -> for ((k, b, _) in st.looks) edit.setLook(k, b)
             is WidthStep -> edit.setWidth(st.sheet, st.col, st.before)
+            is NoteStep -> edit.setNote(st.key, st.before)
             is SortStep -> { for (c in st.cells.steps.asReversed()) edit.set(c.key, c.before); for ((k, b, _) in st.looks.looks) edit.setLook(k, b) }
         }
         redoStack += st
@@ -224,6 +226,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             is RowStep -> { edit.restore(st.after); original = st.shownAfter }
             is LookStep -> for ((k, _, a) in st.looks) edit.setLook(k, a)
             is WidthStep -> edit.setWidth(st.sheet, st.col, st.after)
+            is NoteStep -> edit.setNote(st.key, st.after)
             is SortStep -> { for (c in st.cells.steps) edit.set(c.key, c.after); for ((k, _, a) in st.looks.looks) edit.setLook(k, a) }
         }
         undoStack += st
@@ -262,6 +265,23 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             push(RowStep(before, edit.snapshot(), shownBefore, original))
             changed()
         } } finally { busy = false }
+    }
+
+    /** The note a cell has: one added here, else the file's (shown sheet numbering). */
+    fun note(sheet: Int, row: Int, col: Int): String? {
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return null
+        return edit.noteChanges[CellKey(s, row, col)] ?: original.comments[sheet]?.get(row to col)
+    }
+
+    /** Puts a note on a cell (Excel's comment), written into the file when it is saved. */
+    fun setNote(sheet: Int, row: Int, col: Int, text: String) {
+        val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
+        if (busy || text.isBlank()) return
+        val key = CellKey(s, row, col)
+        val before = edit.noteChanges[key]
+        edit.setNote(key, text.trim())
+        push(NoteStep(key, before, edit.noteChanges[key]))
+        changed()
     }
 
     /** Changes how a cell looks (bold, fill, number format, alignment); false when the workbook cannot take new looks. */
@@ -436,7 +456,15 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             }
             sh.withRows(rows.values.toList())
         }
-        return Workbook(sheets.mapIndexed { i, sh -> dressed(i, sh) }, original.inspection, charts = original.charts, comments = original.comments)
+        // Notes added here shown with the file's own (a new one in place of the cell's old one)
+        val notes = edit.noteChanges
+        val comments = if (notes.isEmpty()) original.comments else original.comments.toMutableMap().also { all ->
+            for ((k, text) in notes) {
+                val shown = shownSheets.indexOf(k.sheet).takeIf { it >= 0 } ?: continue
+                all[shown] = all[shown].orEmpty() + ((k.row to k.col) to text)
+            }
+        }
+        return Workbook(sheets.mapIndexed { i, sh -> dressed(i, sh) }, original.inspection, charts = original.charts, comments = comments)
     }
 
     /** Looks, widths and the filter put on a shown sheet. */
@@ -513,6 +541,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
     var formatting by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var sizing by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var filtering by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    var noting by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     formatting?.let { (sh, r, c) -> CellFormatDialog(state.currentLook(sh, r, c), onDismiss = { formatting = null }) { look -> formatting = null; state.look(sh, r, c, look) } }
     sizing?.let { (sh, _, c) -> ColumnWidthDialog(ua.hramota.doc.sheet.columnName(c), state.widthChars(sh, c), onDismiss = { sizing = null }) { w -> sizing = null; state.width(sh, c, w) } }
     filtering?.let { (sh, r, c) ->
@@ -581,12 +610,19 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                             ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) },
                             ctx.getString(R.string.sheet_sort_down) to { state.sort(sheet, row, col, descending = true, headings = true) },
                             ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },
+                            ctx.getString(if (state.note(sheet, row, col) == null) R.string.cell_note_add else R.string.cell_note_change) to { noting = Triple(sheet, row, col) },
                             if (state.filter != null) ctx.getString(R.string.sheet_filter_off) to { state.setFilter(sheet, row, col, null) } else null,
                         )
                     },
                 ),
                 startCell = startCell,
             )
+        }
+    }
+    noting?.let { (sheet, row, col) ->
+        CommentDialog(state.note(sheet, row, col)?.removePrefix(XlsxEdit.AUTHOR + ": ").orEmpty(), onDismiss = { noting = null }) { text ->
+            noting = null
+            state.setNote(sheet, row, col, text)
         }
     }
     replacedCount?.let { n ->

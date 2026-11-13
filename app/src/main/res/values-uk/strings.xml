@@ -344,6 +344,10 @@
     <string name="rows_insert_above">Вставити рядок вище</string>
     <string name="rows_insert_below">Вставити рядок нижче</string>
     <string name="rows_delete">Видалити рядок %1$d</string>
+    <string name="cell_note_add">Додати коментар</string>
+    <string name="cell_note_change">Змінити коментар</string>
+    <string name="cell_note_title">Коментар</string>
+    <string name="cell_note_hint">Що хочете зауважити?</string>
     <string name="cols_insert_left">Вставити стовпець ліворуч</string>
     <string name="cols_insert_right">Вставити стовпець праворуч</string>
     <string name="cols_delete">Видалити стовпець %1$s</string>

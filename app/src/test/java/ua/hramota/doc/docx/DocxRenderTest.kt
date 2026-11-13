@@ -60,6 +60,23 @@ class DocxRenderTest {
         assertTrue(second.toString(), second.any { it.contains("Сторінка 2 з ${pages.size}") })
     }
 
+    /** A floating picture: drawn at the column's right, the lines beside it shorter, those below it full. */
+    @Test fun textFlowsAroundAFloatingPicture() {
+        val doc = docs().first { it.name == "08-wrap.docx" }.inputStream().use { DocxReader.read(it) }
+        val layout = DocxLayout(doc, fonts) { _, _, _ -> null }
+        val page = layout.layout().first()
+        val pic = page.items.filterIsInstance<PageItem.Image>().single()
+        assertTrue("the picture at the right", pic.rect.left > layout.pageWidth / 2)
+        val text = page.items.filterIsInstance<PageItem.Text>().first { it.source.text.startsWith("Текст обтікає") }
+        val l = text.layout
+        val besideWidth = l.getLineRight(0) - l.getLineLeft(0)
+        val last = (0 until l.lineCount).last { l.getLineTop(it) > pic.rect.bottom - text.y + DocxLayout.U * 14 && it < l.lineCount - 1 }
+        val belowWidth = l.getLineRight(last) - l.getLineLeft(last)
+        assertTrue("beside $besideWidth below $belowWidth", besideWidth < belowWidth * 0.8f)
+        // No text line runs into the picture
+        for (i in 0 until l.lineCount) if (text.y + l.getLineTop(i) < pic.rect.bottom) assertTrue(text.x + l.getLineRight(i) <= pic.rect.left + 1f)
+    }
+
     /** The bundled fonts must really be used: Carlito is narrower than the system sans font. */
     @Test fun bundledFontsAreLoaded() {
         val sample = "Постачальник зобов'язується передати товар"

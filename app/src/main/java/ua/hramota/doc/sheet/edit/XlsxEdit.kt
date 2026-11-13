@@ -59,6 +59,10 @@ class XlsxEdit private constructor(
     private val stylesXml: String?,
     /** Parts that may point at rows (charts, pivot tables, slicers): while there are any, rows are not inserted or deleted. */
     private val rowBlockers: Boolean,
+    /** Sheets' relationships, comments and old-style drawings, as text (for notes added here). */
+    private val extra: Map<String, String> = emptyMap(),
+    /** Every part's name in the package (a new part gets a name not used). */
+    private val entryNames: Set<String> = emptySet(),
 ) {
     /**
      * The workbook's parts as they stand after rows were inserted or deleted (the file's own until
@@ -75,7 +79,7 @@ class XlsxEdit private constructor(
     }
 
     /** What undo needs to go back to: the parts and the typed cells. */
-    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>, internal val looks: Map<CellKey, CellLook> = emptyMap(), internal val widths: Map<Pair<Int, Int>, Float> = emptyMap())
+    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>, internal val looks: Map<CellKey, CellLook> = emptyMap(), internal val widths: Map<Pair<Int, Int>, Float> = emptyMap(), internal val notes: Map<CellKey, String> = emptyMap())
 
     @Volatile private var layout: Layout = first
     val sheets: List<SheetPart> get() = layout.sheets
@@ -123,6 +127,15 @@ class XlsxEdit private constructor(
     private val looks = HashMap<CellKey, CellLook>()
     /** Column widths set here, in characters (as Excel keeps them): (sheet, column) to width. */
     private val widths = HashMap<Pair<Int, Int>, Float>()
+
+    private val notes = HashMap<CellKey, String>()
+
+    /** Notes added here (Excel's comments), cell by cell (a copy). */
+    val noteChanges: Map<CellKey, String> @Synchronized get() = HashMap(notes)
+
+    /** Puts a note on a cell (null: none added here). */
+    @Synchronized
+    fun setNote(cell: CellKey, text: String?) { if (text == null) notes.remove(cell) else notes[cell] = text.take(MAX_NOTE) }
 
     /** Looks changed here, cell by cell (a copy). */
     val lookChanges: Map<CellKey, CellLook> @Synchronized get() = HashMap(looks)
@@ -391,13 +404,14 @@ class XlsxEdit private constructor(
     /** About how much text the workbook's sheets hold (undo of row changes keeps copies of it). */
     val size: Long get() = layout.sheets.sumOf { it.xml.length.toLong() }
 
-    @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs), HashMap(looks), HashMap(widths))
+    @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs), HashMap(looks), HashMap(widths), HashMap(notes))
 
     @Synchronized fun restore(s: Snapshot) {
         layout = s.layout
         inputs.clear(); inputs.putAll(s.inputs)
         looks.clear(); looks.putAll(s.looks)
         widths.clear(); widths.putAll(s.widths)
+        notes.clear(); notes.putAll(s.notes)
         parsedInputs.clear()
         for ((k, i) in inputs) if (i is Input.Formula) parsedInputs[k] = Formula.parse(i.text)
     }
@@ -427,6 +441,8 @@ class XlsxEdit private constructor(
         if (top.any { it.local in SHEET_BLOCKERS }) return RowRefusal.SHEET
         top.firstOrNull { it.local == "extLst" }?.let { e -> if (x.substring(e.start, e.end).let { it.contains("sqref") || it.contains(":f>") || it.contains(":f ") }) return RowRefusal.SHEET }
         if (target.lockedAreas.isNotEmpty() || target.lockedShared.isNotEmpty() || target.cells.values.any { it.fKind == "array" || it.fKind == "dataTable" }) return RowRefusal.LOCKED
+        // Notes added here are anchored to their cells as the file will have them
+        if (notes.keys.any { it.sheet == sheet }) return RowRefusal.SHEET
         if (n > 0) {
             val last = if (cols) maxOf(target.cells.keys.maxOfOrNull { (it and 0x3FFF).toInt() } ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.col } ?: -1)
                 else maxOf(target.rows.lastEntry()?.key ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.row } ?: -1)
@@ -711,6 +727,7 @@ class XlsxEdit private constructor(
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
         val lookNow: Map<CellKey, CellLook> = synchronized(this) { HashMap(looks) }
         val widthNow: Map<Pair<Int, Int>, Float> = synchronized(this) { HashMap(widths) }
+        val notesNow: Map<CellKey, String> = synchronized(this) { HashMap(notes) }
         val inputs = snapshot.first
         val values = recalcOf(snapshot)
         val l = snapshot.third
@@ -743,6 +760,51 @@ class XlsxEdit private constructor(
             if (ownWidths.isNotEmpty()) xml = Styles.widths(xml, ownWidths)
             parts[sh.path] = xml
         }
+        // Notes: into the sheet's comments part and old-style drawing (made when the sheet has none)
+        val added = LinkedHashSet<String>()
+        if (notesNow.isNotEmpty()) {
+            val names = HashSet(entryNames)
+            fun free(pattern: (Int) -> String): Pair<String, Int> { var n = 1; while (pattern(n).lowercase() in names.map { it.lowercase() }) n++; return pattern(n).also { names += it } to n }
+            var types = typesXml ?: throw IOException("No content types")
+            for ((si, sh) in sheets.withIndex()) {
+                val mine = notesNow.filterKeys { it.sheet == si }.map { (k, v) -> SheetComments.Note(k.row, k.col, v) }.sortedWith(compareBy({ it.row }, { it.col }))
+                if (mine.isEmpty()) continue
+                val dir = sh.path.substringBeforeLast('/')
+                val relsPath = dir + "/_rels/" + sh.path.substringAfterLast('/') + ".rels"
+                var rels = parts[relsPath] ?: extra[relsPath]
+                fun target(type: String): String? = rels?.let { r ->
+                    val root = XmlScan.children(r, 0, r.length).firstOrNull() ?: return@let null
+                    XmlScan.children(r, root).firstOrNull { it.local == "Relationship" && it.attrs["Type"] == type && it.attrs["TargetMode"] != "External" }?.attrs?.get("Target")
+                        ?.let { t -> if (t.startsWith("/")) t.removePrefix("/") else java.io.File(dir, t).normalize().path.replace('\\', '/') }
+                }
+                var sheetXml = parts[sh.path] ?: sh.xml
+                // The comments part
+                val commentsPath = target(SheetComments.COMMENTS_TYPE) ?: free { "xl/comments$it.xml" }.first.also { path ->
+                    rels = SheetComments.addRel(rels, SheetComments.COMMENTS_TYPE, "../" + path.removePrefix("xl/")).first
+                    added += path
+                }
+                parts[commentsPath] = SheetComments.comments(parts[commentsPath] ?: extra[commentsPath], mine, AUTHOR)
+                // The old-style drawing Excel shows the notes with
+                val vmlExisting = target(SheetComments.VML_TYPE)
+                if (vmlExisting != null) {
+                    val had = parts[vmlExisting] ?: extra[vmlExisting]
+                    if (had != null) parts[vmlExisting] = SheetComments.vml(had, mine, 1)
+                } else {
+                    val (path, n) = free { "xl/drawings/vmlDrawing$it.vml" }
+                    parts[path] = SheetComments.vml(null, mine, n)
+                    added += path
+                    val (text, id) = SheetComments.addRel(rels, SheetComments.VML_TYPE, "../drawings/" + path.substringAfterLast('/'))
+                    rels = text
+                    if (Regex("<(?:[A-Za-z_][\\w.-]*:)?legacyDrawing\\b").containsMatchIn(sheetXml)) throw IOException("Unusual notes")
+                    sheetXml = SheetComments.legacyDrawing(sheetXml, id)
+                    parts[sh.path] = sheetXml
+                }
+                if (relsPath !in extra && relsPath !in parts) added += relsPath
+                parts[relsPath] = rels!!
+                types = SheetComments.types(types, commentsPath)
+            }
+            parts["[Content_Types].xml"] = types
+        }
         // Nothing changed (all undone): the file is written as it was
         if (parts.isEmpty() && !l.moved) { copy(source, out, emptyMap(), emptySet()); return }
         // Excel works every formula out again when it opens the file (formulas not done here included)
@@ -752,9 +814,9 @@ class XlsxEdit private constructor(
         if (calcChain != null && formulasChanged) {
             dropped += calcChain
             relsXml?.let { r -> parts["xl/_rels/workbook.xml.rels"] = removeElems(r, "Relationship") { it["Type"]?.endsWith("/calcChain") == true } }
-            typesXml?.let { t -> parts["[Content_Types].xml"] = removeElems(t, "Override") { it["PartName"]?.removePrefix("/") == calcChain } }
+            (parts["[Content_Types].xml"] ?: typesXml)?.let { t -> parts["[Content_Types].xml"] = removeElems(t, "Override") { it["PartName"]?.removePrefix("/") == calcChain } }
         }
-        copy(source, out, parts, dropped)
+        copy(source, out, parts, dropped, added)
     }
 
     private fun writeSheet(si: Int, sh: SheetPart, keys: List<CellKey>, values: Map<CellKey, Value>, inputs: Map<CellKey, Input>, styleOf: Map<CellKey, String> = emptyMap()): String {
@@ -896,7 +958,7 @@ class XlsxEdit private constructor(
         return b.append(x, pos, x.length).toString()
     }
 
-    private fun copy(source: InputStream, out: OutputStream, parts: Map<String, String>, dropped: Set<String>) {
+    private fun copy(source: InputStream, out: OutputStream, parts: Map<String, String>, dropped: Set<String>, added: Set<String> = emptySet()) {
         val written = HashSet<String>()
         var total = 0L
         ZipInputStream(source).use { zip ->
@@ -927,6 +989,8 @@ class XlsxEdit private constructor(
                 }
                 z.closeEntry()
             }
+            // Parts made here (notes): written after the file's own
+            for (name in added) if (name !in written) { z.putNextEntry(ZipEntry(name)); z.write(parts.getValue(name).toByteArray(Charsets.UTF_8)); z.closeEntry(); written += name }
             for (name in parts.keys) if (name !in written) throw IOException("$name missing")
             z.finish(); z.flush()
         }
@@ -940,6 +1004,9 @@ class XlsxEdit private constructor(
         const val MAX_CELLS = 400_000
         private const val MAX_TOTAL = 1024L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
+        const val MAX_NOTE = 5000
+        /** Who notes added here are by: the app, never the person's name. */
+        const val AUTHOR = "Hramota"
 
         /** Parts that can point at a sheet's rows from outside it, and are not moved here. */
         /** A sheet with these is not changed in its rows: what they hold is anchored to rows in other parts. */
@@ -952,6 +1019,7 @@ class XlsxEdit private constructor(
         /** Opens an XLSX for editing. Call off the main thread. */
         fun open(input: InputStream): XlsxEdit {
             val raw = HashMap<String, ByteArray>()
+            val names = HashSet<String>()
             var blockers = false
             ZipInputStream(input).use { zip ->
                 var count = 0
@@ -960,11 +1028,13 @@ class XlsxEdit private constructor(
                     val e = zip.nextEntry ?: break
                     if (++count > MAX_ENTRIES) throw IOException("Too many entries")
                     val name = e.name.removePrefix("/")
+                    names += name
                     val lower = name.lowercase()
                     if (ROW_BLOCKERS.any { lower.startsWith(it) }) blockers = true
                     if (lower.endsWith(".xml") && (lower.startsWith("xl/worksheets/") || lower.startsWith("xl/tables/") || lower == "xl/workbook.xml" || lower == "xl/sharedstrings.xml") ||
                         lower.startsWith("xl/worksheets/_rels/") && lower.endsWith(".rels") ||
-                        lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml" || lower.startsWith("xl/") && lower.endsWith("styles.xml") && lower.count { it == '/' } == 1) {
+                        lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml" ||
+                        lower.startsWith("xl/") && lower.endsWith(".vml") || lower.startsWith("xl/") && lower.substringAfterLast('/').startsWith("comments") && lower.endsWith(".xml") || lower.startsWith("xl/") && lower.endsWith("styles.xml") && lower.count { it == '/' } == 1) {
                         val b = readAll(zip, MAX_PART)
                         total += b.size
                         if (total > MAX_TOTAL / 4) throw IOException("Too large to edit")
@@ -1018,7 +1088,10 @@ class XlsxEdit private constructor(
             }
             if (parts.isEmpty()) throw IOException("No sheets")
             val stylesPath = relTargets.values.firstOrNull { it.second.endsWith("/styles") }?.first
-            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, stylesPath, stylesPath?.let(::text), blockers)
+            // Sheets' relationships, comments and old-style drawings, kept as text for notes added here
+            val extra = raw.keys.filter { k -> val lower = k.lowercase(); lower.endsWith(".rels") && lower.startsWith("xl/worksheets/_rels/") || lower.endsWith(".vml") || lower.substringAfterLast('/').startsWith("comments") }
+                .associateWith { k -> if (k.lowercase().endsWith(".vml")) String(raw.getValue(k), Charsets.UTF_8) else text(k)!! }
+            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, stylesPath, stylesPath?.let(::text), blockers, extra, names)
         }
 
         private fun sheet(name: String, path: String, visible: Boolean, xml: String, budget: Int): SheetPart {

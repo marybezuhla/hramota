@@ -336,6 +336,10 @@
     <string name="rows_insert_above">Insert row above</string>
     <string name="rows_insert_below">Insert row below</string>
     <string name="rows_delete">Delete row %1$d</string>
+    <string name="cell_note_add">Add comment</string>
+    <string name="cell_note_change">Change comment</string>
+    <string name="cell_note_title">Comment</string>
+    <string name="cell_note_hint">What would you like to note?</string>
     <string name="cols_insert_left">Insert column left</string>
     <string name="cols_insert_right">Insert column right</string>
     <string name="cols_delete">Delete column %1$s</string>

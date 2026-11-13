@@ -163,6 +163,18 @@ class PptxEdit private constructor(
         return list
     }
 
+    // ---- Comments ----
+
+    private val comments = HashMap<Int, List<String>>()
+
+    /** Comments added here to [slide] (numbers as [addSlide] gives them). */
+    @Synchronized fun addedComments(slide: Int): List<String> = comments[slide].orEmpty()
+
+    /** Sets the comments added here to [slide] (an empty list: none). Written when saving. */
+    @Synchronized fun setComments(slide: Int, list: List<String>) {
+        if (list.isEmpty()) comments.remove(slide) else comments[slide] = list.map { it.take(MAX_COMMENT) }.take(200)
+    }
+
     // ---- Shapes: moved, sized, taken out; text boxes and pictures added ----
 
     /** A shape placed on a slide: the slide's number (as [addSlide] gives it) and the shape's id there. */
@@ -459,6 +471,9 @@ class PptxEdit private constructor(
             for (nn in notesKept) created += nn.path
             pack.linkNotes(notesKept.map { Triple(slidePath(it.slide), it.path, notesMaster!!) }, changed, created)
         }
+        // Comments added: into the slide's comments part (made if it has none), by the app as their author
+        val withComments = comments.filterKeys { it in kept }.filterValues { it.isNotEmpty() }
+        if (withComments.isNotEmpty()) pack.linkComments(withComments.entries.sortedBy { it.key }.map { (slide, list) -> parts[partOf(slide)].first to list }, AUTHOR, changed, created)
         copy(source, out, changed, drop, created, files)
     }
 
@@ -522,6 +537,9 @@ class PptxEdit private constructor(
         private const val MAX_PART = 16L * 1024 * 1024
         private const val MAX_TOTAL = 1024L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
+        const val MAX_COMMENT = 5000
+        /** Who comments added here are by: the app, never the person's name. */
+        const val AUTHOR = "Hramota"
 
         /** Opens a PPTX for editing its text. Call off the main thread. */
         fun open(input: InputStream): PptxEdit {
@@ -540,7 +558,8 @@ class PptxEdit private constructor(
                     // links (all of them: what only a slide taken out used is found through them) and the layouts
                     if (lower == "ppt/presentation.xml" || lower == "[content_types].xml" || lower.endsWith(".rels") ||
                         lower == "ppt/viewprops.xml" || lower.startsWith("ppt/slides/") && lower.endsWith(".xml") || lower.startsWith("ppt/slidelayouts/") && lower.endsWith(".xml") ||
-                        lower.startsWith("ppt/notesslides/") && lower.endsWith(".xml")) {
+                        lower.startsWith("ppt/notesslides/") && lower.endsWith(".xml") ||
+                        lower == "ppt/commentauthors.xml" || lower.startsWith("ppt/comments/") && lower.endsWith(".xml")) {
                         // The same name twice: which one is meant cannot be told; not edited
                         if (raw.containsKey(name)) throw IOException("Duplicate entry $name")
                         val b = readAll(zip, MAX_PART)
@@ -623,7 +642,8 @@ class PptxEdit private constructor(
             val digests = raw.mapValues { (_, b) -> MessageDigest.getInstance("SHA-256").digest(b) }
             val pack = Pack(
                 pres = pres, entries = entries, shown = shownSlides, names = names,
-                texts = raw.keys.filter { it.lowercase().endsWith(".rels") || it.lowercase() == "[content_types].xml" || it.lowercase() == "ppt/viewprops.xml" || it.lowercase().startsWith("ppt/slidelayouts/") && !it.lowercase().endsWith(".rels") }
+                texts = raw.keys.filter { it.lowercase().endsWith(".rels") || it.lowercase() == "[content_types].xml" || it.lowercase() == "ppt/viewprops.xml" || it.lowercase().startsWith("ppt/slidelayouts/") && !it.lowercase().endsWith(".rels") ||
+                    it.lowercase() == "ppt/commentauthors.xml" || it.lowercase().startsWith("ppt/comments/") }
                     .associateWith { text(it)!! },
             )
             return PptxEdit(parts, digests, prefixes, boxes, paras, shown, pack, partSlide, notesParts, notesMaster, notesLinked)
