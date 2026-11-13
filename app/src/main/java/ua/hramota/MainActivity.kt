@@ -1,5 +1,6 @@
 package ua.hramota
 
+import androidx.compose.foundation.verticalScroll
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
