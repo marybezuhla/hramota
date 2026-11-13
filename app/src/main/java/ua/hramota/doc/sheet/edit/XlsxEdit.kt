@@ -409,7 +409,13 @@ class XlsxEdit private constructor(
      * otherwise why not (nothing is changed then). Call off the main thread.
      */
     @Synchronized
-    fun moveRows(sheet: Int, at: Int, n: Int): RowRefusal? {
+    fun moveRows(sheet: Int, at: Int, n: Int): RowRefusal? = move(sheet, at, n, false)
+
+    /** As [moveRows], for columns: [n] columns inserted before column [at], or [-n] deleted from it. */
+    @Synchronized
+    fun moveColumns(sheet: Int, at: Int, n: Int): RowRefusal? = move(sheet, at, n, true)
+
+    private fun move(sheet: Int, at: Int, n: Int, cols: Boolean): RowRefusal? {
         if (n == 0) return null
         if (rowBlockers) return RowRefusal.WORKBOOK
         val l = layout
@@ -422,14 +428,17 @@ class XlsxEdit private constructor(
         top.firstOrNull { it.local == "extLst" }?.let { e -> if (x.substring(e.start, e.end).let { it.contains("sqref") || it.contains(":f>") || it.contains(":f ") }) return RowRefusal.SHEET }
         if (target.lockedAreas.isNotEmpty() || target.lockedShared.isNotEmpty() || target.cells.values.any { it.fKind == "array" || it.fKind == "dataTable" }) return RowRefusal.LOCKED
         if (n > 0) {
-            val last = maxOf(target.rows.lastEntry()?.key ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.row } ?: -1)
-            if (last + n >= 1_048_576) return RowRefusal.FULL
+            val last = if (cols) maxOf(target.cells.keys.maxOfOrNull { (it and 0x3FFF).toInt() } ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.col } ?: -1)
+                else maxOf(target.rows.lastEntry()?.key ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.row } ?: -1)
+            if (last + n >= (if (cols) 16_384 else 1_048_576)) return RowRefusal.FULL
         }
-        val move = Formula.RowMove(at, n)
+        val move = Formula.RowMove(at, n, cols)
+        // A cell's new place on the target sheet (null: deleted)
+        fun moved(k: CellKey): CellKey? = if (k.sheet != sheet) k else if (cols) move.row(k.col)?.let { k.copy(col = it) } else move.row(k.row)?.let { k.copy(row = it) }
         val name = target.name
         try {
             val forced = HashSet<CellKey>()
-            for (k in l.forced) if (k.sheet != sheet) forced += k else move.row(k.row)?.let { forced += k.copy(row = it) }
+            for (k in l.forced) moved(k)?.let { forced += it }
             val newSheets = ArrayList<SheetPart>(l.sheets.size)
             val overrides = HashMap(l.overrides)
             for ((si, sh) in l.sheets.withIndex()) {
@@ -446,12 +455,18 @@ class XlsxEdit private constructor(
             // What was typed moves with its row; formulas typed follow too
             val newInputs = HashMap<CellKey, Input>()
             for ((k, i) in inputs) {
-                val key = if (k.sheet != sheet) k else move.row(k.row)?.let { k.copy(row = it) } ?: continue
+                val key = moved(k) ?: continue
                 newInputs[key] = if (i is Input.Formula) Input.Formula(Formula.moveRows(i.text, k.sheet == sheet, name, move) ?: throw Refused(RowRefusal.FORMULAS)) else i
             }
             val newLooks = HashMap<CellKey, CellLook>()
-            for ((k, v) in looks) { val key = if (k.sheet != sheet) k else move.row(k.row)?.let { k.copy(row = it) } ?: continue; newLooks[key] = v }
+            for ((k, v) in looks) { val key = moved(k) ?: continue; newLooks[key] = v }
             looks.clear(); looks.putAll(newLooks)
+            // Widths set here follow their columns
+            if (cols) {
+                val newWidths = HashMap<Pair<Int, Int>, Float>()
+                for ((k, v) in widths) { val key = if (k.first != sheet) k else move.row(k.second)?.let { k.first to it } ?: continue; newWidths[key] = v }
+                widths.clear(); widths.putAll(newWidths)
+            }
             layout = Layout(newSheets, wb, overrides, forced, true)
             // The old parts stay only for undo: their worked-out lists are made again if needed
             l.calc = null
@@ -474,6 +489,16 @@ class XlsxEdit private constructor(
             if (a.isEmpty()) continue
             val m = Regex("(\\$?[A-Za-z]{1,3})(\\$?)([0-9]{1,7})(?::(\\$?[A-Za-z]{1,3})(\\$?)([0-9]{1,7}))?").matchEntire(a) ?: run { out += a; null } ?: continue
             val g = m.groupValues
+            if (move.cols) {
+                fun letters(t: String) = t.removePrefix("$").uppercase()
+                fun dollar(t: String) = if (t.startsWith("$")) "$" else ""
+                val c1 = Formula.colIndex(letters(g[1]))
+                if (g[4].isEmpty()) { move.row(c1)?.let { out += dollar(g[1]) + columnName(it) + g[2] + g[3] }; continue }
+                val c2 = Formula.colIndex(letters(g[4]))
+                val (l, rt) = move.range(minOf(c1, c2), maxOf(c1, c2)) ?: continue
+                out += dollar(g[1]) + columnName(l) + g[2] + g[3] + ":" + dollar(g[4]) + columnName(rt) + g[5] + g[6]
+                continue
+            }
             val r1 = g[3].toInt() - 1
             if (g[4].isEmpty()) { move.row(r1)?.let { out += g[1] + g[2] + (it + 1) }; continue }
             val r2 = g[6].toInt() - 1
@@ -535,7 +560,7 @@ class XlsxEdit private constructor(
                         if (!e.selfClosing) {
                             var at = e.openEnd
                             for ((r, rowElem) in sh.rows) {
-                                val nr = if (isTarget) move.row(r) else r
+                                val nr = if (isTarget && !move.cols) move.row(r) else r
                                 b.append(x, at, rowElem.start); at = rowElem.end
                                 if (nr == null) { edited = true; continue }
                                 val cells = XmlScan.children(x, rowElem)
@@ -546,6 +571,8 @@ class XlsxEdit private constructor(
                                 edited = true
                                 var tag = x.substring(rowElem.start, rowElem.openEnd)
                                 if (isTarget) tag = setAttr(tag, "r", (nr + 1).toString())
+                                // Which columns the row spans: a hint Excel makes again
+                                if (isTarget && move.cols) tag = tag.replace(Regex("\\sspans=(?:\"[^\"]*\"|'[^']*')"), "")
                                 b.append(tag)
                                 if (rowElem.selfClosing) continue
                                 var cpos = rowElem.openEnd
@@ -555,12 +582,15 @@ class XlsxEdit private constructor(
                                     if (c.local != "c") { b.append(x, c.start, c.end); continue }
                                     val col = c.attrs["r"]?.let { ua.hramota.doc.sheet.columnOf(it) }?.takeIf { it >= 0 } ?: nextCol
                                     nextCol = col + 1
+                                    val nc = if (isTarget && move.cols) move.row(col) else col
+                                    // A cell of a deleted column goes
+                                    if (nc == null) { edited = true; continue }
                                     val raw = sh.cell(r, col)
-                                    val ctag = setAttr(x.substring(c.start, c.openEnd), "r", columnName(col) + (nr + 1))
+                                    val ctag = setAttr(x.substring(c.start, c.openEnd), "r", columnName(nc) + (nr + 1))
                                     val text = newText[key(r, col)]
                                     if (raw?.fElem != null && text != null) {
                                         // Worked out again only where the formula itself changed (the rest keep their values)
-                                        if (key(r, col) in textChanged) changed += key(nr, col)
+                                        if (key(r, col) in textChanged) changed += key(nr, nc)
                                         b.append(ctag).append(x, c.openEnd, raw.fElem.start).append(newF(raw, text)).append(x, raw.fElem.end, c.end)
                                     } else b.append(ctag).append(x, c.openEnd, c.end)
                                 }
@@ -605,16 +635,24 @@ class XlsxEdit private constructor(
                         tag = setAttr(tag, "sqref", movedAreas(ref, move) ?: return null)
                         // Formulas here are written for the area's first cell: when its row goes, they are
                         // written for the first row left first (as Excel does), then moved
-                        val top = ref.trim().split(Regex("\\s+")).firstOrNull()?.let(::area)?.get(0)
+                        val top = ref.trim().split(Regex("\\s+")).firstOrNull()?.let(::area)?.get(if (move.cols) 1 else 0)
                         if (top != null && move.n < 0 && move.row(top) == null) base = intArrayOf(top, move.at - move.n)
                     }
                 }
                 // Which cell was chosen: Excel chooses again
                 "selection" -> return null
-                "pane" -> e.attrs["topLeftCell"]?.let { t -> tag = setAttr(tag, "topLeftCell", movedAreas(t, move) ?: (Regex("[A-Za-z]+").find(t)?.value ?: "A") + (move.at + 1)) }
-                "brk" -> if (parent == "rowBreaks") {
+                "pane" -> e.attrs["topLeftCell"]?.let { t -> tag = setAttr(tag, "topLeftCell", movedAreas(t, move) ?: if (move.cols) columnName(move.at) + (Regex("[0-9]+").find(t)?.value ?: "1") else (Regex("[A-Za-z]+").find(t)?.value ?: "A") + (move.at + 1)) }
+                "brk" -> if (parent == (if (move.cols) "colBreaks" else "rowBreaks")) {
                     val id = e.attrs["id"]?.toIntOrNull()
                     if (id != null && id > 0) tag = setAttr(tag, "id", ((move.row(id - 1) ?: return null) + 1).toString())
+                }
+                // Columns' widths and looks follow their columns
+                "col" -> if (parent == "cols" && move.cols) {
+                    val mn = e.attrs["min"]?.toIntOrNull(); val mx = e.attrs["max"]?.toIntOrNull()
+                    if (mn != null && mx != null && mn >= 1 && mx >= mn) {
+                        val (a, b) = move.range(mn - 1, mx - 1) ?: return null
+                        tag = setAttr(setAttr(tag, "min", (a + 1).toString()), "max", (b + 1).toString())
+                    }
                 }
             }
         }
@@ -623,7 +661,7 @@ class XlsxEdit private constructor(
         // A formula's text (in x14 extensions the text is in an "xm:f" inside)
         if (kids.isEmpty() && (e.local == "formula" || e.local == "formula1" || e.local == "formula2" || e.local == "f")) {
             var text = XmlScan.unescape(x.substring(e.openEnd, e.closeStart))
-            if (base != null) text = Formula.shift(text, base[0], 0, base[1], 0)
+            if (base != null) text = if (move.cols) Formula.shift(text, 0, base[0], 0, base[1]) else Formula.shift(text, base[0], 0, base[1], 0)
             return tag + XmlScan.escape(moved(text, isTarget, target, move)) + x.substring(e.closeStart, e.end)
         }
         if (kids.isEmpty()) return tag + x.substring(e.openEnd, e.end)
@@ -906,7 +944,7 @@ class XlsxEdit private constructor(
         /** Parts that can point at a sheet's rows from outside it, and are not moved here. */
         /** A sheet with these is not changed in its rows: what they hold is anchored to rows in other parts. */
         private val SHEET_BLOCKERS = setOf("drawing", "legacyDrawing", "tableParts", "oleObjects", "controls", "customSheetViews", "scenarios")
-        private val LISTS = setOf("mergeCells", "conditionalFormatting", "dataValidations", "hyperlinks", "protectedRanges", "ignoredErrors", "rowBreaks", "sortState")
+        private val LISTS = setOf("mergeCells", "conditionalFormatting", "dataValidations", "hyperlinks", "protectedRanges", "ignoredErrors", "rowBreaks", "colBreaks", "sortState", "cols")
         private val ROW_BLOCKERS = listOf("xl/charts/", "xl/chartsheets/", "xl/pivotcache/", "xl/pivottables/", "xl/slicers/", "xl/slicercaches/", "xl/timelines/", "xl/timelinecaches/", "xl/querytables/", "xl/model/", "xl/richdata/")
 
         internal fun key(row: Int, col: Int): Long = (row.toLong() shl 14) or col.toLong()

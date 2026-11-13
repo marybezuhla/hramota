@@ -235,23 +235,28 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
      * shown sheet [sheet]. Everything that refers to the rows follows; when that cannot be done here,
      * [notice] says why and nothing changes.
      */
-    suspend fun rows(sheet: Int, row: Int, delete: Boolean, below: Boolean = false) {
+    suspend fun rows(sheet: Int, row: Int, delete: Boolean, below: Boolean = false) =
+        lines(sheet, if (delete || !below) row else row + 1, if (delete) -1 else 1, cols = false)
+
+    /** As [rows], for a column: inserted on the left ([right] false) or right of column [col], or deleted. */
+    suspend fun columns(sheet: Int, col: Int, delete: Boolean, right: Boolean = false) =
+        lines(sheet, if (delete || !right) col else col + 1, if (delete) -1 else 1, cols = true)
+
+    private suspend fun lines(sheet: Int, at: Int, n: Int, cols: Boolean) {
         if (busy) return
         val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
         // Anything typed was put in before (or dropped): it must not land in a row that moved
         draft = null; typing = false
-        val at = if (delete || !below) row else row + 1
-        val n = if (delete) -1 else 1
         busy = true
         // Finished even when the screen goes meanwhile (turned): a half-done change would leave the shown rows behind the workbook
         try { withContext(kotlinx.coroutines.NonCancellable) {
             val before = edit.snapshot()
             val shownBefore = original
-            val refusal = try { withContext(Dispatchers.Default) { edit.moveRows(s, at, n) } }
+            val refusal = try { withContext(Dispatchers.Default) { if (cols) edit.moveColumns(s, at, n) else edit.moveRows(s, at, n) } }
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
-            if (refusal != null) { notice = refusalText(refusal); return@withContext }
-            original = try { withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) sh.withRowsMoved(at, n) else sh }, original.inspection, charts = original.charts, comments = original.comments) } }
+            if (refusal != null) { notice = if (cols && refusal == XlsxEdit.RowRefusal.FULL) R.string.cols_refused_full else refusalText(refusal); return@withContext }
+            original = try { withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) (if (cols) sh.withColumnsMoved(at, n) else sh.withRowsMoved(at, n)) else sh }, original.inspection, charts = original.charts, comments = original.comments) } }
                 catch (e: kotlinx.coroutines.CancellationException) { edit.restore(before); throw e }
                 catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
             push(RowStep(before, edit.snapshot(), shownBefore, original))
@@ -567,6 +572,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     content = state::content, commit = state::commit, enabled = !saving && !state.busy,
                     draft = state::draft, leave = state::flush, discard = state::discard, version = state.version,
                     rows = { sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } },
+                    columns = { sheet, col, delete, right -> scope.launch { state.columns(sheet, col, delete, right) } },
                     cellActions = { sheet, row, col ->
                         val ctx = context
                         listOfNotNull(

@@ -260,18 +260,20 @@ object Formula {
     }
 
     /** Rows inserted ([n] > 0) or deleted ([n] < 0) at row [at] (from 0), as Excel moves what refers to them. */
-    class RowMove(val at: Int, val n: Int) {
-        /** The row's new number; null when it was deleted. */
+    /** Rows (or, with [cols], columns) inserted ([n] > 0) before [at] or deleted ([n] < 0) from it. */
+    class RowMove(val at: Int, val n: Int, val cols: Boolean = false) {
+        private val max = if (cols) MAX_COLS else MAX_ROWS
+        /** The row's (column's) new number; null when it was deleted. */
         fun row(r: Int): Int? = when {
             r < at -> r
-            n > 0 -> (r + n).takeIf { it < MAX_ROWS }
+            n > 0 -> (r + n).takeIf { it < max }
             r < at - n -> null
             else -> r + n
         }
 
         /** A range of rows afterwards: it grows or shrinks with rows inside it; null when all of it was deleted. */
         fun range(top: Int, bottom: Int): Pair<Int, Int>? {
-            if (n > 0) return (if (top >= at) top + n else top).coerceAtMost(MAX_ROWS - 1) to (if (bottom >= at) bottom + n else bottom).coerceAtMost(MAX_ROWS - 1)
+            if (n > 0) return (if (top >= at) top + n else top).coerceAtMost(max - 1) to (if (bottom >= at) bottom + n else bottom).coerceAtMost(max - 1)
             val end = at - n
             val t = when { top < at -> top; top >= end -> top + n; else -> at }
             val b = when { bottom < at -> bottom; bottom >= end -> bottom + n; else -> at - 1 }
@@ -280,9 +282,10 @@ object Formula {
     }
 
     private const val MAX_ROWS = 1_048_576
+    private const val MAX_COLS = 16_384
     private val CELL_RANGE = Regex("(\\$?)([A-Za-z]{1,3})(\\$?)([0-9]{1,7})(?::(\\$?)([A-Za-z]{1,3})(\\$?)([0-9]{1,7}))?")
     private val ROW_RANGE = Regex("(\\$?)([0-9]{1,7}):(\\$?)([0-9]{1,7})")
-    private val COL_RANGE = Regex("\\$?[A-Za-z]{1,3}:\\$?[A-Za-z]{1,3}")
+    private val COL_RANGE = Regex("(\\$?)([A-Za-z]{1,3}):(\\$?)([A-Za-z]{1,3})")
 
     /**
      * The formula after rows moved on sheet [target]: references to it (and, when [own] is true, those
@@ -340,11 +343,21 @@ object Formula {
             val prevOk = named != null || i == 0 || !(text[i - 1].isLetterOrDigit() || text[i - 1] == '_' || text[i - 1] == '.' || text[i - 1] == '\'' || text[i - 1] == ']')
             val applies = if (named != null) !ext && named.equals(target, ignoreCase = true) else own && !ext
             if (prevOk) {
-                val cr = COL_RANGE.matchAt(text, i)
-                if (cr != null && boundaryAfter(i + cr.value.length)) { b.append(cr.value); i += cr.value.length; continue }
+                val cr = COL_RANGE.matchAt(text, i)?.takeIf { colIndex(it.groupValues[2].uppercase()) < MAX_COLS && colIndex(it.groupValues[4].uppercase()) < MAX_COLS }
+                if (cr != null && boundaryAfter(i + cr.value.length)) {
+                    // Whole columns (A:C): moved when columns move
+                    if (!applies || !move.cols) b.append(cr.value) else {
+                        val g = cr.groupValues
+                        val l = colIndex(g[2].uppercase()); val rt = colIndex(g[4].uppercase())
+                        val moved = move.range(minOf(l, rt), maxOf(l, rt))
+                        if (moved == null || moved.second - moved.first != maxOf(l, rt) - minOf(l, rt)) affected?.set(0, true)
+                        if (moved == null) b.append("#REF!") else b.append(g[1]).append(ua.hramota.doc.sheet.columnName(moved.first)).append(':').append(g[3]).append(ua.hramota.doc.sheet.columnName(moved.second))
+                    }
+                    i += cr.value.length; continue
+                }
                 val rr = ROW_RANGE.matchAt(text, i)
                 if (rr != null && boundaryAfter(i + rr.value.length) && (i == 0 || !text[i - 1].isDigit())) {
-                    if (!applies) b.append(rr.value) else {
+                    if (!applies || move.cols) b.append(rr.value) else {
                         val g = rr.groupValues
                         val top = g[2].toInt() - 1; val bottom = g[4].toInt() - 1
                         val moved = move.range(minOf(top, bottom), maxOf(top, bottom))
@@ -359,6 +372,23 @@ object Formula {
                 if (m != null && boundaryAfter(i + m.value.length)) {
                     val g = m.groupValues
                     if (!applies) b.append(m.value)
+                    else if (move.cols) {
+                        // Columns moved: the letters follow, the rows stay
+                        val c1 = colIndex(g[2].uppercase())
+                        if (g[6].isEmpty()) {
+                            val c = move.row(c1)
+                            if (c == null) { affected?.set(0, true); b.append("#REF!") } else b.append(g[1]).append(ua.hramota.doc.sheet.columnName(c)).append(g[3]).append(g[4])
+                        } else {
+                            val c2 = colIndex(g[6].uppercase())
+                            val moved = move.range(minOf(c1, c2), maxOf(c1, c2))
+                            if (moved == null || moved.second - moved.first != maxOf(c1, c2) - minOf(c1, c2)) affected?.set(0, true)
+                            if (moved == null) b.append("#REF!")
+                            else {
+                                val (l, rt) = if (c1 <= c2) moved else moved.second to moved.first
+                                b.append(g[1]).append(ua.hramota.doc.sheet.columnName(l)).append(g[3]).append(g[4]).append(':').append(g[5]).append(ua.hramota.doc.sheet.columnName(rt)).append(g[7]).append(g[8])
+                            }
+                        }
+                    }
                     else if (g[6].isEmpty()) {
                         val r = move.row(g[4].toInt() - 1)
                         if (r == null) affected?.set(0, true)

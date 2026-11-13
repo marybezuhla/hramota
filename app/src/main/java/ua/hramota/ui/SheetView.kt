@@ -509,6 +509,8 @@ class SheetEditing(
     val enabled: Boolean = true,
     /** Inserts a row above or below ([below]), or deletes it ([delete]); null where rows are not changed. */
     val rows: ((sheet: Int, row: Int, delete: Boolean, below: Boolean) -> Unit)? = null,
+    /** Inserts a column on the left or right of a cell's column, or deletes it. */
+    val columns: ((sheet: Int, col: Int, delete: Boolean, right: Boolean) -> Unit)? = null,
     /** What is being typed, so it is put in when the person goes elsewhere (another cell, saving, back). */
     val draft: ((sheet: Int, row: Int, col: Int, text: String) -> Unit)? = null,
     /** The person left the cell: what was typed goes in. */
@@ -566,6 +568,19 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                         androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_above)) }, onClick = { act(false, false) })
                         androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_below)) }, onClick = { act(false, true) })
                         androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.rows_delete, row + 1), color = MaterialTheme.colorScheme.error) }, onClick = { act(true, false) })
+                        editing.columns?.let { columns ->
+                            fun actCol(delete: Boolean, right: Boolean) {
+                                menu = false
+                                if (value.text != editing.content(sheet, row, col) && !put()) return
+                                columns(sheet, col, delete, right)
+                                onClose()
+                            }
+                            androidx.compose.material3.HorizontalDivider()
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.cols_insert_left)) }, onClick = { actCol(false, false) })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.cols_insert_right)) }, onClick = { actCol(false, true) })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.cols_delete, ua.hramota.doc.sheet.columnName(col)), color = MaterialTheme.colorScheme.error) }, onClick = { actCol(true, false) })
+                            androidx.compose.material3.HorizontalDivider()
+                        }
                         editing.cellActions?.invoke(sheet, row, col)?.forEach { (label, go) ->
                             androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = {
                                 menu = false

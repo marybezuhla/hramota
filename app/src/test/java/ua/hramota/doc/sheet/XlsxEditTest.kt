@@ -184,6 +184,41 @@ class XlsxEditTest {
         assertEquals("=A5", again.content(CellKey(0, 1, 2)))
     }
 
+    @Test fun columnsMovingFollowColumns() {
+        val m = Formula.RowMove(1, 2, cols = true)
+        assertEquals("SUM(A1:E3)+\$D\$2", Formula.moveRows("SUM(A1:C3)+\$B\$2", true, "Дані", m))
+        assertEquals("SUM(A:D)+SUM(1:2)", Formula.moveRows("SUM(A:B)+SUM(1:2)", true, "Дані", m))
+        assertEquals("'Дані'!D1+Інший!B1", Formula.moveRows("'Дані'!B1+Інший!B1", false, "Дані", m))
+        val d = Formula.RowMove(0, -1, cols = true)
+        assertEquals("#REF!*2+A1", Formula.moveRows("A1*2+B1", true, "Дані", d))
+    }
+
+    @Test fun insertedAndDeletedColumnsMoveEverythingThatRefersToThem() {
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
+        assertNull(edit.moveColumns(0, 1, 1))
+        // Column C moved to D, its formula as it was (it refers to column A only)
+        assertEquals("=SUM(A1:A10)", edit.content(CellKey(0, 0, 3)))
+        assertEquals("=A1*2", edit.content(CellKey(0, 0, 2)))
+        assertEquals("", edit.content(CellKey(0, 0, 1)))
+        val out = save("docs-edit/rows.xlsx", edit, "columns-inserted")
+        val sheet = part(out, "xl/worksheets/sheet1.xml")!!
+        assertTrue(sheet.contains("<mergeCell ref=\"E3:F5\"/>"))
+        assertTrue(sheet.contains("sqref=\"G2:G8\""))
+        assertTrue(sheet.contains("<autoFilter ref=\"A1:C10\"/>"))
+        assertTrue(part(out, "xl/workbook.xml")!!.contains("'Дані'!\$A\$1:\$C\$10"))
+        val back = XlsxReader.read(ByteArrayInputStream(out)).sheets[0]
+        assertEquals("10", back.text(back.row(0)!!, 0))
+        assertEquals(-1, back.row(0)!!.find(1))
+        assertTrue(back.row(0)!!.find(3) >= 0)
+
+        val del = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows.xlsx")))
+        assertNull(del.moveColumns(0, 0, -1))
+        assertEquals(Value.REF, del.recalc()[CellKey(0, 0, 0)])
+        val d = save("docs-edit/rows.xlsx", del, "columns-deleted")
+        assertTrue(part(d, "xl/worksheets/sheet2.xml")!!.contains("#REF!+1"))
+        assertTrue(part(d, "xl/worksheets/sheet1.xml")!!.contains("<mergeCell ref=\"C3:D5\"/>"))
+    }
+
     @Test fun rowsAreNotMovedUnderTables() {
         val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows-table.xlsx")))
         assertEquals(XlsxEdit.RowRefusal.SHEET, edit.moveRows(0, 2, 1))

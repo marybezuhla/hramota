@@ -102,6 +102,20 @@ class Sheet(
         return Sheet(name, moved, styles, widths, defaultWidth, h, defaultHeight, merged, frozenRows, frozenCols, date1904, hidden)
     }
 
+    /** The sheet with [n] columns inserted before column [at] ([n] > 0) or [-n] deleted from it. */
+    fun withColumnsMoved(at: Int, n: Int): Sheet {
+        val m = ua.hramota.doc.sheet.edit.Formula.RowMove(at, n, cols = true)
+        val moved = rows.map { r ->
+            val keep = r.cols.indices.filter { m.row(r.cols[it]) != null }
+            SheetRow(r.index, IntArray(keep.size) { m.row(r.cols[keep[it]])!! }, IntArray(keep.size) { r.styles[keep[it]] },
+                DoubleArray(keep.size) { r.numbers[keep[it]] }, Array(keep.size) { r.texts[keep[it]] })
+        }
+        val w = HashMap<Int, Float>()
+        for ((k, v) in widths) m.row(k)?.let { w[it] = v }
+        val merged = merges.mapNotNull { g -> m.range(g.left, g.right)?.let { (l, r) -> Merge(g.top, l, g.bottom, r) }?.takeIf { it.top != it.bottom || it.left != it.right } }
+        return Sheet(name, moved, styles, w, defaultWidth, heights, defaultHeight, merged, frozenRows, frozenCols, date1904, hidden)
+    }
+
     /**
      * The sheet as the editor shows it: other rows and looks, column widths changed (points), and
      * rows a filter leaves out shown with no height.
