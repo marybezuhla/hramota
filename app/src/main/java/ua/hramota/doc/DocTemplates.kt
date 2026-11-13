@@ -111,39 +111,39 @@ object DocTemplates {
         if (kind == "budget") {
             name = if (u) "Бюджет" else "Budget"
             widths = listOf(28.0, 14.0, 14.0, 14.0)
-            rows += listOf(C.T(if (u) "Бюджет на місяць" else "Monthly budget", 6))
-            rows += listOf()
-            rows += listOf(C.T(if (u) "Доходи" else "Income", 1), C.T(if (u) "План" else "Planned", 1), C.T(if (u) "Факт" else "Actual", 1), C.T(if (u) "Різниця" else "Difference", 1))
+            rows.add(listOf(C.T(if (u) "Бюджет на місяць" else "Monthly budget", 6)))
+            rows.add(emptyList())
+            rows.add(listOf(C.T(if (u) "Доходи" else "Income", 1), C.T(if (u) "План" else "Planned", 1), C.T(if (u) "Факт" else "Actual", 1), C.T(if (u) "Різниця" else "Difference", 1)))
             val income = if (u) listOf("Зарплата" to 30000.0, "Інше" to 2000.0) else listOf("Salary" to 3000.0, "Other" to 200.0)
             val start = rows.size + 1
-            for ((t, v) in income) { val r = rows.size + 1; rows += listOf(C.T(t), C.N(v, 2), C.N(0.0, 2), C.F("C$r-B$r", 2)) }
+            for ((t, v) in income) { val r = rows.size + 1; rows.add(listOf(C.T(t), C.N(v, 2), C.N(0.0, 2), C.F("C$r-B$r", 2))) }
             val end = rows.size
             val incomeTotal = rows.size + 1
-            rows += listOf(C.T(if (u) "Разом доходи" else "Total income", 5), C.F("SUM(B$start:B$end)", 3), C.F("SUM(C$start:C$end)", 3), C.F("C$incomeTotal-B$incomeTotal", 3))
-            rows += listOf()
-            rows += listOf(C.T(if (u) "Витрати" else "Expenses", 1), C.T(if (u) "План" else "Planned", 1), C.T(if (u) "Факт" else "Actual", 1), C.T(if (u) "Різниця" else "Difference", 1))
+            rows.add(listOf(C.T(if (u) "Разом доходи" else "Total income", 5), C.F("SUM(B$start:B$end)", 3), C.F("SUM(C$start:C$end)", 3), C.F("C$incomeTotal-B$incomeTotal", 3)))
+            rows.add(emptyList())
+            rows.add(listOf(C.T(if (u) "Витрати" else "Expenses", 1), C.T(if (u) "План" else "Planned", 1), C.T(if (u) "Факт" else "Actual", 1), C.T(if (u) "Різниця" else "Difference", 1)))
             val spend = if (u) listOf("Житло й комунальні" to 8000.0, "Їжа" to 9000.0, "Транспорт" to 1500.0, "Зв'язок та інтернет" to 500.0, "Здоров'я" to 1000.0, "Діти" to 3000.0, "Відпочинок" to 2000.0, "Заощадження" to 3000.0, "Інше" to 1000.0)
                 else listOf("Housing and bills" to 800.0, "Food" to 900.0, "Transport" to 150.0, "Phone and internet" to 50.0, "Health" to 100.0, "Children" to 300.0, "Leisure" to 200.0, "Savings" to 300.0, "Other" to 100.0)
             val s2 = rows.size + 1
-            for ((t, v) in spend) { val r = rows.size + 1; rows += listOf(C.T(t), C.N(v, 2), C.N(0.0, 2), C.F("B$r-C$r", 2)) }
+            for ((t, v) in spend) { val r = rows.size + 1; rows.add(listOf(C.T(t), C.N(v, 2), C.N(0.0, 2), C.F("B$r-C$r", 2))) }
             val e2 = rows.size
             val spendTotal = rows.size + 1
-            rows += listOf(C.T(if (u) "Разом витрати" else "Total expenses", 5), C.F("SUM(B$s2:B$e2)", 3), C.F("SUM(C$s2:C$e2)", 3), C.F("B$spendTotal-C$spendTotal", 3))
-            rows += listOf()
-            rows += listOf(C.T(if (u) "Залишок" else "Left over", 5), C.F("B$incomeTotal-B$spendTotal", 3), C.F("C$incomeTotal-C$spendTotal", 3))
+            rows.add(listOf(C.T(if (u) "Разом витрати" else "Total expenses", 5), C.F("SUM(B$s2:B$e2)", 3), C.F("SUM(C$s2:C$e2)", 3), C.F("B$spendTotal-C$spendTotal", 3)))
+            rows.add(emptyList())
+            rows.add(listOf(C.T(if (u) "Залишок" else "Left over", 5), C.F("B$incomeTotal-B$spendTotal", 3), C.F("C$incomeTotal-C$spendTotal", 3)))
         } else {
             name = if (u) "Справи" else "To do"
             widths = listOf(40.0, 14.0, 18.0, 12.0, 30.0)
-            rows += listOf(C.T(if (u) "Список справ" else "To-do list", 6))
-            rows += listOf()
-            rows += listOf(C.T(if (u) "Справа" else "Task", 1), C.T(if (u) "Термін" else "Due", 1), C.T(if (u) "Хто" else "Who", 1), C.T(if (u) "Зроблено" else "Done", 1), C.T(if (u) "Примітки" else "Notes", 1))
+            rows.add(listOf(C.T(if (u) "Список справ" else "To-do list", 6)))
+            rows.add(emptyList())
+            rows.add(listOf(C.T(if (u) "Справа" else "Task", 1), C.T(if (u) "Термін" else "Due", 1), C.T(if (u) "Хто" else "Who", 1), C.T(if (u) "Зроблено" else "Done", 1), C.T(if (u) "Примітки" else "Notes", 1)))
             val today = (java.time.LocalDate.now().toEpochDay() - java.time.LocalDate.of(1899, 12, 30).toEpochDay()).toDouble()
             val tasks = if (u) listOf("Оплатити рахунки", "Записатися до лікаря", "Купити подарунок") else listOf("Pay the bills", "Book a doctor", "Buy a present")
-            for ((i, t) in tasks.withIndex()) rows += listOf(C.T(t), C.N(today + (i + 1) * 2, 4), C.T(""), C.T(""), C.T(""))
-            repeat(10) { rows += listOf(null, null, null, null, null) }
+            for ((i, t) in tasks.withIndex()) rows.add(listOf(C.T(t), C.N(today + (i + 1) * 2, 4), C.T(""), C.T(""), C.T("")))
+            repeat(10) { rows.add(listOf(null, null, null, null, null)) }
             val first = 4; val last = rows.size
-            rows += listOf()
-            rows += listOf(C.T(if (u) "Зроблено справ" else "Tasks done", 5), C.F("COUNTA(D$first:D$last)&\" / \"&COUNTA(A$first:A$last)", 5))
+            rows.add(emptyList())
+            rows.add(listOf(C.T(if (u) "Зроблено справ" else "Tasks done", 5), C.F("COUNTA(D$first:D$last)&\" / \"&COUNTA(A$first:A$last)", 5)))
         }
         return workbook(name, rows, widths)
     }
