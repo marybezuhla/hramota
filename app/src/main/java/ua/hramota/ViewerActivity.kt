@@ -181,6 +181,17 @@ open class ViewerActivity : ComponentActivity() {
                                         ViewerState.Paged(pages, reading, doc.inspection)
                                     }
                                     format == Format.DOC -> openDoc(uri) { opened = it }
+                                    // OpenDocument: on pages, sheets and slides as LibreOffice shows them
+                                    format == Format.ODT -> {
+                                        val doc = input()?.use { ua.hramota.doc.odf.OdtReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        val pages = DocxPages(doc, appFonts(applicationContext), background = true).also { opened = it }
+                                        ViewerState.Paged(pages, doc.readingText(), doc.inspection)
+                                    }
+                                    format == Format.ODS -> ViewerState.Sheets(input()?.use { ua.hramota.doc.odf.OdsReader.read(it) } ?: return@withContext ViewerState.Failed)
+                                    format == Format.ODP -> {
+                                        val deck = input()?.use { ua.hramota.doc.odf.OdpReader.read(it) } ?: return@withContext ViewerState.Failed
+                                        ViewerState.Paged(SlidePages(deck, appFonts(applicationContext)), deck.paragraphs { getString(R.string.slide_n, it) }, deck.inspection)
+                                    }
                                     format == Format.XLSX -> ViewerState.Sheets(input()?.use { XlsxReader.read(it) } ?: return@withContext ViewerState.Failed)
                                     format == Format.PPTX || format == Format.PPT -> {
                                         val deck = (if (format == Format.PPT) contentResolver.openInputStream(uri) else input())?.use { if (format == Format.PPT) PptReader.read(it) else PptxReader.read(it) } ?: return@withContext ViewerState.Failed
