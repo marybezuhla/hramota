@@ -114,7 +114,7 @@ object DocxReader {
                     name == "word/document.xml" -> parts[name] = readLimited(zip, MAX_PART)
                     name == "word/styles.xml" || name == "word/numbering.xml" || name == "word/theme/theme1.xml" ||
                         name == "word/_rels/document.xml.rels" || name == "word/settings.xml" || name == "word/_rels/settings.xml.rels" ||
-                        name == "word/comments.xml" || name == "docProps/core.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
+                        name == "word/comments.xml" || name == "docProps/core.xml" || name == "word/footnotes.xml" || name == "word/endnotes.xml" -> parts[name] = readLimited(zip, MAX_SMALL_PART)
                     // Headers and footers, and their own relationships (pictures)
                     HEADER_PART.matches(name) || HEADER_RELS.matches(name) -> if (headerBytes < MAX_HEADERS && parts.size < 200) {
                         val bytes = readLimited(zip, MAX_SMALL_PART)
@@ -172,6 +172,25 @@ object DocxReader {
                     }
                 }
                 XmlPullParser.END_DOCUMENT -> break
+            }
+        }
+        // Footnotes and endnotes: after the text, numbered as their marks in it (1, 2, 3… and i, ii, iii…)
+        for ((part, kind, refs) in listOf(Triple("word/footnotes.xml", "footnote", body.footnotes), Triple("word/endnotes.xml", "endnote", body.endnotes))) {
+            if (refs.isEmpty()) continue
+            val tree = parts[part]?.let { try { Xml.tree(ByteArrayInputStream(it)) } catch (e: Exception) { null } } ?: continue
+            val notes = tree.all(kind).filter { it.attr("type") == null || it.attr("type") == "normal" }.associateBy { it.attr("id") }
+            val notesBody = Body(styles, numbering, rels)
+            var first = true
+            for ((id, label) in refs) {
+                val note = notes[id] ?: continue
+                val out = ArrayList<Block>()
+                for (c in note.children) { notesBody.blocks(c, out, 0); if (out.size > 200) break }
+                if (out.isEmpty()) continue
+                if (first) { blocks += Block.Para(styles.defaultPara, styles.defaultRun, listOf(Inline.Text("————————", styles.defaultRun)), null, null); first = false }
+                // The note's own number in front of its first paragraph, small as in Word
+                val p0 = out.indexOfFirst { it is Block.Para }
+                if (p0 >= 0) { val para = out[p0] as Block.Para; out[p0] = para.copy(inlines = listOf(Inline.Text(label + " ", styles.defaultRun.copy(vertAlign = "superscript"))) + para.inlines.filterNot { it is Inline.Text && it.text.isBlank() && para.inlines.indexOf(it) == 0 }) }
+                blocks += out
             }
         }
         val settings = parts["word/settings.xml"]?.let { Xml.tree(ByteArrayInputStream(it)) }
@@ -247,6 +266,15 @@ object DocxReader {
     }
 
     private fun textOf(n: XmlNode): String? = n.text.takeIf { it.isNotBlank() }?.take(200)
+
+    /** i, ii, iii… as Word numbers endnotes. */
+    private fun roman(n: Int): String {
+        val v = intArrayOf(1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1)
+        val s = arrayOf("m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i")
+        var x = n; val sb = StringBuilder()
+        for (i in v.indices) while (x >= v[i]) { sb.append(s[i]); x -= v[i] }
+        return sb.toString()
+    }
 
     private fun indexOf(data: ByteArray, mark: ByteArray, from: Int = 0): Int {
         if (mark.isEmpty()) return -1
@@ -343,6 +371,9 @@ object DocxReader {
         private var replacing = false
         /** Paragraphs and cells read so far, against [MAX_BLOCKS]. */
         var count = 0
+        /** Footnote and endnote marks in the order they come: the note's id and its number. */
+        val footnotes = LinkedHashMap<String, String>()
+        val endnotes = LinkedHashMap<String, String>()
 
         fun blocks(node: XmlNode, out: MutableList<Block>, depth: Int) {
             if (count > MAX_BLOCKS || depth > MAX_TABLE_DEPTH) return
@@ -423,6 +454,9 @@ object DocxReader {
                 "br" -> out += if (c.attr("type") == "page") Inline.PageBreak else Inline.LineBreak
                 "cr" -> out += Inline.LineBreak
                 "noBreakHyphen" -> out += Inline.Text("‑", props)
+                // A note's mark: its number, raised (the note itself is shown after the text)
+                "footnoteReference" -> c.attr("id")?.let { id -> if (footnotes.size < 5000) out += Inline.Text(footnotes.getOrPut(id) { (footnotes.size + 1).toString() }, props.copy(vertAlign = "superscript")) }
+                "endnoteReference" -> c.attr("id")?.let { id -> if (endnotes.size < 5000) out += Inline.Text(endnotes.getOrPut(id) { roman(endnotes.size + 1) }, props.copy(vertAlign = "superscript")) }
                 "softHyphen" -> Unit
                 "sym" -> out += Inline.Text(Numbering.bullet(c.attr("char")?.toIntOrNull(16)?.toChar()?.toString() ?: ""), props)
                 "drawing" -> image(c)?.let { out += it }
