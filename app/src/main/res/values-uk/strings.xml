@@ -510,4 +510,21 @@
     <string name="convert_note_ppt">Буде новий файл PPTX, який можна редагувати; старий лишиться як був. Перенесуться слайди з текстом, фігурами й картинками там, де вони є. Не перенесуться анімації, переходи, нотатки доповідача, діаграми й вбудовані об\'єкти, а заголовки стануть звичайними текстовими полями.</string>
     <string name="slide_picture_failed">Не вдалося додати картинку.</string>
     <string name="slide_shape_animated">Цю рамку не можна видалити: на неї посилається анімація.</string>
+    <string name="ink_section">Рукопис</string>
+    <string name="ink_title">Мій почерк</string>
+    <string name="ink_open_hint">Напишіть кілька десятків речень, щоб розпізнавання звикло до вашої руки. Зберігається лише на цьому телефоні.</string>
+    <string name="ink_count">Написано: %1$d (досить від %2$d)</string>
+    <string name="ink_hint">Напишіть речення вище так, як пишете зазвичай, стилусом чи пальцем.</string>
+    <string name="ink_undo">Назад</string>
+    <string name="ink_clear">Стерти</string>
+    <string name="ink_skip">Пропустити</string>
+    <string name="ink_next">Зберегти, далі</string>
+    <string name="ink_undo_last">Прибрати останнє</string>
+    <string name="ink_export">Зберегти у файл…</string>
+    <string name="ink_delete_all">Видалити всі зразки</string>
+    <string name="ink_delete_confirm">Видалити всі зразки вашого почерку? Розпізнавання більше не буде під нього підлаштоване.</string>
+    <string name="ink_delete_go">Видалити</string>
+    <string name="ink_saved">Збережено.</string>
+    <string name="ink_save_failed">Не вдалося зберегти.</string>
+    <string name="ink_about">Грамота розпізнає рукопис загальною моделлю, навченою не на чиємусь особистому письмі. Те, що ви пишете тут, підлаштовує розпізнавання під вашу руку лише на цьому телефоні: зразки нікуди не надсилаються, а під замком сховища шифруються. Якщо захочете допомогти зробити розпізнавання кращим для всіх, можете зберегти їх у файл і поділитися ним самі.</string>
 </resources>

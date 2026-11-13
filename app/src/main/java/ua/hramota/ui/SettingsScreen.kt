@@ -77,6 +77,7 @@ fun SettingsScreen(
     onAddDictionary: () -> Unit = {},
     onRemoveDictionary: (String) -> Unit = {},
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var licenses by rememberSaveable { mutableStateOf(false) }
     var cleared by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
@@ -156,6 +157,12 @@ fun SettingsScreen(
             Section(stringResource(R.string.read_aloud))
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { VoiceDownloads() }
 
+            Section(stringResource(R.string.ink_section))
+            Column(Modifier.fillMaxWidth().clickable { context.startActivity(android.content.Intent(context, ua.hramota.ink.MyHandwritingActivity::class.java)) }.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(stringResource(R.string.ink_title), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.ink_open_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
             Section(stringResource(R.string.dict_section))
             Text(stringResource(R.string.dict_section_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             for (d in dictionaries) Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -187,7 +194,6 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_licenses), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
             }
             // The author's letter and how to support Ukraine, as in the author's other apps
-            val context = androidx.compose.ui.platform.LocalContext.current
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 AuthorLetter()
                 androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 24.dp))

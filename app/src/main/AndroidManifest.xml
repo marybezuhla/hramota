@@ -141,6 +141,11 @@
             android:documentLaunchMode="always"
             android:autoRemoveFromRecents="true"
             android:label="@string/compare_title" />
+        <!-- Samples of one's own handwriting, kept on the phone -->
+        <activity
+            android:name=".ink.MyHandwritingActivity"
+            android:exported="false"
+            android:label="@string/ink_title" />
         <!-- Copies kept inside Hramota are opened in its own viewer through this; nothing is shared outside -->
         <provider
             android:name="androidx.core.content.FileProvider"

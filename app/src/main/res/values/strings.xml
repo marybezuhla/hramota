@@ -500,4 +500,21 @@
     <string name="convert_note_ppt">This makes a new PPTX file you can edit; the old one stays as it is. Slides keep their text, shapes and pictures where they are. Animations, transitions, speaker notes, charts and embedded objects are not carried over, and titles become ordinary text boxes.</string>
     <string name="slide_picture_failed">Could not add the picture.</string>
     <string name="slide_shape_animated">This frame cannot be deleted: an animation refers to it.</string>
+    <string name="ink_section">Handwriting</string>
+    <string name="ink_title">My handwriting</string>
+    <string name="ink_open_hint">Write a few dozen sentences so recognition gets used to your hand. Kept only on this phone.</string>
+    <string name="ink_count">Written: %1$d (enough from %2$d)</string>
+    <string name="ink_hint">Write the sentence above as you usually do, with a stylus or a finger.</string>
+    <string name="ink_undo">Undo</string>
+    <string name="ink_clear">Clear</string>
+    <string name="ink_skip">Skip</string>
+    <string name="ink_next">Save, next</string>
+    <string name="ink_undo_last">Take out the last one</string>
+    <string name="ink_export">Save to a file…</string>
+    <string name="ink_delete_all">Delete all samples</string>
+    <string name="ink_delete_confirm">Delete every sample of your handwriting? Recognition will no longer be tuned to it.</string>
+    <string name="ink_delete_go">Delete</string>
+    <string name="ink_saved">Saved.</string>
+    <string name="ink_save_failed">Could not save.</string>
+    <string name="ink_about">Hramota recognises handwriting with a general model trained on no one\'s personal writing. What you write here tunes recognition to your hand, on this phone only: the samples are never sent anywhere and are encrypted with locked storage on. If you wish to help make recognition better for everyone, you can save them to a file and share it yourself.</string>
 </resources>
