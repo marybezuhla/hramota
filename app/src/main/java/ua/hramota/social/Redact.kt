@@ -38,7 +38,7 @@ object Redact {
                 val last = starts.indexOfLast { it <= r.last }.coerceAtLeast(first)
                 val box = Rect(words[first].box)
                 for (i in first + 1..last) box.union(words[i].box)
-                if (out.none { it.box == box }) out += Found(kind, text.substring(r.first, r.last + 1), box)
+                if (out.none { it.box == box && it.kind == kind }) out += Found(kind, text.substring(r.first, r.last + 1), box)
             }
             for (m in EMAIL.findAll(text)) add(Kind.EMAIL, m.range)
             for (m in IBAN.findAll(text)) add(Kind.IBAN, m.range)

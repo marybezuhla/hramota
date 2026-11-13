@@ -1,6 +1,6 @@
 package ua.hramota.social
 
-import java.text.BreakIterator
+import android.icu.text.BreakIterator
 
 /** Where a post goes: its name and how many characters one post may have. */
 data class Platform(val key: String, val name: String, val limit: Int, val countsLinksAs: Int = -1)

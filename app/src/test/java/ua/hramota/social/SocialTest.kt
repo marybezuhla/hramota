@@ -46,10 +46,12 @@ class SocialTest {
         assertTrue(parts.all { it.length <= 280 })
     }
 
+    private var y = 0
     private fun line(vararg words: String): OcrLine {
         var left = 0
-        val ws = words.map { w -> OcrWord(w, Rect(left, 0, left + w.length * 10, 20)).also { left += w.length * 10 + 10 } }
-        return OcrLine(words.joinToString(" "), Rect(0, 0, left, 20), 0.9f, ws)
+        val top = y; y += 30
+        val ws = words.map { w -> OcrWord(w, Rect(left, top, left + w.length * 10, top + 20)).also { left += w.length * 10 + 10 } }
+        return OcrLine(words.joinToString(" "), Rect(0, top, left, top + 20), 0.9f, ws)
     }
 
     @Test fun privateThingsAreFound() {
