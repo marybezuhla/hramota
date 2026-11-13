@@ -37,11 +37,11 @@ jobs:
           persist-credentials: false
       - name: Tools
         run: |
-          # Ubuntu's own Python (3.12): every package below has ready-made wheels for it
-          /usr/bin/python3 --version
-          /usr/bin/python3 -m venv .venv
+          python3 --version
+          python3 -m venv .venv
           .venv/bin/pip install --quiet torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
-          .venv/bin/pip install --quiet numpy==2.3.4 scikit-image==0.25.2 pillow==11.3.0 fonttools==4.60.1 onnx==1.19.1 onnxruntime==1.23.2
+          # Ready-made wheels only: nothing is compiled here
+          .venv/bin/pip install --quiet --only-binary :all: numpy==2.3.4 scikit-image==0.26.0 pillow==12.0.0 fonttools==4.60.1 onnx==1.19.1 onnxruntime==1.23.2
       - name: Fonts
         run: .venv/bin/python rukopys/synth/fonts.py fonts
       - name: Train
