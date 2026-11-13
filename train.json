@@ -1,0 +1,61 @@
+{
+ "steps": 2210,
+ "epochs": 24,
+ "best_cer": 0.21491002570694087,
+ "history": [
+  {
+   "step": 261,
+   "cer": 1.0
+  },
+  {
+   "step": 511,
+   "cer": 0.9933161953727506
+  },
+  {
+   "step": 775,
+   "cer": 0.9892030848329049
+  },
+  {
+   "step": 1036,
+   "cer": 0.7218508997429306
+  },
+  {
+   "step": 1305,
+   "cer": 0.4267352185089974
+  },
+  {
+   "step": 1568,
+   "cer": 0.3033419023136247
+  },
+  {
+   "step": 1822,
+   "cer": 0.2390745501285347
+  },
+  {
+   "step": 2087,
+   "cer": 0.22262210796915166
+  }
+ ],
+ "train_fonts": [
+  "hand-amaticsc.ttf",
+  "hand-badscript.ttf",
+  "hand-caveat.ttf",
+  "hand-comforter.ttf",
+  "hand-gabriela.ttf",
+  "hand-greatvibes.ttf",
+  "hand-kurale.ttf",
+  "hand-lobster.ttf",
+  "hand-marckscript.ttf",
+  "hand-neucha.ttf",
+  "hand-pangolin.ttf",
+  "hand-pattaya.ttf",
+  "print-DejaVuSans-Oblique.ttf",
+  "print-DejaVuSans.ttf"
+ ],
+ "held_out_fonts": [
+  "hand-shantellsans.ttf",
+  "hand-underdog.ttf"
+ ],
+ "train_lines": 2988,
+ "test_lines": 134
+}

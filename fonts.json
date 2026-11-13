@@ -1,0 +1,98 @@
+[
+ {
+  "file": "hand-caveat.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
+  "sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-badscript.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/badscript/BadScript-Regular.ttf",
+  "sha256": "40ec737eee65ec4efbc24ae636fa31d7d84d1ccca83ab54cd555edb72cb3eaf0",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-marckscript.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/marckscript/MarckScript-Regular.ttf",
+  "sha256": "504de8cc6f919163bc9afb67b9bc208d258230c5e8d00cb82ec52474f9fafc3b",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-neucha.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/neucha/Neucha.ttf",
+  "sha256": "7927bd6ce090fa032857dcbc3ad0e8b765c462d0a72a8779068132496b4e087d",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-pangolin.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/pangolin/Pangolin-Regular.ttf",
+  "sha256": "cf4f0a46704c7859d4943320fce6c6d06cc7dc450ef971c3676ef36f9f482299",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-amaticsc.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/amaticsc/AmaticSC-Bold.ttf",
+  "sha256": "d367beadee66efbb657d24d3d8f30f3b60633e9d5c8ded7385541cf775cabb4d",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-shantellsans.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/shantellsans/ShantellSans%5BBNCE%2CINFM%2CSPAC%2Cwght%5D.ttf",
+  "sha256": "d98a7913853f78d71aa0b86daf66b5eddb5a3266c07bfd51ef70632b88c41084",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-comforter.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/comforter/Comforter-Regular.ttf",
+  "sha256": "2852da85b2fbfd37ccd87387f3578a251cb9a8814fbab22c4487f792936a2267",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-underdog.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/underdog/Underdog-Regular.ttf",
+  "sha256": "33f9aee5b2aaeb85e1f433fb21916d0c6dbae74e23b94d978b8131bdbddc40c6",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-lobster.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/lobster/Lobster-Regular.ttf",
+  "sha256": "d6568e697fd50cedc0be04d8aae4127fe95add607e7bff954ca88604be80c205",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-greatvibes.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/greatvibes/GreatVibes-Regular.ttf",
+  "sha256": "8d509802186f1b51572531ecf313e8098f9a5bfdfaca93f0c9b34467f9982d15",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-kurale.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/kurale/Kurale-Regular.ttf",
+  "sha256": "6055aaca6870ca64210dd81fa47f8bb71595a9c8fbe570351ed45a15f1a0820d",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-pattaya.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/pattaya/Pattaya-Regular.ttf",
+  "sha256": "02b77f7f5b52e718a91230c8ea153bfe746e1d748dabded4e41d7e6765fa9889",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "hand-gabriela.ttf",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/gabriela/Gabriela-Regular.ttf",
+  "sha256": "c38334bfff10cc97fa6e5c5ddf1f12dd54428bb218d7a423fb3c07bf8180bfd8",
+  "license": "OFL-1.1"
+ },
+ {
+  "file": "print-DejaVuSans.ttf",
+  "source": "Ubuntu fonts-dejavu-core",
+  "sha256": "b4c632e3cdf9acc7f28758fb5a323c8524d7fc6660d46904d9b6cbe2809c419c",
+  "license": "Bitstream Vera / DejaVu"
+ },
+ {
+  "file": "print-DejaVuSans-Oblique.ttf",
+  "source": "Ubuntu fonts-dejavu-core",
+  "sha256": "e6bb3d31b3afd8070753da4bac76ac6f97d99743d0bf070d7fe01336a1f1ae42",
+  "license": "Bitstream Vera / DejaVu"
+ }
+]
