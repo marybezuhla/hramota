@@ -43,7 +43,9 @@ jobs:
         env:
           HOURS: ${{ inputs.hours || (github.ref_name == 'rukopys-smoke' && '0.03' || '4.5') }}
           LINES: ${{ inputs.lines || (github.ref_name == 'rukopys-smoke' && '3000' || '150000') }}
-        run: .venv/bin/python -u rukopys/train/train.py --fonts fonts --hours "$HOURS" --train-n "$LINES" --val-n "$(( LINES < 30000 ? 200 : 1500 ))" --out out
+        run: |
+          VAL=1500; if [ "$LINES" -lt 30000 ]; then VAL=200; fi
+          .venv/bin/python -u rukopys/train/train.py --fonts fonts --hours "$HOURS" --train-n "$LINES" --val-n "$VAL" --out out
       - name: Compare with Р1
         run: .venv/bin/python rukopys/eval/compare.py out > out/report.json && head -c 2000 out/report.json
       - name: Keep
