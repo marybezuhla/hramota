@@ -215,7 +215,8 @@ private fun TextBlock(state: NoteState, b: NBlock.Text, number: Int) {
                     while (pre < before.length && pre < text.length && before[pre] == text[pre]) pre++
                     var suf = 0
                     while (suf < before.length - pre && suf < text.length - pre && before[before.length - 1 - suf] == text[text.length - 1 - suf]) suf++
-                    if (before.length - pre - suf > 0) {
+                    // Only the hidden mark deleted (and nothing typed): Backspace at the very start
+                    if (before.length - pre - suf == 1 && text.length == before.length - 1 && pre == 0) {
                         // The hidden mark was deleted: Backspace at the very start
                         if (state.backspaceAtStart(b.id)) stale[0] = true else value = TextFieldValue(ZW + b.text, TextRange(1))
                         return@BasicTextField

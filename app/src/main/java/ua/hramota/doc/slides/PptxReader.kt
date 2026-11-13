@@ -325,7 +325,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val fil
             val master = layout?.rels?.values?.firstOrNull { it.contains("slideMaster") }?.let { part(it) }
             if (master != null) loadTheme(master)
             slides += slide(slide, layout, master)
-            comments(path).takeIf { it.isNotEmpty() }?.let { comments[slides.size - 1] = it }
+            (try { comments(path) } catch (e: Exception) { emptyList() }).takeIf { it.isNotEmpty() }?.let { comments[slides.size - 1] = it }
         }
         if (slides.isEmpty()) throw IOException("No slides")
         return Deck(width, height, slides, media, if (comments.isEmpty()) inspection else inspection.copy(comments = comments.values.sumOf { it.size }), comments)
@@ -564,7 +564,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val fil
         if (path !in media) {
             if (media.count { it.key.startsWith("chart:") } >= 50) return null
             val tree = tree(path) ?: return null
-            val chart = ua.hramota.doc.Chart.parse(tree, scheme) ?: return null
+            val chart = try { ua.hramota.doc.Chart.parse(tree, scheme) } catch (e: Exception) { null } ?: return null
             // Drawn at twice the size in points: sharp enough on a phone and in a PDF
             media["chart:" + path] = try { chart.png((r.w * 2).toInt(), (r.h * 2).toInt()) } catch (e: Exception) { return null }
         }

@@ -181,11 +181,14 @@ object Shelf {
         if (isSealed == seal) return null
         val out = if (seal) File(f.path + Vault.SUFFIX) else File(f.path.removeSuffix(Vault.SUFFIX))
         val name = f.name.removeSuffix(Vault.SUFFIX)
+        // Written beside it first, then put in place whole: a reader never sees half a file
+        val tmp = File(out.path + ".converting")
         try {
-            f.inputStream().buffered().use { input -> out.outputStream().buffered().use { if (seal) Sealed.seal(key, input, it, name) else Sealed.open(key, input, it, name) } }
+            f.inputStream().buffered().use { input -> tmp.outputStream().buffered().use { if (seal) Sealed.seal(key, input, it, name) else Sealed.open(key, input, it, name) } }
             // Checked before the original goes: a sealed file must open again
-            if (seal) out.inputStream().buffered().use { Sealed.open(key, it, NullOut, name) }
-        } catch (e: Exception) { out.delete(); throw IOException("Could not convert ${f.name}", e) }
+            if (seal) tmp.inputStream().buffered().use { Sealed.open(key, it, NullOut, name) }
+            if (!tmp.renameTo(out)) throw IOException("rename")
+        } catch (e: Exception) { tmp.delete(); throw IOException("Could not convert ${f.name}", e) }
         f.delete()
         return out
     }

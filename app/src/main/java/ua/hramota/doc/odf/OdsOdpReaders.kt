@@ -74,26 +74,33 @@ object OdsReader {
                         // The same row many times over: written out only while it holds something (not the empty rest of the sheet)
                         val filled = r.elements.any { c -> c.name == "table-cell" && (c.elements.isNotEmpty() || c.attr("value-type") != null) }
                         val times = if (filled) rep.coerceAtMost(1000) else 1
+                        // Each cell worked out once, then written on every repeat of the row
+                        class Cl(val at: Int, val crep: Int, val look: Int, val text: String?, val across: Int, val down: Int)
+                        val line = ArrayList<Cl>()
+                        var at = 0
+                        for (cell in r.elements) {
+                            if (at >= SheetLimits.MAX_COLS) break
+                            val crep = (cell.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_COLS)
+                            if (cell.name == "table-cell" || cell.name == "covered-table-cell") {
+                                val type = cell.attr("value-type")
+                                val text = cell.all("p").joinToString("\n") { it.text }
+                                val numeric = type in setOf("float", "percentage", "currency")
+                                val style = cell.attr("style-name") ?: r.attr("default-cell-style-name")
+                                val has = text.isNotEmpty() || type != null
+                                val shown = cell.name == "table-cell" && (has || styles.props(style, "table-cell")["background-color"]?.let { it != "transparent" } == true) && crep <= 1024
+                                val across = (cell.attr("number-columns-spanned")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_COLS)
+                                val down = (cell.attr("number-rows-spanned")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_ROWS)
+                                if (shown || across > 1 || down > 1) line += Cl(at, if (shown) crep else 0, if (shown) look(style, numeric) else 0, if (has) text else null, across, down)
+                            }
+                            at += crep
+                        }
                         for (k in 0 until times) {
+                            // The sheet's cells all used: the rest is not read
+                            if (budget[0] <= 0) break
                             if (h != null && (rep <= 1000)) b.height(row + k, h)
-                            var c = 0
-                            for (cell in r.elements) {
-                                val crep = (cell.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_COLS)
-                                if (cell.name == "table-cell" || cell.name == "covered-table-cell") {
-                                    val type = cell.attr("value-type")
-                                    val text = cell.all("p").joinToString("\n") { it.text }
-                                    val numeric = type in setOf("float", "percentage", "currency")
-                                    val style = cell.attr("style-name") ?: r.attr("default-cell-style-name")
-                                    val has = text.isNotEmpty() || type != null
-                                    if (cell.name == "table-cell" && (has || styles.props(style, "table-cell")["background-color"]?.let { it != "transparent" } == true) && crep <= 1024) {
-                                        val s = look(style, numeric)
-                                        for (j in 0 until crep) if (has) b.text(row + k, c + j, s, text) else b.blank(row + k, c + j, s)
-                                    }
-                                    val across = cell.attr("number-columns-spanned")?.toIntOrNull() ?: 1
-                                    val down = cell.attr("number-rows-spanned")?.toIntOrNull() ?: 1
-                                    if (across > 1 || down > 1) b.merges += Merge(row + k, c, row + k + down - 1, c + across - 1)
-                                }
-                                c += crep
+                            for (cl in line) {
+                                for (j in 0 until cl.crep) if (cl.text != null) b.text(row + k, cl.at + j, cl.look, cl.text) else b.blank(row + k, cl.at + j, cl.look)
+                                if ((cl.across > 1 || cl.down > 1) && b.merges.size < 10_000) b.merges += Merge(row + k, cl.at, row + k + cl.down - 1, cl.at + cl.across - 1)
                             }
                         }
                         row += rep
@@ -156,13 +163,14 @@ object OdpReader {
                     val widths = t.all("table-column").flatMap { c -> List((c.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, 64)) { length(styles.props(c.attr("style-name"), "table-column")["column-width"]) } }
                     val rows = t.all("table-row").take(200)
                     if (rows.isEmpty()) return@let
-                    val n = rows.maxOf { r -> r.elements.count { it.name == "table-cell" || it.name == "covered-table-cell" } }.coerceAtLeast(1)
+                    // At most 64 columns are drawn (a slide has no room for more)
+                    val n = rows.maxOf { r -> r.elements.count { it.name == "table-cell" || it.name == "covered-table-cell" } }.coerceIn(1, 64)
                     val cw = (0 until n).map { widths.getOrNull(it) ?: (w / n) }
                     val scale = if (cw.sum() > 0f) w / cw.sum() else 1f
                     val rh = h / rows.size
                     for ((ri, r) in rows.withIndex()) {
                         var cx = x
-                        for ((ci, c) in r.elements.filter { it.name == "table-cell" || it.name == "covered-table-cell" }.withIndex()) {
+                        for ((ci, c) in r.elements.filter { it.name == "table-cell" || it.name == "covered-table-cell" }.take(n).withIndex()) {
                             val span = (c.attr("number-columns-spanned")?.toIntOrNull() ?: 1).coerceIn(1, n)
                             val cellW = (ci until minOf(n, ci + span)).sumOf { (cw[it] * scale).toDouble() }.toFloat()
                             if (c.name == "table-cell") {

@@ -700,6 +700,10 @@
     <string name="form_menu">Fill in the form / sign</string>
     <string name="form_saved">The filled copy is saved.</string>
     <string name="form_not_saved">Could not save the filled copy.</string>
+    <plurals name="form_saved_missed">
+        <item quantity="one">The copy is saved, but %d field did not take its value — please check the copy.</item>
+        <item quantity="other">The copy is saved, but %d fields did not take their values — please check the copy.</item>
+    </plurals>
     <string name="sign_title">Signature</string>
     <string name="sign_hint">Draw it with a finger or a stylus; it goes onto the page as a picture. This is a hand-drawn signature, not a qualified electronic one.</string>
     <string name="sign_draw">Draw a signature</string>

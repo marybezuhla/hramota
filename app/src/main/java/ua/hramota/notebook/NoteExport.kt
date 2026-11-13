@@ -32,6 +32,7 @@ import kotlin.math.min
 /** A note as Word, Markdown, PDF or one long picture. */
 object NoteExport {
     const val HIGHLIGHT = 0xFFFFE066.toInt()
+    private const val MAX_PDF_PAGES = 2000
 
     // ---------------------------------------------------------------- Word
 
@@ -269,9 +270,11 @@ object NoteExport {
             newPage()
             for (piece in pieces(context, note, width, 0.75f, 11.5f)) {
                 var from = 0f
-                while (from < piece.height) {
+                // A piece is never taller than a few pages (a damaged note cannot make pages without end)
+                val pieceHeight = piece.height.coerceAtMost(height * 20)
+                while (from < pieceHeight && n < MAX_PDF_PAGES) {
                     val room = height - y
-                    var to = piece.height
+                    var to = pieceHeight
                     if (to - from > room) {
                         // Cut at a line top that fits, or start on a new page; a piece taller than a page is cut where it must
                         val cut = piece.cuts.lastOrNull { it > from && it - from <= room }
@@ -282,8 +285,8 @@ object NoteExport {
                     val c = page!!.canvas
                     c.save(); c.translate(m, m + y); piece.draw(c, from, to); c.restore()
                     y += to - from
-                    from = to
-                    if (from < piece.height) newPage()
+                    from = maxOf(to, from + 1f)
+                    if (from < pieceHeight) newPage()
                 }
             }
             page?.let { doc.finishPage(it) }

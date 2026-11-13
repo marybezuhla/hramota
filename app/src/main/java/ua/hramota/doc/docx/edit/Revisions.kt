@@ -52,6 +52,8 @@ object Revisions {
     }
 
     private val PROP_CHANGES = setOf("rPrChange", "pPrChange", "sectPrChange", "tblPrChange", "trPrChange", "tcPrChange", "tblGridChange", "numberingChange")
+    /** Marks pairing with others elsewhere: kept when the text around them goes, so no pair is left half. */
+    private val PAIRED = setOf("bookmarkStart", "bookmarkEnd", "commentRangeStart", "commentRangeEnd")
     private val RANGE_MARKS = setOf("moveFromRangeStart", "moveFromRangeEnd", "moveToRangeStart", "moveToRangeEnd")
 
     private fun walk(x: String, from: Int, to: Int, sb: StringBuilder, accept: Boolean, depth: Int) {
@@ -68,9 +70,11 @@ object Revisions {
                 e.local in kept && e.empty -> {}
                 e.local in dropped && e.empty -> {}
                 // A table row added (rejected) or deleted (accepted): the whole row goes
-                e.local == "tr" && rowMarked(x, e, if (accept) "del" else "ins") -> {}
+                e.local == "tr" && rowMarked(x, e, if (accept) "del" else "ins") -> keepPaired(x, e, sb, depth)
+                // A table with every row gone goes too (a table without rows is not allowed)
+                e.local == "tbl" && XmlScan.children(x, e).let { k -> k.any { it.local == "tr" } && k.none { it.local == "tr" && !rowMarked(x, it, if (accept) "del" else "ins") } } -> keepPaired(x, e, sb, depth)
                 e.local in kept -> walk(x, e.openEnd, e.closeStart, sb, accept, depth + 1)
-                e.local in dropped -> {}
+                e.local in dropped -> keepPaired(x, e, sb, depth)
                 e.local in PROP_CHANGES -> {}
                 // Formatting changed: rejecting puts the old formatting back
                 !accept && (e.local == "rPr" || e.local == "pPr") && hasChange(x, e) -> {
@@ -94,6 +98,15 @@ object Revisions {
             }
         }
         sb.append(x, pos, to)
+    }
+
+    /** Of an element that goes, only the paired marks inside it (bookmarks, comment ranges) are written. */
+    private fun keepPaired(x: String, e: Elem, sb: StringBuilder, depth: Int) {
+        if (depth > 200) throw IOException("Too deep")
+        if (e.empty || e.selfClosing) return
+        for (k in XmlScan.children(x, e)) {
+            if (k.local in PAIRED) sb.append(x, k.start, k.end) else keepPaired(x, k, sb, depth + 1)
+        }
     }
 
     private fun rowMarked(x: String, tr: Elem, mark: String): Boolean =

@@ -351,9 +351,9 @@ open class ViewerActivity : ComponentActivity() {
                                         runCatching { pg.render(i, 1080)?.asAndroidBitmap()?.let { ua.hramota.social.Cards.fit(it, shape) } }.getOrNull()
                                     }
                                 }
-                                // The text of each page, as its description (where the pages have text)
-                                val alts = (pg as? ua.hramota.doc.TextPages)?.let { tp -> (from..to).map { i -> runCatching { tp.pageText(i).replace(Regex("\\s+"), " ").trim().take(1000) }.getOrDefault("") } } ?: emptyList()
-                                if (pics.isNotEmpty()) ua.hramota.social.Pictures.open(this@ViewerActivity, pics, alts, name.substringBeforeLast('.', name))
+                                // No description filled in by itself: a page's whole text would go along with the pictures
+                                // unseen (it is written from the picture's text on asking, and can be read first)
+                                if (pics.isNotEmpty()) ua.hramota.social.Pictures.open(this@ViewerActivity, pics, emptyList(), name.substringBeforeLast('.', name))
                             }
                         }
                     }
@@ -661,17 +661,33 @@ open class ViewerActivity : ComponentActivity() {
         held.scope.launch {
             held.formSaving = true
             var wasEmpty = false
+            var missed = 0
             val ok = try {
                 withContext(Dispatchers.IO) {
                     try {
                         // Only into a file just made (one chosen from those already there is not written over)
                         wasEmpty = EditSaving.isEmpty(app, target)
-                        wasEmpty && app.contentResolver.openFileDescriptor(target, "wt")?.use { pdf.saveForm(values, sig, it) } == true
+                        val written = wasEmpty && app.contentResolver.openFileDescriptor(target, "wt")?.use { pdf.saveForm(values, sig, it) } == true
+                        // The copy opened again and its fields read: a field that did not take its value is told
+                        if (written) missed = try {
+                            val read = app.contentResolver.openFileDescriptor(target, "r")?.let { pfd ->
+                                val copy = PdfiumPages.open(app, pfd)
+                                try { copy.formFields() } finally { copy.close() }
+                            }
+                            if (read == null) values.size
+                            else values.count { (k, v) -> read.firstOrNull { it.name == k }?.value != v.take(2000) }
+                        } catch (e: Exception) { values.size }
+                        written
                     } catch (e: Exception) { false }
                 }
             } finally { held.formSaving = false }
             if (!ok && wasEmpty) withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { try { EditSaving.remove(app, target) } catch (e: Exception) {} }
-            android.widget.Toast.makeText(app, app.getString(if (ok) R.string.form_saved else R.string.form_not_saved), android.widget.Toast.LENGTH_LONG).show()
+            val said = when {
+                !ok -> app.getString(R.string.form_not_saved)
+                missed > 0 -> app.resources.getQuantityString(R.plurals.form_saved_missed, missed, missed)
+                else -> app.getString(R.string.form_saved)
+            }
+            android.widget.Toast.makeText(app, said, android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

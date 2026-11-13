@@ -446,6 +446,18 @@ static jstring option_label(JNIEnv* env, FPDF_FORMHANDLE form, FPDF_ANNOTATION a
     return s;
 }
 
+// Puts a short C string at [i], dropping the local reference at once (a form has thousands of widgets)
+static void put_str(JNIEnv* env, jobjectArray out, int i, const char* c) {
+    jstring s = (*env)->NewStringUTF(env, c);
+    (*env)->SetObjectArrayElement(env, out, i, s);
+    if (s) (*env)->DeleteLocalRef(env, s);
+}
+
+// Everything the field list may hold, in UTF-16 units: the list goes back to the app in one
+// message, which has a hard size limit (about 1 MB); a form past this is shown in part
+#define FIELDS_BUDGET (300 * 1024)
+#define MAX_OPTIONS_CHARS 16384
+
 // The form's widgets, at most [max]: for each, 9 strings in a row: page, type, flags, name,
 // alternate name (the label for people), value, checked ("1"/"0"), export value, and
 // "left,top,right,bottom" on a devW x devH drawing of its page; then its options as one string
@@ -461,13 +473,15 @@ JNIEXPORT jobjectArray JNICALL Java_ua_hramota_pdf_PdfiumNative_fields(JNIEnv* e
     const int per = 10;
     jobjectArray out = (*env)->NewObjectArray(env, max * per, str, NULL);
     int k = 0;
+    long budget = FIELDS_BUDGET;
+    unsigned short* opts = malloc((MAX_OPTIONS_CHARS + 1) * 2);
     int pages = FPDF_GetPageCount(doc);
-    for (int p = 0; p < pages && k < max; p++) {
+    for (int p = 0; p < pages && k < max && budget > 0 && opts; p++) {
         FPDF_PAGE page = FPDF_LoadPage(doc, p);
         if (!page) continue;
         FORM_OnAfterLoadPage(page, form);
         int n = FPDFPage_GetAnnotCount(page);
-        for (int i = 0; i < n && k < max; i++) {
+        for (int i = 0; i < n && k < max && budget > 0; i++) {
             FPDF_ANNOTATION a = FPDFPage_GetAnnot(page, i);
             if (!a) continue;
             if (FPDFAnnot_GetSubtype(a) == FPDF_ANNOT_WIDGET) {
@@ -480,36 +494,38 @@ JNIEXPORT jobjectArray JNICALL Java_ua_hramota_pdf_PdfiumNative_fields(JNIEnv* e
                     FPDF_PageToDevice(page, 0, 0, devW, devH, 0, r.right, r.bottom, &x2, &y2);
                 }
                 int base = k * per;
-                snprintf(buf, sizeof(buf), "%d", p);
-                (*env)->SetObjectArrayElement(env, out, base, (*env)->NewStringUTF(env, buf));
-                snprintf(buf, sizeof(buf), "%d", type);
-                (*env)->SetObjectArrayElement(env, out, base + 1, (*env)->NewStringUTF(env, buf));
-                snprintf(buf, sizeof(buf), "%d", FPDFAnnot_GetFormFieldFlags(form, a));
-                (*env)->SetObjectArrayElement(env, out, base + 2, (*env)->NewStringUTF(env, buf));
-                jstring s;
-                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldName); (*env)->SetObjectArrayElement(env, out, base + 3, s); (*env)->DeleteLocalRef(env, s);
-                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldAlternateName); (*env)->SetObjectArrayElement(env, out, base + 4, s); (*env)->DeleteLocalRef(env, s);
-                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldValue); (*env)->SetObjectArrayElement(env, out, base + 5, s); (*env)->DeleteLocalRef(env, s);
-                (*env)->SetObjectArrayElement(env, out, base + 6, (*env)->NewStringUTF(env, FPDFAnnot_IsChecked(form, a) ? "1" : "0"));
-                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldExportValue); (*env)->SetObjectArrayElement(env, out, base + 7, s); (*env)->DeleteLocalRef(env, s);
+                snprintf(buf, sizeof(buf), "%d", p); put_str(env, out, base, buf);
+                snprintf(buf, sizeof(buf), "%d", type); put_str(env, out, base + 1, buf);
+                snprintf(buf, sizeof(buf), "%d", FPDFAnnot_GetFormFieldFlags(form, a)); put_str(env, out, base + 2, buf);
+                AnnotText texts[4] = { FPDFAnnot_GetFormFieldName, FPDFAnnot_GetFormFieldAlternateName, FPDFAnnot_GetFormFieldValue, FPDFAnnot_GetFormFieldExportValue };
+                int slots[4] = { 3, 4, 5, 7 };
+                for (int t = 0; t < 4; t++) {
+                    jstring s = annot_text(env, form, a, texts[t]);
+                    if (s) { budget -= (*env)->GetStringLength(env, s) + 8; (*env)->SetObjectArrayElement(env, out, base + slots[t], s); (*env)->DeleteLocalRef(env, s); }
+                }
+                put_str(env, out, base + 6, FPDFAnnot_IsChecked(form, a) ? "1" : "0");
                 snprintf(buf, sizeof(buf), "%d,%d,%d,%d", x1 < x2 ? x1 : x2, y1 < y2 ? y1 : y2, x1 < x2 ? x2 : x1, y1 < y2 ? y2 : y1);
-                (*env)->SetObjectArrayElement(env, out, base + 8, (*env)->NewStringUTF(env, buf));
-                // The choices of a list or a drop-down, joined
+                put_str(env, out, base + 8, buf);
+                // The choices of a list or a drop-down, joined by U+001F in one buffer
                 int options = (type == FPDF_FORMFIELD_COMBOBOX || type == FPDF_FORMFIELD_LISTBOX) ? FPDFAnnot_GetOptionCount(form, a) : 0;
                 if (options > 500) options = 500;
-                jstring joined = (*env)->NewStringUTF(env, "");
+                int used = 0;
                 for (int o = 0; o < options; o++) {
-                    jstring label = option_label(env, form, a, o);
-                    jclass sc = (*env)->GetObjectClass(env, joined);
-                    jmethodID concat = (*env)->GetMethodID(env, sc, "concat", "(Ljava/lang/String;)Ljava/lang/String;");
-                    jstring sep = (*env)->NewStringUTF(env, o == 0 ? "" : "\x1f");
-                    jstring a1 = (jstring)(*env)->CallObjectMethod(env, joined, concat, sep);
-                    jstring a2 = (jstring)(*env)->CallObjectMethod(env, a1, concat, label);
-                    (*env)->DeleteLocalRef(env, joined); (*env)->DeleteLocalRef(env, a1); (*env)->DeleteLocalRef(env, sep); (*env)->DeleteLocalRef(env, label); (*env)->DeleteLocalRef(env, sc);
-                    joined = a2;
+                    unsigned long bytes = FPDFAnnot_GetOptionLabel(form, a, o, NULL, 0);
+                    if (bytes > 4096) bytes = 0;
+                    long chars = bytes >= 2 ? (long)(bytes / 2 - 1) : 0;
+                    if (used + (o > 0 ? 1 : 0) + chars > MAX_OPTIONS_CHARS) break;
+                    if (o > 0) opts[used++] = 0x1f;
+                    if (chars > 0) {
+                        // Room for the label and its terminating zero, which the next one overwrites
+                        FPDFAnnot_GetOptionLabel(form, a, o, (FPDF_WCHAR*)(opts + used), (unsigned long)(chars + 1) * 2);
+                        used += (int)chars;
+                    }
                 }
+                jstring joined = (*env)->NewString(env, (const jchar*)opts, used);
+                budget -= used + 8;
                 (*env)->SetObjectArrayElement(env, out, base + 9, joined);
-                (*env)->DeleteLocalRef(env, joined);
+                if (joined) (*env)->DeleteLocalRef(env, joined);
                 k++;
             }
             FPDFPage_CloseAnnot(a);
@@ -517,6 +533,7 @@ JNIEXPORT jobjectArray JNICALL Java_ua_hramota_pdf_PdfiumNative_fields(JNIEnv* e
         FORM_OnBeforeClosePage(page, form);
         FPDF_ClosePage(page);
     }
+    free(opts);
     FPDFDOC_ExitFormFillEnvironment(form);
     // Only the rows filled
     jobjectArray trimmed = (*env)->NewObjectArray(env, k * per, str, NULL);

@@ -206,17 +206,23 @@ object OdtReader {
                         val cells = ArrayList<Cell>()
                         var col = 0
                         for (c in r.elements) {
-                            val repeat = (c.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, 64)
+                            // A row is at most 63 cells wide (as the columns are)
+                            if (col >= 63) break
+                            val repeat = (c.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, 63 - col)
                             when (c.name) {
-                                "table-cell" -> repeat(repeat) {
+                                "table-cell" -> {
+                                    // A repeated cell is read once and shown as many times
                                     val span = (c.attr("number-columns-spanned")?.toIntOrNull() ?: 1).coerceIn(1, 63)
                                     val down = (c.attr("number-rows-spanned")?.toIntOrNull() ?: 1)
-                                    if (down > 1) spanning[col] = down - 1
                                     val blocks = ArrayList<Block>()
                                     for (k in c.elements) block(k, blocks, 0, depth + 1)
                                     if (blocks.isEmpty()) blocks += Block.Para(ParaProps(), RunProps(size = 12f), emptyList(), null, null)
-                                    cells += Cell(span, false, blocks, color(styles.props(c.attr("style-name"), "table-cell")["background-color"]))
-                                    col += span
+                                    val fill = color(styles.props(c.attr("style-name"), "table-cell")["background-color"])
+                                    repeat(repeat) {
+                                        if (down > 1) spanning[col] = down - 1
+                                        cells += Cell(span, false, blocks, fill)
+                                        col += span
+                                    }
                                 }
                                 "covered-table-cell" -> repeat(repeat) {
                                     // Covered from above (a cell spanning rows): a merged cell; covered from the left: nothing

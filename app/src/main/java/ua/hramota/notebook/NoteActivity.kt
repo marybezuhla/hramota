@@ -84,6 +84,10 @@ class NoteActivity : ComponentActivity() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         val saving = Mutex()
         var saved = -1
+        /** The newest version written: an older one waiting for the lock is not written after it. */
+        @Volatile var written = -1
+        /** A locked note asks for the phone's lock again after Hramota was left. */
+        var mustAsk by mutableStateOf(false)
         override fun onCleared() { scope.cancel() }
     }
 
@@ -102,10 +106,10 @@ class NoteActivity : ComponentActivity() {
             else if (note.meta.locked) {
                 held.askLock = true
                 lifecycleScope.launch {
-                    if (Vault.confirm(this@NoteActivity, getString(R.string.note_locked_title), note.meta.title)) { held.state = NoteState(note.meta, note.blocks); held.askLock = false }
+                    if (Vault.confirm(this@NoteActivity, getString(R.string.note_locked_title), note.meta.title)) { held.state = NoteState(note.meta, note.blocks).also { held.saved = it.version; held.written = it.version }; held.askLock = false }
                     else finish()
                 }
-            } else held.state = NoteState(note.meta, note.blocks)
+            } else held.state = NoteState(note.meta, note.blocks).also { held.saved = it.version; held.written = it.version }
         }
         if (id == null) { finish(); return }
         setContent {
@@ -114,6 +118,7 @@ class NoteActivity : ComponentActivity() {
                     val s = held.state
                     when {
                         held.missing -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(stringResource(R.string.note_missing)) }
+                        held.mustAsk -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                         s == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                         else -> NoteScreen(s, held, onBack = { finish() })
                     }
@@ -125,6 +130,24 @@ class NoteActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         if (::held.isInitialized) saveNow(held, this)
+    }
+
+    private var stopped = false
+    override fun onStop() { super.onStop(); stopped = true }
+
+    override fun onStart() {
+        super.onStart()
+        if (!::held.isInitialized) return
+        // Hramota locked while away: the note is not shown again without unlocking (it was saved when left)
+        if (Vault.locked(this)) { finish(); return }
+        val s = held.state
+        if (stopped && s != null && s.meta.locked && !held.mustAsk) {
+            held.mustAsk = true
+            lifecycleScope.launch {
+                if (Vault.confirm(this@NoteActivity, getString(R.string.note_locked_title), s.meta.title)) held.mustAsk = false else finish()
+            }
+        }
+        stopped = false
     }
 
     override fun onDestroy() {
@@ -150,7 +173,9 @@ private fun saveNow(held: NoteActivity.Holder, context: Context) {
     val app = context.applicationContext
     held.scope.launch(Dispatchers.IO + NonCancellable) {
         held.saving.withLock {
-            try { Notebook.write(app, note); held.saved = v } catch (e: Exception) {
+            // A newer version was written meanwhile: this older one is not written over it
+            if (v <= held.written) return@withLock
+            try { Notebook.write(app, note); held.saved = v; held.written = v } catch (e: Exception) {
                 withContext(Dispatchers.Main) { Toast.makeText(app, app.getString(R.string.note_not_saved), Toast.LENGTH_LONG).show() }
             }
         }
@@ -220,9 +245,10 @@ internal fun NoteScreen(state: NoteState, held: NoteActivity.Holder, onBack: () 
                 val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
                 val file = runCatching { Notebook.putPicture(context, state.meta.id, bytes, png) }.getOrNull() ?: return@withContext null
-                NBlock.Picture(state.newId(), file, o.outWidth, o.outHeight)
+                Triple(file, o.outWidth, o.outHeight)
             }
-            if (added == null) Toast.makeText(context, context.getString(R.string.slide_picture_failed), Toast.LENGTH_SHORT).show() else state.insert(added)
+            if (added == null) Toast.makeText(context, context.getString(R.string.slide_picture_failed), Toast.LENGTH_SHORT).show()
+            else state.insert(NBlock.Picture(state.newId(), added.first, added.second, added.third))
         }
     }
     val books by Notebook.books(context).collectAsState()

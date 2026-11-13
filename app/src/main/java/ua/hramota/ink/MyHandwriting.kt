@@ -119,6 +119,12 @@ class MyHandwritingActivity : ComponentActivity() {
         applySecureScreen()
         setContent { AppTheme { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MyHandwritingScreen(onBack = { finish() }) } } }
     }
+
+    override fun onStart() {
+        super.onStart()
+        // Hramota locked while away: the samples are not shown again without unlocking
+        if (Vault.locked(this)) finish()
+    }
 }
 
 @Composable

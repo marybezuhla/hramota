@@ -161,8 +161,9 @@ object DocxWriter {
         if (r.bold) rpr.append("<w:b/><w:bCs/>")
         if (r.italic) rpr.append("<w:i/><w:iCs/>")
         if (r.strike) rpr.append("<w:strike/>")
-        if (r.underline) rpr.append("<w:u w:val=\"single\"/>")
+        // In the schema's order: highlight before underline
         if (r.highlight) rpr.append("<w:highlight w:val=\"yellow\"/>")
+        if (r.underline) rpr.append("<w:u w:val=\"single\"/>")
         val sb = StringBuilder("<w:r>")
         if (rpr.isNotEmpty()) sb.append("<w:rPr>").append(rpr).append("</w:rPr>")
         // Line breaks and tabs inside a paragraph as Word keeps them

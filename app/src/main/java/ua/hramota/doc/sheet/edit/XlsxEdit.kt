@@ -174,6 +174,24 @@ class XlsxEdit private constructor(
         }
     }
 
+    /**
+     * What the cell holds, exactly as stored (for moving it whole, as sorting does): null when it
+     * holds a formula or an error, which are not moved.
+     */
+    @Synchronized
+    fun stored(cell: CellKey): Input? {
+        inputs[cell]?.let { return if (it is Input.Formula) null else it }
+        val raw = sheets.getOrNull(cell.sheet)?.cell(cell.row, cell.col) ?: return Input.Clear
+        if (raw.f != null) return null
+        return when (val v = rawValue(raw)) {
+            is Value.Num -> Input.Number(v.v)
+            is Value.Text -> Input.Text(v.v)
+            is Value.Bool -> Input.Bool(v.v)
+            is Value.Err -> null
+            Value.Empty -> Input.Clear
+        }
+    }
+
     /** The cell's style number (cellXfs), as the file has it. */
     fun style(cell: CellKey): Int? = sheets.getOrNull(cell.sheet)?.styleOf(cell.row, cell.col)?.toIntOrNull()
 
@@ -773,7 +791,7 @@ class XlsxEdit private constructor(
         val ref = columnName(col) + (row + 1)
         val s = (restyled ?: raw?.s ?: inherited)?.takeIf { it != "0" || raw?.s != null || restyled != null }?.let { " s=\"${XmlScan.escape(it)}\"" } ?: ""
         // Only the look changed: the cell as it is, with its new style
-        if (restyled != null && input == null && value == null) {
+        if (restyled != null && input == null && value == null && !unshared) {
             if (raw == null) return "<${p}c r=\"$ref\"$s/>"
             val tag = x.substring(raw.elem.start, raw.elem.openEnd)
             val newTag = (if (Regex("\\ss=\"[^\"]*\"").containsMatchIn(tag)) tag.replace(Regex("\\ss=\"[^\"]*\""), s) else tag.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1$s"))

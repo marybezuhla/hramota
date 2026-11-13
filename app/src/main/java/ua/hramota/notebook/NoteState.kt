@@ -83,7 +83,7 @@ class NoteState(meta: NoteMeta, blocks: List<NBlock>) {
     /** An ink or picture block tapped: its actions are shown. */
     var chosen by mutableStateOf<Long?>(null)
 
-    private var nextId = (blocks.maxOfOrNull { it.id } ?: 0L) + 1
+    private var nextId = (this.blocks.maxOfOrNull { it.id } ?: 0L) + 1
     fun newId() = nextId++
 
     /** Replaces the blocks; [typingIn]: typing in that block (merged with typing just before into one undo step). */

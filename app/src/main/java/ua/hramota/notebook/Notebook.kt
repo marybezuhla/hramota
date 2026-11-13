@@ -102,7 +102,9 @@ object Notebook {
             loaded = true
             if (gone.isNotEmpty()) { gone.forEach { removeFiles(context, it.id) }; save(context) }
         } catch (e: Exception) {
+            // An index that cannot be read is not written over with a smaller one
             books.value = emptyList(); notes.value = emptyList()
+            unreadable = true
             loaded = true
         }
     }
@@ -165,10 +167,14 @@ object Notebook {
         return notes.value.first { it.id == m.id }
     }
 
+    /** A note; null when it is not there or its file cannot be read (never an empty one in its place, which a save would write over it). */
     fun read(context: Context, id: String): Note? {
         ensure(context)
         val meta = notes.value.firstOrNull { it.id == id } ?: return null
-        val bytes = try { Vault.readIn(Library.notebookDir(context), "$id.json") } catch (e: Exception) { null } ?: return Note(meta, listOf(NBlock.Text(1, "")))
+        val dir = Library.notebookDir(context)
+        val exists = java.io.File(dir, "$id.json").exists() || java.io.File(dir, "$id.json" + Vault.SUFFIX).exists()
+        if (!exists) return Note(meta, listOf(NBlock.Text(1, "")))
+        val bytes = try { Vault.readIn(dir, "$id.json") } catch (e: Exception) { null } ?: return null
         return try { Note(meta, blocks(JSONObject(String(bytes)).getJSONArray("blocks"))) } catch (e: Exception) { null }
     }
 
@@ -178,7 +184,10 @@ object Notebook {
         val o = JSONObject().put("version", 1).put("blocks", JSONArray().apply { note.blocks.forEach { put(blockJson(it)) } })
         Vault.writeIn(context, Library.notebookDir(context), note.meta.id + ".json", o.toString().toByteArray())
         val text = plainText(note.blocks)
+        // Put in the bin meanwhile (from the list or the editor's menu): it stays there
+        val current = notes.value.firstOrNull { it.id == note.meta.id }
         val m = note.meta.copy(
+            deleted = current?.deleted ?: note.meta.deleted,
             preview = text.lineSequence().filter { it.isNotBlank() }.drop(if (note.meta.title.isBlank()) 1 else 0).take(3).joinToString("\n").take(240),
             text = (note.meta.title + "\n" + text).take(MAX_SEARCH_TEXT),
             hasInk = note.blocks.any { it is NBlock.Ink && it.strokes.isNotEmpty() },
@@ -234,23 +243,29 @@ object Notebook {
     // ---------------------------------------------------------------- backup
 
     /** Everything of the notebook as plain files, for a sealed backup. */
-    @Synchronized fun backupFiles(context: Context): List<Pair<String, ByteArray>> {
+    @Synchronized fun backupFiles(context: Context, put: (String, ByteArray) -> Unit) {
         ensure(context)
-        if (unreadable) return emptyList()
-        val out = ArrayList<Pair<String, ByteArray>>()
+        if (unreadable) return
         val dir = Library.notebookDir(context)
-        Vault.readIn(dir, INDEX)?.let { out += "notebook/$INDEX" to it }
-        for (m in notes.value) Vault.readIn(dir, m.id + ".json")?.let { out += "notebook/${m.id}.json" to it }
+        // One file at a time: a notebook with many photos is never held in memory whole
+        Vault.readIn(dir, INDEX)?.let { put("notebook/$INDEX", it) }
+        for (m in notes.value) Vault.readIn(dir, m.id + ".json")?.let { put("notebook/${m.id}.json", it) }
         val media = Library.notebookMediaDir(context)
         for (f in media.listFiles().orEmpty()) {
             val name = f.name.removeSuffix(Vault.SUFFIX)
-            if (!SAFE.matches(name)) continue
-            Vault.readIn(media, name)?.let { out += "notebook-media/$name" to it }
+            if (!PICTURE.matches(name)) continue
+            Vault.readIn(media, name)?.let { put("notebook-media/$name", it) }
         }
-        return out
     }
 
-    private val SAFE = Regex("[A-Za-z0-9_.\\-]{1,120}")
+    /** Names a note's id and its pictures may have (anything else from a backup is left out). */
+    private val ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    private val PICTURE = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9a-f-]{12}\\.(png|jpg)")
+
+    /** Seals or opens every notebook file in place (locked storage turned on or off), with no note being written meanwhile. */
+    @Synchronized fun convert(context: Context, key: javax.crypto.SecretKey, seal: Boolean) {
+        for (dir in listOf(Library.notebookDir(context), Library.notebookMediaDir(context))) for (f in dir.listFiles().orEmpty()) if (f.isFile) ua.hramota.data.Shelf.convertFile(key, f, seal)
+    }
 
     /**
      * Joins a backup's notebook to this one: notebooks and notes missing here are added; a note
@@ -270,13 +285,13 @@ object Notebook {
         val list = notes.value.toMutableList()
         for (i in 0 until n.length()) {
             val m = try { meta(n.getJSONObject(i)) } catch (e: Exception) { continue }
-            if (!SAFE.matches(m.id + ".json")) continue
+            if (!ID.matches(m.id)) continue
             val mine = list.indexOfFirst { it.id == m.id }
             if (mine >= 0 && list[mine].updated >= m.updated) continue
             val content = read("notebook/${m.id}.json") ?: continue
             val note = try { Note(m, blocks(JSONObject(String(content)).getJSONArray("blocks"))) } catch (e: Exception) { continue }
             for (p in note.blocks.filterIsInstance<NBlock.Picture>()) {
-                if (!SAFE.matches(p.file)) continue
+                if (!PICTURE.matches(p.file) || !p.file.startsWith(m.id + "-")) continue
                 read("notebook-media/${p.file}")?.let { Vault.writeIn(context, Library.notebookMediaDir(context), p.file, it) }
             }
             Vault.writeIn(context, Library.notebookDir(context), m.id + ".json", content)

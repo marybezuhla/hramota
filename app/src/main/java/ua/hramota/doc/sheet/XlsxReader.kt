@@ -147,7 +147,8 @@ object XlsxReader {
             sheets += b.build(styles, date1904, strings, s.attr("name") ?: "Sheet")
             chartPaths += (sheets.size - 1) to related(parts, path, "/drawing").flatMap { related(parts, it, "/chart") }
             // Notes on cells (Excel's comments): the author and the words, by cell
-            for (cp in related(parts, path, "/comments")) {
+            // A damaged notes part is left out; the sheet is still shown
+            for (cp in related(parts, path, "/comments")) try {
                 val ct = tree(cp) ?: continue
                 val authors = ct.child("authors")?.all("author")?.map { it.text }.orEmpty()
                 val map = HashMap<Pair<Int, Int>, String>()
@@ -155,13 +156,14 @@ object XlsxReader {
                     val ref = c.attr("ref") ?: continue
                     val m = Regex("([A-Za-z]{1,3})(\\d+)").matchEntire(ref) ?: continue
                     val col = m.groupValues[1].uppercase().fold(0) { a, ch -> a * 26 + (ch - 'A' + 1) } - 1
-                    val row = m.groupValues[2].toInt() - 1
+                    val row = (m.groupValues[2].toIntOrNull() ?: continue) - 1
+                    if (row < 0 || col < 0) continue
                     val words = buildList { val st = ArrayDeque<XmlNode>().apply { add(c) }; while (st.isNotEmpty()) { val x = st.removeFirst(); if (x.name == "t") add(x.text); st.addAll(x.children) } }.joinToString("").trim()
                     val who = c.attr("authorId")?.toIntOrNull()?.let { authors.getOrNull(it) }?.takeIf { it.isNotBlank() }
                     map[row to col] = (if (who != null) "$who: " else "") + words.take(2000)
                 }
                 if (map.isNotEmpty()) comments[sheets.size - 1] = (comments[sheets.size - 1].orEmpty() + map)
-            }
+            } catch (e: Exception) {}
         }
         // Charts, once all sheets are read (a chart saved without its values reads them from the cells)
         val resolve = { ref: String -> cellsOf(sheets, ref) }
@@ -169,8 +171,11 @@ object XlsxReader {
             val pictures = ArrayList<ByteArray>()
             for (chartPath in list) {
                 if (chartCount >= 40) break
-                val chart = tree(chartPath)?.let { ua.hramota.doc.Chart.parse(it, resolve = resolve) } ?: continue
-                try { pictures += chart.png(1000, 620); chartCount++ } catch (e: Exception) {}
+                // A chart that cannot be read is left out, never the whole workbook with it
+                try {
+                    val chart = tree(chartPath)?.let { ua.hramota.doc.Chart.parse(it, resolve = resolve) } ?: continue
+                    pictures += chart.png(1000, 620); chartCount++
+                } catch (e: Exception) {}
             }
             if (pictures.isNotEmpty()) charts[i] = pictures
         }
@@ -184,8 +189,9 @@ object XlsxReader {
         val name = m.groupValues[1].replace("''", "'").ifEmpty { m.groupValues[2] }
         val sh = sheets.firstOrNull { it.name == name } ?: return emptyList()
         fun col(l: String) = l.uppercase().fold(0) { a, c -> a * 26 + (c - 'A' + 1) } - 1
-        val c1 = col(m.groupValues[3]); val r1 = m.groupValues[4].toInt() - 1
-        val c2 = m.groupValues[5].ifEmpty { m.groupValues[3] }.let(::col); val r2 = (m.groupValues[6].ifEmpty { m.groupValues[4] }).toInt() - 1
+        val c1 = col(m.groupValues[3]); val r1 = (m.groupValues[4].toIntOrNull() ?: return emptyList()) - 1
+        val c2 = m.groupValues[5].ifEmpty { m.groupValues[3] }.let(::col); val r2 = ((m.groupValues[6].ifEmpty { m.groupValues[4] }).toIntOrNull() ?: return emptyList()) - 1
+        if (r1 < 0 || r2 < 0) return emptyList()
         val out = ArrayList<String>()
         for (r in minOf(r1, r2)..minOf(maxOf(r1, r2), minOf(r1, r2) + 2000)) for (c in minOf(c1, c2)..minOf(maxOf(c1, c2), minOf(c1, c2) + 50)) {
             val row = sh.row(r); val k = row?.find(c) ?: -1

@@ -82,7 +82,7 @@ object Backup {
             put("settings.json", Settings.get(context).toJson().toString().toByteArray())
             for (e in entries) Shelf.loadCoverBytes(context, e.id)?.let { put("covers/${e.id}.png", it) }
             // The notebook whole: its index, each note and its pictures (plain inside the sealed backup)
-            for ((name, bytes) in ua.hramota.notebook.Notebook.backupFiles(context)) put(name, bytes)
+            ua.hramota.notebook.Notebook.backupFiles(context) { name, bytes -> put(name, bytes) }
             chosen.forEachIndexed { i, e ->
                 progress(i, chosen.size)
                 val f = File(e.copy!!)

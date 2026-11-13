@@ -102,7 +102,9 @@ internal object Styles {
         append("fills", newFills, setOf("borders", "cellStyleXfs", "cellXfs", "cellStyles", "dxfs", "tableStyles", "colors", "extLst"))
         append("cellXfs", newXfs, emptySet())
         val b = StringBuilder(styles)
-        for ((s, e, t) in edits.sortedByDescending { it.first }) b.replace(s, e, t)
+        // At the same place, the part replaced goes first and the new part is put before it after
+        // (an insertion first would be swallowed by the replacement)
+        for ((s, e, t) in edits.sortedWith(compareByDescending<Triple<Int, Int, String>> { it.first }.thenByDescending { it.second })) b.replace(s, e, t)
         return b.toString() to xfs.size
     }
 

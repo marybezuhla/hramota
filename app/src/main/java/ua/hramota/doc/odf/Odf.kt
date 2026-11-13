@@ -26,7 +26,7 @@ class OdfPackage private constructor(val parts: Map<String, ByteArray>, val medi
     companion object {
         private const val MAX_PART = 64L * 1024 * 1024
         private const val MAX_MEDIA = 96L * 1024 * 1024
-        private const val MAX_NODES = 3_000_000
+        private const val MAX_NODES = 1_500_000
         private const val MAX_DEPTH = 200
 
         fun read(input: InputStream): OdfPackage {

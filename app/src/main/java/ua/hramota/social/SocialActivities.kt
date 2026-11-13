@@ -94,8 +94,8 @@ object Pictures {
 
     /** Writes [bitmaps] as PNG files and opens the screen to hide parts, describe and share them. */
     fun open(context: Context, bitmaps: List<Bitmap>, alts: List<String> = emptyList(), name: String = "hramota") {
+        // Another pictures screen may be open with its own files: they are left alone
         val d = dir(context)
-        d.listFiles()?.forEach { it.delete() }
         val stamp = System.currentTimeMillis()
         val files = bitmaps.mapIndexed { i, b ->
             File(d, "${safe(name)}-${stamp}-${i + 1}.png").also { f -> FileOutputStream(f).use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
@@ -183,7 +183,8 @@ internal fun ThreadScreen(start: String, onBack: () -> Unit) {
     var platform by rememberSaveable { mutableStateOf("x") }
     var numbered by rememberSaveable { mutableStateOf(true) }
     val p = SocialText.PLATFORMS.first { it.key == platform }
-    val parts = remember(text, platform, numbered) { SocialText.thread(text, p, numbered) }
+    // Cut in parts away from the screen's thread: a long text takes a moment
+    val parts by produceState(emptyList<String>(), text, platform, numbered) { value = withContext(Dispatchers.Default) { SocialText.thread(text, p, numbered) } }
     val length = remember(text, platform) { SocialText.length(text.trim(), p) }
     fun copy(s: String) {
         context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("post", s))
@@ -230,6 +231,8 @@ class PicturesActivity : ComponentActivity() {
         val files = mutableStateListOf<String>()
         val alts = mutableStateListOf<String>()
         var started = false
+        /** Every picture this screen has had (also those replaced by a hidden version): deleted when it closes. */
+        val made = java.util.Collections.synchronizedSet(HashSet<String>())
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -240,7 +243,7 @@ class PicturesActivity : ComponentActivity() {
             held.started = true
             val files = intent.getStringArrayExtra(EXTRA_FILES).orEmpty().filter { File(it).exists() && File(it).parentFile?.canonicalPath == Pictures.dir(this).canonicalPath }
             val picked = intent.getStringExtra(EXTRA_PICK) != null
-            held.files.addAll(files)
+            held.files.addAll(files); held.made.addAll(files)
             val alts = intent.getStringArrayExtra(EXTRA_ALTS).orEmpty()
             held.alts.addAll(files.indices.map { alts.getOrElse(it) { "" } })
             if (files.isEmpty() && !picked) { finish(); return }
@@ -252,7 +255,7 @@ class PicturesActivity : ComponentActivity() {
         super.onDestroy()
         val r = TextRecognizer.get(this)
         kotlinx.coroutines.CoroutineScope(Dispatchers.Default).launch { r.letGo() }
-        if (isFinishing) Pictures.dir(this).listFiles()?.forEach { it.delete() }
+        if (isFinishing) ViewModelProvider(this)[Holder::class.java].made.toList().forEach { File(it).delete() }
     }
 
     companion object {
@@ -279,7 +282,7 @@ internal fun PicturesScreen(held: PicturesActivity.Holder, pickFirst: Boolean, o
                 File(Pictures.dir(context), "picture-${System.currentTimeMillis()}.png").also { out -> FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }; bmp.recycle() }
             }
             if (f == null) Toast.makeText(context, context.getString(R.string.scan_picture_failed), Toast.LENGTH_SHORT).show()
-            else { held.files += f.path; held.alts += "" }
+            else { held.made += f.path; held.files += f.path; held.alts += "" }
         }
     }
     var asked by rememberSaveable { mutableStateOf(false) }
@@ -316,7 +319,11 @@ internal fun PicturesScreen(held: PicturesActivity.Holder, pickFirst: Boolean, o
         }
     }
 
-    editing?.let { i -> HideEditor(held.files[i], onDone = { now -> if (now != null) held.files[i] = now; editing = null }); return }
+    editing?.let { i -> HideEditor(held.files[i], onDone = { now ->
+        // The description was of the picture before parts were hidden: it may tell what is now hidden
+        if (now != null) { held.made += now; held.files[i] = now; held.alts[i] = "" }
+        editing = null
+    }); return }
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         TopBar(stringResource(R.string.social_pictures), null, onBack = onBack)

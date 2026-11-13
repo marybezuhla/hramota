@@ -367,6 +367,9 @@ class PdfiumPages private constructor(
                 read(reply)
             } catch (e: Exception) {
                 null
+            } catch (e: OutOfMemoryError) {
+                // A reply claiming a huge size: refused like any other bad answer
+                null
             } finally {
                 data.recycle(); reply.recycle()
             }

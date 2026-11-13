@@ -320,31 +320,43 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         if (b[2] - first < 1) return
         if (sh.merges.any { m -> m.bottom >= first && m.top <= b[2] && m.right >= b[1] && m.left <= b[3] }) { notice = R.string.sort_refused; return }
         val cols = b[1]..b[3]
-        val contents = (first..b[2]).map { r -> cols.map { c -> edit.content(CellKey(s, r, c)) } }
-        if (contents.any { line -> line.any { it.startsWith("=") } } || (first..b[2]).any { r -> cols.any { c -> edit.locked(CellKey(s, r, c)) } }) { notice = R.string.sort_refused; return }
-        // Each cell's look goes with it: a change made here, else the file's
-        val looks = (first..b[2]).map { r -> cols.map { c -> CellKey(s, r, c).let { key -> edit.look(key) ?: edit.style(key)?.let { CellLook(style = it.toString()) } } } }
+        // What moves is what the cells hold exactly (a number with all its digits, text that looks
+        // like a number still text), not what is shown; formulas and errors are not moved
+        val stored = (first..b[2]).map { r -> cols.map { c -> edit.stored(CellKey(s, r, c)) } }
+        if (stored.any { line -> line.any { it == null } } || (first..b[2]).any { r -> cols.any { c -> edit.locked(CellKey(s, r, c)) } }) { notice = R.string.sort_refused; return }
+        // Each cell's whole look goes with it: the file's style first, then a change made here
+        val looks = (first..b[2]).map { r -> cols.map { c -> CellKey(s, r, c).let { key ->
+            val mine = edit.look(key) ?: CellLook()
+            if (mine.style != null) mine else mine.copy(style = (edit.style(key) ?: 0).toString())
+        } } }
         val collator = java.text.Collator.getInstance(java.util.Locale.forLanguageTag("uk")).apply { strength = java.text.Collator.SECONDARY }
         val k = col - b[1]
-        fun num(t: String) = ua.hramota.doc.sheet.edit.Formula.parseNumber(t.replace(',', '.').replace(" ", "").replace("\u00A0", ""))
-        val order = contents.indices.sortedWith { x, y ->
-            val a = contents[x].getOrElse(k) { "" }; val bb = contents[y].getOrElse(k) { "" }
+        // Compared by what the cells hold: numbers as numbers, text as text (a number typed as text stays text)
+        fun num(i: Input?) = (i as? Input.Number)?.v
+        fun text(i: Input?) = when (i) { is Input.Text -> i.v; is Input.Bool -> if (i.v) "TRUE" else "FALSE"; else -> "" }
+        fun empty(i: Input?) = i == null || i == Input.Clear || i is Input.Text && i.v.isEmpty()
+        val order = stored.indices.sortedWith { x, y ->
+            val a = stored[x].getOrNull(k); val bb = stored[y].getOrNull(k)
             // Empty cells go last either way
-            if (a.isEmpty() != bb.isEmpty()) return@sortedWith if (a.isEmpty()) 1 else -1
+            if (empty(a) != empty(bb)) return@sortedWith if (empty(a)) 1 else -1
             val na = num(a); val nb = num(bb)
-            val c = when { na != null && nb != null -> na.compareTo(nb); na != null -> -1; nb != null -> 1; else -> collator.compare(a, bb) }
+            val c = when { na != null && nb != null -> na.compareTo(nb); na != null -> -1; nb != null -> 1; else -> collator.compare(text(a), text(bb)) }
             if (descending) -c else c
         }
-        if (order == contents.indices.toList()) return
+        if (order == stored.indices.toList()) return
+        val changesBefore = edit.changes
         val cellSteps = ArrayList<CellStep>(); val lookSteps = ArrayList<Triple<CellKey, CellLook?, CellLook?>>()
         for ((to, from) in order.withIndex()) {
             if (to == from) continue
             for ((j, c) in cols.withIndex()) {
                 val key = CellKey(s, first + to, c)
-                put(sheet, key, contents[from][j])?.let { cellSteps += it }
-                val before = edit.look(key)
+                val input = stored[from][j]!!
+                val before = changesBefore[key]
+                edit.set(key, input)
+                cellSteps += CellStep(key, before, input)
+                val lookBefore = edit.look(key)
                 val after = looks[from][j]
-                if (after != null && edit.setLook(key, after) || after == null && before != null && edit.setLook(key, null)) lookSteps += Triple(key, before, after)
+                if (edit.setLook(key, after)) lookSteps += Triple(key, lookBefore, after)
             }
         }
         push(SortStep(CellsStep(cellSteps), LookStep(lookSteps)))

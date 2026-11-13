@@ -215,7 +215,7 @@ class PdfEngineService : Service() {
         const val SAVE_FORM = IBinder.FIRST_CALL_TRANSACTION + 13
         const val MAX_FIELDS = 2000
         /** Largest side of a signature picture (it travels between processes in one message). */
-        const val MAX_SIGNATURE = 600
+        const val MAX_SIGNATURE = 360
         /** Render results. */
         const val R_OK = 0
         const val R_FAILED = 1

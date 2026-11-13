@@ -40,12 +40,13 @@ class Chart(
 
         /** A chart part's tree ([chartSpace]); null if it holds no chart drawn here. */
         fun parse(chartSpace: XmlNode, theme: Map<String, Int> = emptyMap(), resolve: ((String) -> List<String>)? = null): Chart? {
-            this.resolve = resolve
-            try { return parseHere(chartSpace, theme) } finally { this.resolve = null }
+            this.resolve.set(resolve)
+            try { return parseHere(chartSpace, theme) } finally { this.resolve.remove() }
         }
 
         /** Reads cells a reference names, for charts saved without their values (made by some programs). */
-        private var resolve: ((String) -> List<String>)? = null
+        // Per thread: two workbooks read at once never use each other's cells
+        private val resolve = ThreadLocal<((String) -> List<String>)?>()
 
         private fun parseHere(chartSpace: XmlNode, theme: Map<String, Int>): Chart? {
             val chart = chartSpace.child("chart") ?: return null
@@ -87,7 +88,7 @@ class Chart(
         private fun points(n: XmlNode?): Map<Int, String> {
             n ?: return emptyMap()
             val cache = n.find("numCache") ?: n.find("strCache") ?: n.find("numLit") ?: n.find("strLit") ?: n.find("multiLvlStrCache")
-                ?: return n.find("f")?.text?.let { f -> resolve?.invoke(f) }?.take(MAX_POINTS)?.withIndex()?.associate { it.index to it.value } ?: emptyMap()
+                ?: return n.find("f")?.text?.let { f -> resolve.get()?.invoke(f) }?.take(MAX_POINTS)?.withIndex()?.associate { it.index to it.value } ?: emptyMap()
             val count = cache.child("ptCount")?.attr("val")?.toIntOrNull()?.coerceIn(0, MAX_POINTS) ?: MAX_POINTS
             val lvl = cache.child("lvl") ?: cache
             return lvl.all("pt").mapNotNull { pt -> pt.attr("idx")?.toIntOrNull()?.takeIf { it in 0 until count }?.let { it to (pt.child("v")?.text ?: "") } }.toMap()

@@ -73,7 +73,7 @@ import kotlin.math.min
 
 /** One's own signature, kept to sign again (sealed with locked storage on). */
 object SavedSignature {
-    private const val FILE = "signature.json"
+    const val FILE = "signature.json"
     fun load(context: android.content.Context): List<Stroke>? = try {
         Vault.readSmall(context, FILE)?.let { InkJson.readStrokes(JSONObject(String(it)).getJSONArray("strokes")) }
     } catch (e: Exception) { null }
@@ -83,7 +83,7 @@ object SavedSignature {
     fun forget(context: android.content.Context) { Vault.deleteIn(context.filesDir, FILE) }
 
     /** The signature as a picture (transparent around it, dark blue ink) at most [maxSide] px, and its BGRA bytes for the PDF. */
-    fun picture(strokes: List<Stroke>, maxSide: Int = 600): Triple<Int, Int, ByteArray>? {
+    fun picture(strokes: List<Stroke>, maxSide: Int = 360): Triple<Int, Int, ByteArray>? {
         val pts = strokes.flatMap { it.points }
         if (pts.isEmpty()) return null
         val pad = 6f

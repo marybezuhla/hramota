@@ -710,6 +710,12 @@
     <string name="form_menu">Заповнити форму / підписати</string>
     <string name="form_saved">Заповнену копію збережено.</string>
     <string name="form_not_saved">Не вдалося зберегти заповнену копію.</string>
+    <plurals name="form_saved_missed">
+        <item quantity="one">Копію збережено, але %d поле не прийняло значення — перевірте копію.</item>
+        <item quantity="few">Копію збережено, але %d поля не прийняли значень — перевірте копію.</item>
+        <item quantity="many">Копію збережено, але %d полів не прийняли значень — перевірте копію.</item>
+        <item quantity="other">Копію збережено, але %d поля не прийняли значень — перевірте копію.</item>
+    </plurals>
     <string name="sign_title">Підпис</string>
     <string name="sign_hint">Намалюйте його пальцем чи стилусом: на сторінку він ляже картинкою. Це власноручний підпис, а не кваліфікований електронний.</string>
     <string name="sign_draw">Намалювати підпис</string>
