@@ -54,13 +54,20 @@ object InkText {
         return bmp
     }
 
-    /** The text written, in paragraphs (empty if none was found). Runs off the main thread. */
-    suspend fun read(context: Context, strokes: List<Stroke>): String {
+    /**
+     * The text written, in paragraphs (empty if none was found). Runs off the main thread. Writing in
+     * a Cyrillic language ([cyrillic]), a word of letters that look alike in both scripts is taken as
+     * Cyrillic: a hand-written «ТАК» is not "TAK".
+     */
+    suspend fun read(context: Context, strokes: List<Stroke>, cyrillic: Boolean = java.util.Locale.getDefault().language in CYRILLIC_LANGUAGES): String {
         val bmp = render(strokes) ?: return ""
         return try {
             val r = TextRecognizer.get(context)
             r.hold()
-            try { Reflow.paragraphs(r.recognize(bmp)).joinToString("\n") } finally { r.letGo() }
+            val text = try { Reflow.paragraphs(r.recognize(bmp)).joinToString("\n") } finally { r.letGo() }
+            if (cyrillic) ua.hramota.ocr.Lookalikes.toCyrillic(text) else text
         } finally { bmp.recycle() }
     }
+
+    private val CYRILLIC_LANGUAGES = setOf("uk", "be", "bg", "ru", "sr", "mk")
 }

@@ -20,6 +20,12 @@ internal object Lookalikes {
 
     private fun isCyrillic(c: Char) = Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CYRILLIC
 
+    /** Words written only in letters that look the same in both scripts, read as Cyrillic ("TAK" → "ТАК"). */
+    fun toCyrillic(text: String): String = word.replace(text) { m ->
+        val w = m.value
+        if (w.any { it !in map }) w else w.map { map.getValue(it) }.joinToString("")
+    }
+
     fun fix(line: String): String {
         if (word.findAll(line).count() < 2) return line
         return word.replace(line) { m ->

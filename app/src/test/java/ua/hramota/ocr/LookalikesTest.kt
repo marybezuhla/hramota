@@ -12,6 +12,7 @@ class LookalikesTest {
         assertEquals("Pixel 10 Pro", Lookalikes.fix("Pixel 10 Pro"))
         assertEquals("Hello Mac", Lookalikes.fix("Hello Mac"))
     }
+    @Test fun handwritingInACyrillicLanguage() { assertEquals("ТАК, Мама", Lookalikes.toCyrillic("TAK, Mama")); assertEquals("Wow", Lookalikes.toCyrillic("Wow")) }
     @Test fun aLineOfOneWordIsLeftAlone() { assertEquals("Mizec", Lookalikes.fix("Mizec")) }
     @Test fun aWordSplitAtALineEndIsJoined() {
         assertEquals("медичної\nсвідомості –\nдалі", joinOcrLines(listOf("меди-", "чної", "свідомості –", "далі")))

@@ -65,7 +65,7 @@ class OcrTest {
             // К
             line(90f, 10f, 90f, 10f + h, 500), line(115f, 10f, 90f, 10f + h * 0.55f, 600), line(95f, 10f + h * 0.45f, 117f, 10f + h, 700),
         )
-        val text = InkText.read(context, strokes)
+        val text = InkText.read(context, strokes, cyrillic = true)
         assertTrue("«$text»", text.uppercase().contains("ТАК"))
     }
 }
