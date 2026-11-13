@@ -588,7 +588,7 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveForm(JNIEnv* env
                     int haveRect = FPDFAnnot_GetRect(a, &r);
                     double cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
                     if (value) {
-                        if (type == FPDF_FORMFIELD_TEXTFIELD || type == FPDF_FORMFIELD_COMBOBOX && !same_text(env, value, form, a, FPDFAnnot_GetFormFieldValue)) {
+                        if (type == FPDF_FORMFIELD_TEXTFIELD || (type == FPDF_FORMFIELD_COMBOBOX && !same_text(env, value, form, a, FPDFAnnot_GetFormFieldValue))) {
                             if (FORM_SetFocusedAnnot(form, a)) {
                                 if (type == FPDF_FORMFIELD_COMBOBOX) {
                                     int options = FPDFAnnot_GetOptionCount(form, a);
