@@ -273,6 +273,15 @@ private fun NoteScreen(state: NoteState, held: NoteActivity.Holder, onBack: () -
                         val paras = Notebook.plainText(state.blocks).split('\n').filter { it.isNotBlank() }.let { if (state.meta.title.isNotBlank()) listOf(state.meta.title) + it else it }
                         if (paras.isNotEmpty()) ua.hramota.speech.ReadAloud.start(context, ua.hramota.speech.ReadAloud.Document("note:" + state.meta.id, state.meta.title.ifBlank { context.getString(R.string.note_untitled) }, { paras.size }, { i -> paras.getOrElse(i) { "" } }), 0, 0, settings.readSpeed, settings.readVoice)
                     })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.social_card)) }, onClick = {
+                        menu = false
+                        val first = state.blocks.filterIsInstance<NBlock.Text>().map { it.text }.filter { it.isNotBlank() }.joinToString("\n").take(ua.hramota.social.Cards.MAX_CHARS)
+                        context.startActivity(ua.hramota.social.QuoteCardActivity.intent(context, first, state.meta.title))
+                    })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.social_thread)) }, onClick = {
+                        menu = false
+                        context.startActivity(ua.hramota.social.ThreadActivity.intent(context, Notebook.plainText(state.blocks.filterIsInstance<NBlock.Text>())))
+                    })
                     for ((k, l) in listOf("pdf" to R.string.note_share_pdf, "docx" to R.string.note_share_docx, "md" to R.string.note_share_md, "png" to R.string.note_share_png))
                         DropdownMenuItem(text = { Text(stringResource(l)) }, onClick = { menu = false; saveNow(held, context); share(k) })
                     for ((k, l) in listOf("pdf" to R.string.note_save_pdf, "docx" to R.string.note_save_docx, "md" to R.string.note_save_md))

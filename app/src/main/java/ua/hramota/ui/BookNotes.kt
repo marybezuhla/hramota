@@ -152,6 +152,8 @@ internal fun SelectionMenu(
     selection: BookSelection, clipboard: TakingClipboard, origin: androidx.compose.ui.geometry.Offset, onMark: (String, Int) -> Unit, onNote: (String) -> Unit,
     onDictionary: (String) -> Unit = {},
     onFind: (String) -> Unit = {},
+    /** Where the text is from, under a quotation card: the book's author and title. */
+    source: String = "",
 ) {
     val rect = selection.rect ?: return
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -174,6 +176,8 @@ internal fun SelectionMenu(
                 Item(stringResource(R.string.dict_open)) { selection.take(clipboard) { onDictionary(it) } }
                 Item(stringResource(R.string.search_find)) { selection.take(clipboard) { onFind(it) } }
                 Item(stringResource(R.string.copy)) { selection.copyToClipboard(clipboard) }
+                Item(stringResource(R.string.social_card)) { selection.take(clipboard) { t -> context.startActivity(ua.hramota.social.QuoteCardActivity.intent(context, t, source)) } }
+                Item(stringResource(R.string.social_thread)) { selection.take(clipboard) { t -> context.startActivity(ua.hramota.social.ThreadActivity.intent(context, t)) } }
                 Item(stringResource(R.string.share)) {
                     selection.take(clipboard) { t ->
                         try { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t.take(100_000)), null)) } catch (_: Exception) {}

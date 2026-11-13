@@ -115,6 +115,8 @@ open class ViewerActivity : ComponentActivity() {
         var savingNotes by mutableStateOf<PdfiumPages?>(null)
         // "docx" or "xlsx": what a conversion carries over is said before the place is chosen
         var convertAsk by mutableStateOf<String?>(null)
+        // Pages as pictures for a post: which ones and in what shape
+        var imagesAsk by mutableStateOf<ua.hramota.doc.Pages?>(null)
         // A DOCX being edited lives through turning the phone
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
 
@@ -308,6 +310,21 @@ open class ViewerActivity : ComponentActivity() {
                             },
                         )
                     }
+                    imagesAsk?.let { pg ->
+                        ua.hramota.social.PagesAsPicturesDialog(pg.pageCount, shownPage(state) ?: 0, onDismiss = { imagesAsk = null }) { from, to, shape ->
+                            imagesAsk = null
+                            held.scope.launch {
+                                val pics = withContext(Dispatchers.Default) {
+                                    (from..to).mapNotNull { i ->
+                                        runCatching { pg.render(i, 1080)?.asAndroidBitmap()?.let { ua.hramota.social.Cards.fit(it, shape) } }.getOrNull()
+                                    }
+                                }
+                                // The text of each page, as its description (where the pages have text)
+                                val alts = (pg as? ua.hramota.doc.TextPages)?.let { tp -> (from..to).map { i -> runCatching { tp.pageText(i).replace(Regex("\\s+"), " ").trim().take(1000) }.getOrDefault("") } } ?: emptyList()
+                                if (pics.isNotEmpty()) ua.hramota.social.Pictures.open(this@ViewerActivity, pics, alts, name.substringBeforeLast('.', name))
+                            }
+                        }
+                    }
                     convertAsk?.let { kind ->
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { convertAsk = null },
@@ -435,6 +452,14 @@ open class ViewerActivity : ComponentActivity() {
                                 ((state as? ViewerState.Paged)?.pages as? ua.hramota.doc.PrintPages)?.let { pg ->
                                     getString(R.string.save_as_pdf) to {
                                         val go = { pendingPdf = pg; savePdf.launch(name.substringBeforeLast('.', name) + ".pdf") }
+                                        if (protectedDoc) held.unprotectedAsk = go else go()
+                                        Unit
+                                    }
+                                },
+                                // Pages as pictures for social networks (one, or a carousel)
+                                (state as? ViewerState.Paged)?.pages?.takeIf { it.pageCount > 0 }?.let { pg ->
+                                    getString(R.string.social_pages) to {
+                                        val go = { imagesAsk = pg }
                                         if (protectedDoc) held.unprotectedAsk = go else go()
                                         Unit
                                     }

@@ -166,6 +166,7 @@ internal fun BookDocument(
             onNote = { t -> locate(book, visible.blocks(), t)?.let { editing = it to true } },
             onDictionary = { t -> lookingUp = t },
             onFind = onFind,
+            source = listOf(book.author, book.title).filter { it.isNotBlank() }.joinToString(", "),
         )
     }
     lookingUp?.let { w -> DictionarySheet(w) { lookingUp = null } }

@@ -254,6 +254,7 @@ class MainActivity : ComponentActivity() {
                         onCompare = { comparing = true; compareFirst = null; choosing = true },
                         onCreate = { creating = true },
                         onScan = { startActivity(android.content.Intent(this, ua.hramota.ocr.ScanActivity::class.java)) },
+                        onPicture = { startActivity(ua.hramota.social.PicturesActivity.pick(this)) },
                         // Where access was not kept (a file shared once by another app), its copy in Hramota opens instead
                         onOpenRecent = { r ->
                             val copy = copies[r.uri]

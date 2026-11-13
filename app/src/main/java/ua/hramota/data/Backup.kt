@@ -81,6 +81,8 @@ object Backup {
             put("shelves.json", JSONArray().apply { library.shelves.value.forEach { put(library.shelfJson(it)) } }.toString().toByteArray())
             put("settings.json", Settings.get(context).toJson().toString().toByteArray())
             for (e in entries) Shelf.loadCoverBytes(context, e.id)?.let { put("covers/${e.id}.png", it) }
+            // The notebook whole: its index, each note and its pictures (plain inside the sealed backup)
+            for ((name, bytes) in ua.hramota.notebook.Notebook.backupFiles(context)) put(name, bytes)
             chosen.forEachIndexed { i, e ->
                 progress(i, chosen.size)
                 val f = File(e.copy!!)
@@ -141,7 +143,7 @@ object Backup {
                             name == "library.json" -> listJson = String(limited(z, MAX_JSON))
                             name == "shelves.json" -> shelvesJson = String(limited(z, MAX_JSON))
                             name == "settings.json" -> settingsJson = String(limited(z, 1024 * 1024))
-                            name.startsWith("covers/") || name.startsWith("documents/") -> {
+                            name.startsWith("covers/") || name.startsWith("documents/") || name.startsWith("notebook/") || name.startsWith("notebook-media/") -> {
                                 val f = File(staging, name).also { it.parentFile?.mkdirs() }
                                 if (!f.canonicalPath.startsWith(staging.canonicalPath + File.separator)) continue
                                 Sealed.SealingStream(stageKey, f.outputStream().buffered(), name).use { o -> copyWatchingSpace(z, o, staging) }
@@ -193,6 +195,14 @@ object Backup {
                     }
                 }
             }
+            // Notes missing here are added, and newer versions of the same notes replace older ones
+            try {
+                ua.hramota.notebook.Notebook.restore(context) { name ->
+                    val f = File(staging, name)
+                    if (!f.exists() || !f.canonicalPath.startsWith(staging.canonicalPath + File.separator)) null
+                    else ByteArrayOutputStream().also { o -> f.inputStream().buffered().use { Sealed.open(stageKey, it, o, name) } }.toByteArray()
+                }
+            } catch (_: Exception) {}
             settingsJson?.let { s -> try { Settings.get(context).restore(JSONObject(s)) } catch (_: Exception) {} }
             return Result(added, updated, docs)
         } finally {

@@ -231,6 +231,61 @@ object Notebook {
             .forEach { it.delete() }
     }
 
+    // ---------------------------------------------------------------- backup
+
+    /** Everything of the notebook as plain files, for a sealed backup. */
+    @Synchronized fun backupFiles(context: Context): List<Pair<String, ByteArray>> {
+        ensure(context)
+        if (unreadable) return emptyList()
+        val out = ArrayList<Pair<String, ByteArray>>()
+        val dir = Library.notebookDir(context)
+        Vault.readIn(dir, INDEX)?.let { out += "notebook/$INDEX" to it }
+        for (m in notes.value) Vault.readIn(dir, m.id + ".json")?.let { out += "notebook/${m.id}.json" to it }
+        val media = Library.notebookMediaDir(context)
+        for (f in media.listFiles().orEmpty()) {
+            val name = f.name.removeSuffix(Vault.SUFFIX)
+            if (!SAFE.matches(name)) continue
+            Vault.readIn(media, name)?.let { out += "notebook-media/$name" to it }
+        }
+        return out
+    }
+
+    private val SAFE = Regex("[A-Za-z0-9_.\\-]{1,120}")
+
+    /**
+     * Joins a backup's notebook to this one: notebooks and notes missing here are added; a note
+     * changed later in the backup replaces the one here. Nothing here is deleted.
+     */
+    @Synchronized fun restore(context: Context, read: (String) -> ByteArray?) {
+        ensure(context)
+        if (unreadable) return
+        val index = read("notebook/$INDEX") ?: return
+        val o = JSONObject(String(index))
+        val b = o.optJSONArray("books") ?: JSONArray()
+        val haveBooks = books.value.map { it.id }.toSet()
+        val newBooks = (0 until b.length()).mapNotNull { i -> b.optJSONObject(i)?.let { Book(it.optString("id"), it.optString("title"), it.optInt("color", COLORS[0]), it.optLong("created")) } }
+            .filter { it.id.isNotEmpty() && it.id !in haveBooks }
+        books.value = books.value + newBooks
+        val n = o.optJSONArray("notes") ?: JSONArray()
+        val list = notes.value.toMutableList()
+        for (i in 0 until n.length()) {
+            val m = try { meta(n.getJSONObject(i)) } catch (e: Exception) { continue }
+            if (!SAFE.matches(m.id + ".json")) continue
+            val mine = list.indexOfFirst { it.id == m.id }
+            if (mine >= 0 && list[mine].updated >= m.updated) continue
+            val content = read("notebook/${m.id}.json") ?: continue
+            val note = try { Note(m, blocks(JSONObject(String(content)).getJSONArray("blocks"))) } catch (e: Exception) { continue }
+            for (p in note.blocks.filterIsInstance<NBlock.Picture>()) {
+                if (!SAFE.matches(p.file)) continue
+                read("notebook-media/${p.file}")?.let { Vault.writeIn(context, Library.notebookMediaDir(context), p.file, it) }
+            }
+            Vault.writeIn(context, Library.notebookDir(context), m.id + ".json", content)
+            if (mine >= 0) list[mine] = m else list += m
+        }
+        notes.value = list
+        save(context)
+    }
+
     // ---------------------------------------------------------------- JSON
 
     private const val MAX_SEARCH_TEXT = 200_000

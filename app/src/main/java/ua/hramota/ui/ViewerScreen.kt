@@ -528,6 +528,8 @@ private fun ViewerContent(
                     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t), null))
                 }
             },
+            onCard = { scope.launch { context.startActivity(ua.hramota.social.QuoteCardActivity.intent(context, selectedText(textPages, sel), name.substringBeforeLast('.', name))); selection = null } },
+            onThread = { scope.launch { context.startActivity(ua.hramota.social.ThreadActivity.intent(context, selectedText(textPages, sel))); selection = null } },
             onClose = { selection = null },
         )
         // The player, under the thumb, while this document is read aloud
@@ -671,6 +673,7 @@ private fun SelectionBar(
     onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
     onMark: (Int) -> Unit = {}, onNote: () -> Unit = {}, onDictionary: () -> Unit = {}, onApp: (android.content.ComponentName) -> Unit = {},
     onFind: () -> Unit = {},
+    onCard: () -> Unit = {}, onThread: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val apps = remember { textApps(context) }
@@ -687,6 +690,8 @@ private fun SelectionBar(
                 TextButton(onClick = onFind) { Text(stringResource(R.string.search_find), maxLines = 1) }
                 TextButton(onClick = onCopy) { Text(stringResource(R.string.copy), maxLines = 1) }
                 TextButton(onClick = onShare) { Text(stringResource(R.string.share), maxLines = 1) }
+                TextButton(onClick = onCard) { Text(stringResource(R.string.social_card), maxLines = 1) }
+                TextButton(onClick = onThread) { Text(stringResource(R.string.social_thread), maxLines = 1) }
                 for ((label, component) in apps) TextButton(onClick = { onApp(component) }) { Text(label, maxLines = 1) }
             }
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_selection)) }

@@ -141,6 +141,10 @@
             android:documentLaunchMode="always"
             android:autoRemoveFromRecents="true"
             android:label="@string/compare_title" />
+        <!-- For social networks: quotation cards, threads of posts, pictures with parts hidden -->
+        <activity android:name=".social.QuoteCardActivity" android:exported="false" android:label="@string/social_card" />
+        <activity android:name=".social.ThreadActivity" android:exported="false" android:windowSoftInputMode="adjustResize" android:label="@string/social_thread" />
+        <activity android:name=".social.PicturesActivity" android:exported="false" android:label="@string/social_pictures" />
         <!-- A note of the notebook, each in a window of its own -->
         <activity
             android:name=".notebook.NoteActivity"

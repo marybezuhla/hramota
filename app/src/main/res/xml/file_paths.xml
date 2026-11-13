@@ -6,4 +6,6 @@
     <cache-path name="open" path="open/" />
     <!-- Pages photographed by the phone's camera app for the scanner; deleted when the scanner closes -->
     <cache-path name="scan" path="scan/" />
+    <!-- Pictures got ready for a post (cards, pages, hidden parts); deleted when that screen closes -->
+    <cache-path name="share" path="share/" />
 </paths>
