@@ -277,6 +277,37 @@ private class Builder(private val parts: Map<String, ByteArray>, private val fil
         return shapes.firstOrNull { ph(it)?.let { o -> type(o.type) == type(ph.type) } == true }
     }
 
+    private val comments = HashMap<Int, List<String>>()
+
+    /** A slide's comments, older (PowerPoint up to 2019) and newer (threads with replies): "Author: words". */
+    private fun comments(slidePath: String): List<String> {
+        val dir = slidePath.substringBeforeLast('/')
+        val relTree = tree("$dir/_rels/${slidePath.substringAfterLast('/')}.rels") ?: return emptyList()
+        val out = ArrayList<String>()
+        fun words(n: XmlNode): String {
+            val sb = StringBuilder(); val st = ArrayDeque<XmlNode>().apply { add(n) }
+            while (st.isNotEmpty()) { val x = st.removeFirst(); if (x.name == "t" || x.name == "text") sb.append(x.text); if (x.name == "p" && sb.isNotEmpty()) sb.append(' '); st.addAll(x.children) }
+            return sb.toString().trim()
+        }
+        val legacyAuthors = tree("ppt/commentAuthors.xml")?.all("cmAuthor").orEmpty().associate { (it.attr("id") ?: "") to (it.attr("name") ?: "") }
+        val modernAuthors = tree("ppt/authors.xml")?.all("author").orEmpty().associate { (it.attr("id") ?: "") to (it.attr("name") ?: "") }
+        for (r in relTree.all("Relationship")) {
+            if (r.attr("Type")?.endsWith("/comments") != true || r.attr("TargetMode") == "External") continue
+            val part = tree(resolve(dir, r.attr("Target") ?: continue)) ?: continue
+            for (cm in part.all("cm").take(500)) {
+                val who = (legacyAuthors[cm.attr("authorId")] ?: modernAuthors[cm.attr("authorId")])?.takeIf { it.isNotBlank() }
+                val text = cm.child("text")?.text ?: cm.child("txBody")?.let(::words) ?: ""
+                if (text.isNotBlank()) out += (if (who != null) "$who: " else "") + text.take(2000)
+                for (reply in cm.child("replyLst")?.all("reply").orEmpty().take(100)) {
+                    val rw = modernAuthors[reply.attr("authorId")]?.takeIf { it.isNotBlank() }
+                    val rt = reply.child("txBody")?.let(::words) ?: continue
+                    if (rt.isNotBlank()) out += "  ↳ " + (if (rw != null) "$rw: " else "") + rt.take(2000)
+                }
+            }
+        }
+        return out
+    }
+
     fun deck(inspection: Inspection): Deck {
         val pres = tree("ppt/presentation.xml") ?: throw IOException("Not a presentation")
         val presRels = rels("ppt/presentation.xml")
@@ -294,9 +325,10 @@ private class Builder(private val parts: Map<String, ByteArray>, private val fil
             val master = layout?.rels?.values?.firstOrNull { it.contains("slideMaster") }?.let { part(it) }
             if (master != null) loadTheme(master)
             slides += slide(slide, layout, master)
+            comments(path).takeIf { it.isNotEmpty() }?.let { comments[slides.size - 1] = it }
         }
         if (slides.isEmpty()) throw IOException("No slides")
-        return Deck(width, height, slides, media, inspection)
+        return Deck(width, height, slides, media, if (comments.isEmpty()) inspection else inspection.copy(comments = comments.values.sumOf { it.size }), comments)
     }
 
     private fun slide(slide: Part, layout: Part?, master: Part?): Slide {

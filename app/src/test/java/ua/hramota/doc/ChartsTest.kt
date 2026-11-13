@@ -23,6 +23,7 @@ class ChartsTest {
         val deck = PptxReader.read(bytes("charts/charts.pptx").inputStream())
         val charts = deck.slides[0].shapes.filterIsInstance<SlideShape.Picture>().filter { it.key.startsWith("chart:") }
         assertEquals(2, charts.size)
+        assertEquals(listOf("Олена: Додати дані за квітень"), deck.comments[0])
         for ((i, c) in charts.withIndex()) {
             val png = deck.media[c.key]!!
             assertTrue(android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) != null)
@@ -32,6 +33,7 @@ class ChartsTest {
 
     @Test fun sheetChartsReadTheirCells() {
         val wb = XlsxReader.read(bytes("charts/charts.xlsx").inputStream())
+        assertTrue(wb.comments[0]!![2 to 1]!!.contains("Перевірити суму"))
         val pics = wb.charts[0]!!
         assertEquals(1, pics.size)
         keep("chart-sheet.png", pics[0])

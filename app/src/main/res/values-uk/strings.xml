@@ -742,4 +742,6 @@
     <string name="tpl_design_meadow">Оформлення: Луг (зелене)</string>
     <string name="sheet_charts">Діаграми на аркуші: %1$d</string>
     <string name="sheet_chart_n">Діаграма %1$d</string>
+    <string name="slide_comments">Коментарі</string>
+    <string name="slide_comments_n">Коментарі (%1$d)</string>
 </resources>

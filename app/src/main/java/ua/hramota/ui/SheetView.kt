@@ -144,7 +144,7 @@ fun WorkbookDocument(
     if (shown != index) { shown = index; state.x = 0f; state.y = 0f }
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            SheetGrid(sheet, state, hits, current, selected, room = editing != null) { selected = it }
+            SheetGrid(sheet, state, hits, current, selected, room = editing != null, comments = workbook.comments[index].orEmpty()) { selected = it }
         }
         if (editing != null) {
             selected?.let { (r, c) ->
@@ -154,7 +154,7 @@ fun WorkbookDocument(
             val row = sheet.row(r)
             val k = row?.find(c) ?: -1
             val text = if (row != null && k >= 0) sheet.text(row, k) else ""
-            CellBar("${columnName(c)}${r + 1}", text) { selected = null }
+            CellBar("${columnName(c)}${r + 1}", text, workbook.comments[index]?.get(r to c)) { selected = null }
         }
         // The sheet's charts, drawn from the values saved with them
         val charts = workbook.charts[index].orEmpty()
@@ -179,9 +179,9 @@ fun WorkbookDocument(
 }
 
 @Composable
-private fun CellBar(ref: String, text: String, onClose: () -> Unit) {
+private fun CellBar(ref: String, text: String, comment: String? = null, onClose: () -> Unit) {
     val context = LocalContext.current
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) { Column {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 12.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -190,7 +190,10 @@ private fun CellBar(ref: String, text: String, onClose: () -> Unit) {
             }) { Text(stringResource(R.string.copy)) }
             TextButton(onClick = onClose) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
         }
-    }
+        // The cell's comment under its content
+        if (comment != null) Text("💬 $comment", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 6, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp))
+    } }
 }
 
 @Composable
@@ -222,6 +225,8 @@ private fun SheetGrid(
     current: SearchHit?,
     selected: Pair<Int, Int>?,
     room: Boolean = false,
+    /** Cells with a comment: a small red corner, as in Excel. */
+    comments: Map<Pair<Int, Int>, String> = emptyMap(),
     onSelect: (Pair<Int, Int>?) -> Unit,
 ) {
     val g = remember(sheet, room) { Geometry(sheet, room) }
@@ -291,6 +296,16 @@ private fun SheetGrid(
         if (fr > 0) drawLine(Color(0xFF9E9E9E), Offset(body.x, body.y + frozenH), Offset(size.width, body.y + frozenH), 1.5f)
         if (fc > 0) drawLine(Color(0xFF9E9E9E), Offset(body.x + frozenW, body.y), Offset(body.x + frozenW, size.height), 1.5f)
 
+        // Comment marks
+        for ((rc) in comments) {
+            val (r, c) = rc
+            if (r >= g.rows || c >= g.cols) continue
+            val x = body.x + if (c < fc) g.colX[c + 1] * unit else frozenW + (g.colX[c + 1] - g.colX[fc]) * unit - state.x
+            val y = body.y + if (r < fr) g.rowY[r] * unit else frozenH + (g.rowY[r] - g.rowY[fr]) * unit - state.y
+            if (x < body.x || y < body.y - 8f || x > size.width + 8f || y > size.height) continue
+            val k = 6f * unit.coerceIn(0.6f, 3f)
+            drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(x - k, y); lineTo(x, y); lineTo(x, y + k); close() }, Color(0xFFD32F2F))
+        }
         // Selected cell
         selected?.let { (r, c) ->
             val x = body.x + if (c < fc) g.colX[c] * unit else frozenW + (g.colX[c] - g.colX[fc]) * unit - state.x

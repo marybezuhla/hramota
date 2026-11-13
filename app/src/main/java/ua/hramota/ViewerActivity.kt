@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
@@ -117,6 +119,8 @@ open class ViewerActivity : ComponentActivity() {
         var convertAsk by mutableStateOf<String?>(null)
         // Pages as pictures for a post: which ones and in what shape
         var imagesAsk by mutableStateOf<ua.hramota.doc.Pages?>(null)
+        // A presentation's comments shown
+        var slideComments by mutableStateOf<Map<Int, List<String>>?>(null)
         // A PDF form being filled (and signed): its fields
         var formOpen by mutableStateOf<List<ua.hramota.pdf.PdfField>?>(null)
         // A DOCX being edited lives through turning the phone
@@ -323,6 +327,21 @@ open class ViewerActivity : ComponentActivity() {
                             },
                         )
                     }
+                    slideComments?.let { all ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { slideComments = null },
+                            title = { androidx.compose.material3.Text(getString(R.string.slide_comments)) },
+                            text = {
+                                androidx.compose.foundation.lazy.LazyColumn {
+                                    for ((i, list) in all.toSortedMap()) {
+                                        item { androidx.compose.material3.Text(getString(R.string.slide_n, i + 1), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp)) }
+                                        items(list.size) { k -> androidx.compose.material3.Text(list[k], style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 2.dp)) }
+                                    }
+                                }
+                            },
+                            confirmButton = { androidx.compose.material3.TextButton(onClick = { slideComments = null }) { androidx.compose.material3.Text(getString(R.string.insp_close)) } },
+                        )
+                    }
                     imagesAsk?.let { pg ->
                         ua.hramota.social.PagesAsPicturesDialog(pg.pageCount, shownPage(state) ?: 0, onDismiss = { imagesAsk = null }) { from, to, shape ->
                             imagesAsk = null
@@ -480,6 +499,10 @@ open class ViewerActivity : ComponentActivity() {
                                         if (protectedDoc) held.unprotectedAsk = go else go()
                                         Unit
                                     }
+                                },
+                                // A presentation's comments, by slide
+                                ((state as? ViewerState.Paged)?.pages as? SlidePages)?.deck?.comments?.takeIf { it.isNotEmpty() }?.let { c ->
+                                    getString(R.string.slide_comments_n, c.values.sumOf { it.size }) to { slideComments = c; Unit }
                                 },
                                 // Tracked changes: all accepted or all rejected, into a new file
                                 (state as? ViewerState.Paged)?.inspection?.takeIf { format == Format.DOCX && it.trackedChanges && !protectedDoc }?.let {

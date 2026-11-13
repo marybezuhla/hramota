@@ -137,6 +137,7 @@ object XlsxReader {
         val sheets = ArrayList<Sheet>()
         val charts = HashMap<Int, List<ByteArray>>()
         val chartPaths = ArrayList<Pair<Int, List<String>>>()
+        val comments = HashMap<Int, Map<Pair<Int, Int>, String>>()
         var chartCount = 0
         for (s in wb.child("sheets")?.all("sheet").orEmpty().take(SheetLimits.MAX_SHEETS)) {
             if (s.attr("state") == "hidden" || s.attr("state") == "veryHidden") continue
@@ -145,6 +146,22 @@ object XlsxReader {
             val b = built[path] ?: continue
             sheets += b.build(styles, date1904, strings, s.attr("name") ?: "Sheet")
             chartPaths += (sheets.size - 1) to related(parts, path, "/drawing").flatMap { related(parts, it, "/chart") }
+            // Notes on cells (Excel's comments): the author and the words, by cell
+            for (cp in related(parts, path, "/comments")) {
+                val ct = tree(cp) ?: continue
+                val authors = ct.child("authors")?.all("author")?.map { it.text }.orEmpty()
+                val map = HashMap<Pair<Int, Int>, String>()
+                for (c in ct.child("commentList")?.all("comment").orEmpty().take(5000)) {
+                    val ref = c.attr("ref") ?: continue
+                    val m = Regex("([A-Za-z]{1,3})(\\d+)").matchEntire(ref) ?: continue
+                    val col = m.groupValues[1].uppercase().fold(0) { a, ch -> a * 26 + (ch - 'A' + 1) } - 1
+                    val row = m.groupValues[2].toInt() - 1
+                    val words = buildList { val st = ArrayDeque<XmlNode>().apply { add(c) }; while (st.isNotEmpty()) { val x = st.removeFirst(); if (x.name == "t") add(x.text); st.addAll(x.children) } }.joinToString("").trim()
+                    val who = c.attr("authorId")?.toIntOrNull()?.let { authors.getOrNull(it) }?.takeIf { it.isNotBlank() }
+                    map[row to col] = (if (who != null) "$who: " else "") + words.take(2000)
+                }
+                if (map.isNotEmpty()) comments[sheets.size - 1] = (comments[sheets.size - 1].orEmpty() + map)
+            }
         }
         // Charts, once all sheets are read (a chart saved without its values reads them from the cells)
         val resolve = { ref: String -> cellsOf(sheets, ref) }
@@ -158,7 +175,7 @@ object XlsxReader {
             if (pictures.isNotEmpty()) charts[i] = pictures
         }
         if (sheets.isEmpty()) throw IOException("No sheets")
-        return Workbook(sheets, Inspection(macros = macros, embedded = embedded.take(100), remoteResources = external), charts = charts)
+        return Workbook(sheets, Inspection(macros = macros, embedded = embedded.take(100), remoteResources = external, comments = comments.values.sumOf { it.size }), charts = charts, comments = comments)
     }
 
     /** The texts of the cells "'Sheet'!$A$1:$A$5" names, row by row (empty for cells not filled). */

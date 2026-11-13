@@ -119,7 +119,9 @@ class Sheet(
 /** [complete] is false when a limit or damage left part of the file unread. */
 class Workbook(val sheets: List<Sheet>, val inspection: Inspection = Inspection(), val complete: Boolean = true,
     /** Charts drawn as pictures (PNG), by the index of the sheet they stand on. */
-    val charts: Map<Int, List<ByteArray>> = emptyMap())
+    val charts: Map<Int, List<ByteArray>> = emptyMap(),
+    /** Comments on cells, by sheet index and (row, column): "Author: words". */
+    val comments: Map<Int, Map<Pair<Int, Int>, String>> = emptyMap())
 
 /** Limits so a damaged or hostile file cannot exhaust memory. */
 object SheetLimits {

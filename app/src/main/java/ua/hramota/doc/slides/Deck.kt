@@ -80,6 +80,8 @@ class Deck(
     val slides: List<Slide>,
     val media: Map<String, ByteArray>,
     val inspection: Inspection = Inspection(),
+    /** Comments by slide index: "Author: words" (replies marked with ↳). */
+    val comments: Map<Int, List<String>> = emptyMap(),
 ) {
     companion object {
         const val MAX_SLIDES = 2000

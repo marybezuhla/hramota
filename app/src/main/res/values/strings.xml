@@ -732,4 +732,6 @@
     <string name="tpl_design_meadow">Design: Meadow (green)</string>
     <string name="sheet_charts">Charts on this sheet: %1$d</string>
     <string name="sheet_chart_n">Chart %1$d</string>
+    <string name="slide_comments">Comments</string>
+    <string name="slide_comments_n">Comments (%1$d)</string>
 </resources>

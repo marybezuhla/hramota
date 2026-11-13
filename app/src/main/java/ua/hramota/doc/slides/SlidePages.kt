@@ -33,7 +33,7 @@ import kotlin.math.roundToInt
  * Slides drawn as pages: each slide is laid out once (in units of 1/[U] point, independent of the
  * screen), then drawn at the width it is shown. Text can be searched, selected and copied.
  */
-class SlidePages(private val deck: Deck, private val fonts: Fonts) : TextPages, ua.hramota.doc.PrintPages {
+class SlidePages(val deck: Deck, private val fonts: Fonts) : TextPages, ua.hramota.doc.PrintPages {
     companion object { const val U = 8f }
 
     private val lock = Mutex()
