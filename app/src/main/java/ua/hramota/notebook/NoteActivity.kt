@@ -158,7 +158,7 @@ private fun saveNow(held: NoteActivity.Holder, context: Context) {
 }
 
 @Composable
-private fun NoteScreen(state: NoteState, held: NoteActivity.Holder, onBack: () -> Unit) {
+internal fun NoteScreen(state: NoteState, held: NoteActivity.Holder, onBack: () -> Unit) {
     val context = LocalContext.current
     // Saved a moment after each change, and when the note is left
     LaunchedEffect(state.version) { if (state.version != held.saved) { delay(700); saveNow(held, context) } }

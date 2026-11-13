@@ -247,7 +247,7 @@ internal object Scans {
 }
 
 @Composable
-private fun ScanScreen(held: ScanActivity.Holder, onBack: () -> Unit) {
+internal fun ScanScreen(held: ScanActivity.Holder, onBack: () -> Unit) {
     val context = LocalContext.current
     val pages = held.pages
     var withPictures by rememberSaveable { mutableStateOf(false) }

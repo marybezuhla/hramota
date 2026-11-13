@@ -125,7 +125,7 @@ class QuoteCardActivity : ComponentActivity() {
 }
 
 @Composable
-private fun QuoteCardScreen(start: String, startSource: String, onBack: () -> Unit) {
+internal fun QuoteCardScreen(start: String, startSource: String, onBack: () -> Unit) {
     val context = LocalContext.current
     var quote by rememberSaveable { mutableStateOf(start.trim().take(Cards.MAX_CHARS)) }
     var source by rememberSaveable { mutableStateOf(startSource) }
@@ -177,7 +177,7 @@ class ThreadActivity : ComponentActivity() {
 }
 
 @Composable
-private fun ThreadScreen(start: String, onBack: () -> Unit) {
+internal fun ThreadScreen(start: String, onBack: () -> Unit) {
     val context = LocalContext.current
     var text by rememberSaveable { mutableStateOf(start) }
     var platform by rememberSaveable { mutableStateOf("x") }
@@ -264,7 +264,7 @@ class PicturesActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PicturesScreen(held: PicturesActivity.Holder, pickFirst: Boolean, onBack: () -> Unit) {
+internal fun PicturesScreen(held: PicturesActivity.Holder, pickFirst: Boolean, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<Int?>(null) }
@@ -365,7 +365,7 @@ private fun PicturesScreen(held: PicturesActivity.Holder, pickFirst: Boolean, on
  * addresses and card numbers were found in its text; painted over for good on "Done".
  */
 @Composable
-private fun HideEditor(path: String, onDone: (String?) -> Unit) {
+internal fun HideEditor(path: String, onDone: (String?) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bitmap = remember(path) { BitmapFactory.decodeFile(path) }
