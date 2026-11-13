@@ -90,6 +90,8 @@ object MyInk {
     @Synchronized fun deleteAll(context: Context) {
         File(context.filesDir, FILE).delete()
         File(context.filesDir, FILE + Vault.SUFFIX).delete()
+        // What was fitted to the samples goes with them
+        InkTuning.forget(context)
     }
 
     /** The sentences to write, from the app (comments and empty lines left out). */
@@ -141,6 +143,32 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var about by rememberSaveable { mutableStateOf(false) }
+    // Fitting recognition to the samples: how far along, then what came of it
+    var fitting by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var fitted by remember { mutableStateOf<InkTuning.Tuning?>(null) }
+    fitted?.let { t ->
+        AlertDialog(
+            onDismissRequest = { fitted = null },
+            title = { Text(stringResource(R.string.ink_fit_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((k, v) in t.scores) Text(stringResource(R.string.ink_fit_score, stringResource(when (k) {
+                        "r1" -> R.string.ink_way_r1; "r1-upright" -> R.string.ink_way_r1_upright; "r2" -> R.string.ink_way_r2; else -> R.string.ink_way_r2_upright
+                    }), Math.round(v * 100)))
+                    Text(stringResource(R.string.ink_fit_chosen, stringResource(when {
+                        t.engine == "r1" && t.slant == 0f -> R.string.ink_way_r1; t.engine == "r1" -> R.string.ink_way_r1_upright
+                        t.slant == 0f -> R.string.ink_way_r2; else -> R.string.ink_way_r2_upright
+                    })), style = MaterialTheme.typography.titleSmall)
+                    if (!Rukopys.available(context)) Text(stringResource(R.string.ink_fit_no_r2), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { fitted = null }) { Text(stringResource(R.string.ok)) } },
+        )
+    }
+    fitting?.let { (done, all) ->
+        AlertDialog(onDismissRequest = {}, title = { Text(stringResource(R.string.ink_fit_title)) },
+            text = { Text(stringResource(R.string.ink_fit_progress, done, all)) }, confirmButton = {})
+    }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/jsonl")) { uri ->
         if (uri != null) scope.launch {
             val ok = withContext(Dispatchers.IO) {
@@ -169,6 +197,17 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
                 DropdownMenu(menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_undo_last)) }, enabled = !written.isNullOrEmpty(), onClick = {
                         menu = false; MyInk.dropLast(context); written = written?.dropLast(1)
+                    })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.ink_fit)) }, enabled = (written?.size ?: 0) >= 3 && fitting == null, onClick = {
+                        menu = false
+                        fitting = 0 to 0
+                        scope.launch {
+                            val t = try {
+                                withContext(Dispatchers.Default) { InkText.fit(context) { d, a -> scope.launch { fitting = d to a } } }
+                            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { null }
+                            fitting = null
+                            if (t == null) Toast.makeText(context, context.getString(R.string.ink_fit_failed), Toast.LENGTH_SHORT).show() else fitted = t
+                        }
                     })
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_export)) }, enabled = !written.isNullOrEmpty(), onClick = { menu = false; export.launch("my-handwriting.jsonl") })
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_delete_all), color = MaterialTheme.colorScheme.error) }, enabled = !written.isNullOrEmpty(), onClick = { menu = false; confirmDelete = true })

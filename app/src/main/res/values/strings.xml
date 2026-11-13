@@ -531,6 +531,17 @@
     <string name="ink_delete_go">Delete</string>
     <string name="ink_saved">Saved.</string>
     <string name="ink_save_failed">Could not save.</string>
+    <string name="ink_fit">Tune recognition</string>
+    <string name="ink_fit_title">Recognising your handwriting</string>
+    <string name="ink_fit_progress">Reading your samples in different ways: %1$d of %2$d…</string>
+    <string name="ink_fit_score">%1$s: %2$d%% of letters right</string>
+    <string name="ink_fit_chosen">Chosen: %1$s</string>
+    <string name="ink_fit_no_r2">The second model (for joined-up writing) is not in this version of Hramota yet.</string>
+    <string name="ink_fit_failed">Couldn’t check recognition.</string>
+    <string name="ink_way_r1">as the scanner</string>
+    <string name="ink_way_r1_upright">as the scanner, slant straightened</string>
+    <string name="ink_way_r2">writing model</string>
+    <string name="ink_way_r2_upright">writing model, slant straightened</string>
     <string name="ink_about">Hramota recognises handwriting with a general model trained on no one\'s personal writing. What you write here tunes recognition to your hand, on this phone only: the samples are never sent anywhere and are encrypted with locked storage on. If you wish to help make recognition better for everyone, you can save them to a file and share it yourself.</string>
     <string name="scan">Scan</string>
     <string name="scan_pages">Pages: %1$d</string>

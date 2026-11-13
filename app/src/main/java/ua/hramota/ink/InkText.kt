@@ -60,6 +60,15 @@ object InkText {
      * Cyrillic: a hand-written «ТАК» is not "TAK".
      */
     suspend fun read(context: Context, strokes: List<Stroke>, cyrillic: Boolean = java.util.Locale.getDefault().language in CYRILLIC_LANGUAGES): String {
+        // As fitted to this person's hand in «Мій почерк» (the first way, as written, until then)
+        val t = InkTuning.get(context)
+        val s = InkTuning.upright(strokes, t.slant)
+        if (t.engine == "r2" && Rukopys.available(context)) return Rukopys.read(context, s)
+        return readFirst(context, s, cyrillic)
+    }
+
+    /** Read the first way (Р1), the strokes as given. */
+    suspend fun readFirst(context: Context, strokes: List<Stroke>, cyrillic: Boolean = java.util.Locale.getDefault().language in CYRILLIC_LANGUAGES): String {
         val bmp = render(strokes) ?: return ""
         return try {
             val r = TextRecognizer.get(context)
@@ -70,4 +79,46 @@ object InkText {
     }
 
     private val CYRILLIC_LANGUAGES = setOf("uk", "be", "bg", "ru", "sr", "mk")
+
+    /**
+     * Fits recognition to the person's hand: their latest samples (at most [MAX_FIT]) read each way —
+     * Р1 and Р2 (when Hramota has it), as written and with their slant taken out — and the way
+     * that reads most letters right is kept. [progress] gets (done, all). Off the main thread.
+     */
+    suspend fun fit(context: Context, progress: (Int, Int) -> Unit = { _, _ -> }): InkTuning.Tuning {
+        val samples = MyInk.samples(context).takeLast(MAX_FIT).mapNotNull { o ->
+            val text = o.optString("text").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val strokes = runCatching { InkJson.readStrokes(o.getJSONArray("strokes")) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            text to strokes
+        }
+        if (samples.isEmpty()) return InkTuning.get(context)
+        val slant = InkTuning.slantOf(samples.flatMap { it.second })
+        val second = Rukopys.available(context)
+        val ways = buildList {
+            add("r1" to 0f)
+            if (slant != 0f) add("r1" to slant)
+            if (second) { add("r2" to 0f); if (slant != 0f) add("r2" to slant) }
+        }
+        val wrong = IntArray(ways.size)
+        var letters = 0
+        var done = 0
+        for ((text, strokes) in samples) {
+            val want = InkTuning.plain(text)
+            letters += want.length
+            for ((k, way) in ways.withIndex()) {
+                val s = InkTuning.upright(strokes, way.second)
+                val got = InkTuning.plain(if (way.first == "r2") Rukopys.read(context, s) else readFirst(context, s, cyrillic = true))
+                wrong[k] += InkTuning.distance(got, want)
+            }
+            progress(++done, samples.size)
+        }
+        val scores = ways.indices.associate { k -> (ways[k].first + if (ways[k].second != 0f) "-upright" else "") to (1f - wrong[k].toFloat() / letters.coerceAtLeast(1)).coerceAtLeast(0f) }
+        // The way with fewest letters wrong (the first way as written when equal)
+        val best = ways.indices.minBy { wrong[it] }
+        val t = InkTuning.Tuning(ways[best].first, ways[best].second, scores, samples.size)
+        InkTuning.save(context, t)
+        return t
+    }
+
+    const val MAX_FIT = 40
 }

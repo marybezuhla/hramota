@@ -341,7 +341,7 @@ class Library private constructor(private val context: Context) {
         ShelfSearch.convert(context, key, seal)
         // One's handwriting samples and saved signature
         synchronized(ua.hramota.ink.MyInk) {
-            for (f in context.filesDir.listFiles().orEmpty()) if (f.name.removeSuffix(Vault.SUFFIX) in setOf(ua.hramota.ink.MyInk.FILE, ua.hramota.ui.SavedSignature.FILE)) Shelf.convertFile(key, f, seal)
+            for (f in context.filesDir.listFiles().orEmpty()) if (f.name.removeSuffix(Vault.SUFFIX) in setOf(ua.hramota.ink.MyInk.FILE, ua.hramota.ink.InkTuning.FILE, ua.hramota.ui.SavedSignature.FILE)) Shelf.convertFile(key, f, seal)
         }
         ua.hramota.notebook.Notebook.reload(context)
         // Earlier versions kept by unfinished saves follow the storage too

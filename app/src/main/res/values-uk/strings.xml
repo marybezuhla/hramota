@@ -543,6 +543,17 @@
     <string name="ink_delete_go">Видалити</string>
     <string name="ink_saved">Збережено.</string>
     <string name="ink_save_failed">Не вдалося зберегти.</string>
+    <string name="ink_fit">Підлаштувати розпізнавання</string>
+    <string name="ink_fit_title">Розпізнавання вашого почерку</string>
+    <string name="ink_fit_progress">Читаю ваші зразки різними способами: %1$d з %2$d…</string>
+    <string name="ink_fit_score">%1$s: %2$d%% літер правильно</string>
+    <string name="ink_fit_chosen">Вибрано: %1$s</string>
+    <string name="ink_fit_no_r2">Друга модель (для письма прописом) ще не ввійшла в цю версію Грамоти.</string>
+    <string name="ink_fit_failed">Не вдалося перевірити розпізнавання.</string>
+    <string name="ink_way_r1">як сканер</string>
+    <string name="ink_way_r1_upright">як сканер, із випрямленим нахилом</string>
+    <string name="ink_way_r2">модель письма</string>
+    <string name="ink_way_r2_upright">модель письма, із випрямленим нахилом</string>
     <string name="ink_about">Грамота розпізнає рукопис загальною моделлю, навченою не на чиємусь особистому письмі. Те, що ви пишете тут, підлаштовує розпізнавання під вашу руку лише на цьому телефоні: зразки нікуди не надсилаються, а під замком сховища шифруються. Якщо захочете допомогти зробити розпізнавання кращим для всіх, можете зберегти їх у файл і поділитися ним самі.</string>
     <string name="scan">Сканувати</string>
     <string name="scan_pages">Сторінок: %1$d</string>
