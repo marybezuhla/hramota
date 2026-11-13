@@ -69,3 +69,19 @@ class OcrTest {
         assertTrue("«$text»", text.uppercase().contains("ТАК"))
     }
 }
+
+/** A note as PDF: pages of A4, a long note on more than one. */
+@RunWith(AndroidJUnit4::class)
+class NotePdfTest {
+    private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    @Test fun aLongNoteTakesPages() {
+        val blocks = (1L..120L).map { ua.hramota.notebook.NBlock.Text(it, "Рядок номер $it, досить довгий, щоб займати місце на сторінці.") }
+        val note = ua.hramota.notebook.Note(ua.hramota.notebook.NoteMeta("pdf-test", title = "Довгий запис"), blocks)
+        val file = File(context.cacheDir, "note.pdf")
+        file.outputStream().use { ua.hramota.notebook.NoteExport.pdf(context, note, it) }
+        val sizes = PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { r -> (0 until r.pageCount).map { i -> r.openPage(i).use { it.width to it.height } } }
+        assertTrue(sizes.toString(), sizes.size >= 3 && sizes.all { it == 595 to 842 })
+        file.delete()
+    }
+}

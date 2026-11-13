@@ -83,17 +83,20 @@ fun HomeScreen(
     now: Long = System.currentTimeMillis(),
     /** Recent files that cannot be opened again from here (shown quieter, with why). */
     unreachable: Set<String> = emptySet(),
+    /** Documents Hramota remembers (their marks and notes are shown in the notebook). */
+    documents: List<ua.hramota.data.LibraryEntry> = emptyList(),
+    onOpenDocument: (ua.hramota.data.LibraryEntry) -> Unit = {},
 ) {
     // Nearly the whole screen for the shelf and the recent files: the tabs and settings in one row at the
     // top; opening, making and comparing files behind one round button within reach of the thumb
+    // Three tabs: recent files, the shelf of kept documents, the notebook
+    var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (startOnShelf) 1 else 0) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
       Column(Modifier.fillMaxSize()) {
-        // Two tabs: recent files, and the shelf of kept documents
-        var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (startOnShelf) 1 else 0) }
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
           // With a large font the tabs scroll sideways rather than break words
           Row(Modifier.weight(1f).horizontalScroll(androidx.compose.foundation.rememberScrollState()).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
-            for ((i, label) in listOf(stringResource(R.string.recent), stringResource(R.string.shelf, shelf.size)).withIndex()) {
+            for ((i, label) in listOf(stringResource(R.string.recent), stringResource(R.string.shelf, shelf.size), stringResource(R.string.notebook)).withIndex()) {
                 val on = tab == i
                 Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = if (on) FontWeight.SemiBold else null, maxLines = 1, softWrap = false,
                     color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -107,7 +110,9 @@ fun HomeScreen(
                 Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (tab == 1) {
+        if (tab == 2) {
+            ua.hramota.notebook.NotebookHome(Modifier.weight(1f).fillMaxWidth(), documents, onOpenDocument)
+        } else if (tab == 1) {
             Shelf(shelf, shelves, onOpenShelf, onShelfAction, onPutShelf, onRemoveShelf, onSetShelves, Modifier.weight(1f).fillMaxWidth(), startShelf)
         } else if (recents.isEmpty()) {
             Text(
@@ -134,7 +139,7 @@ fun HomeScreen(
             }
         }
       }
-        if (comparePrompt == null) {
+        if (comparePrompt == null && tab != 2) {
             var actions by remember { mutableStateOf(false) }
             Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
                 androidx.compose.material3.FloatingActionButton(onClick = { actions = true }) {

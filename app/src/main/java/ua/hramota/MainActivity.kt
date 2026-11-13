@@ -272,6 +272,9 @@ class MainActivity : ComponentActivity() {
                         onPutShelf = { library.putShelf(it) },
                         onRemoveShelf = { library.removeShelf(it) },
                         onSetShelves = { e, s -> library.setShelves(e.id, s) },
+                        documents = known.values.toList(),
+                        // A document with marks: its kept copy, or where it was opened from
+                        onOpenDocument = { e -> if (e.kept) openShelf(e) else e.uri?.let { openViewer(Uri.parse(it), e.title) } },
                     )
                 }
             }

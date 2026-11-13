@@ -141,6 +141,12 @@
             android:documentLaunchMode="always"
             android:autoRemoveFromRecents="true"
             android:label="@string/compare_title" />
+        <!-- A note of the notebook, each in a window of its own -->
+        <activity
+            android:name=".notebook.NoteActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:label="@string/notebook" />
         <!-- Pages photographed or picked, their text recognised on the phone -->
         <activity
             android:name=".ocr.ScanActivity"
