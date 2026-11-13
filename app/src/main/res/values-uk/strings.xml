@@ -344,6 +344,15 @@
     <string name="rows_insert_above">Вставити рядок вище</string>
     <string name="rows_insert_below">Вставити рядок нижче</string>
     <string name="rows_delete">Видалити рядок %1$d</string>
+    <string name="edit_pages">Сторінки</string>
+    <string name="edit_pages_failed">Не вдалося розкласти документ на сторінки.</string>
+    <string name="edit_page_n">Сторінка %1$d: перейти до неї в редакторі</string>
+    <plurals name="edit_pages_n">
+        <item quantity="one">%d сторінка</item>
+        <item quantity="few">%d сторінки</item>
+        <item quantity="many">%d сторінок</item>
+        <item quantity="other">%d сторінки</item>
+    </plurals>
     <string name="cell_note_add">Додати коментар</string>
     <string name="cell_note_change">Змінити коментар</string>
     <string name="cell_note_title">Коментар</string>

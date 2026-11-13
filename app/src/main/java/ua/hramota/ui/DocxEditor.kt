@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.aspectRatio
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -377,8 +380,11 @@ fun DocxEditorScreen(
     author: String = "",
     onAuthor: (String) -> Unit = {},
     startWithComments: Boolean = false,
+    /** The document as it would be saved now (off the main thread), for seeing it in pages; null when it cannot be made. */
+    pagesOf: (suspend (List<EditPara>) -> ByteArray?)? = null,
 ) {
     var askClose by remember { mutableStateOf(false) }
+    var pagesShown by remember { mutableStateOf(false) }
     var commenting by remember { mutableStateOf(false) }
     var listing by remember { mutableStateOf(startWithComments) }
     var locked by remember { mutableStateOf(false) }
@@ -399,6 +405,7 @@ fun DocxEditorScreen(
                     val commentsLabel = stringResource(R.string.comments_count, state.comments.size)
                     if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}", modifier = Modifier.clearAndSetSemantics { contentDescription = commentsLabel }) }
                     IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
+                    if (pagesOf != null) TextButton(onClick = { pagesShown = true }, enabled = !saving) { Text(stringResource(R.string.edit_pages)) }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
@@ -443,6 +450,7 @@ fun DocxEditorScreen(
         state.addComment(text, who)
     }
     if (listing) CommentsSheet(state, enabled = !saving, onDismiss = { listing = false })
+    if (pagesShown && pagesOf != null) EditedPages(state, pagesOf, onDismiss = { pagesShown = false })
     replacedCount?.let { n ->
         AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
             confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
@@ -684,3 +692,61 @@ internal fun commentDate(iso: String): String = try {
     val t = java.time.Instant.parse(iso)
     java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT).withZone(java.time.ZoneId.systemDefault()).format(t)
 } catch (e: Exception) { iso.take(16).replace('T', ' ') }
+
+
+/**
+ * The document as it now stands, laid out in pages as it will print (the edits written into a copy in
+ * memory and laid out like any Word file). Tapping a page goes back to the editor at its first paragraph.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditedPages(state: EditorState, make: suspend (List<EditPara>) -> ByteArray?, onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val paras = state.paras
+    val pages by androidx.compose.runtime.produceState<Any?>(null, paras) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            try {
+                val bytes = make(paras) ?: return@withContext false
+                val doc = ua.hramota.doc.docx.DocxReader.read(java.io.ByteArrayInputStream(bytes))
+                ua.hramota.doc.docx.DocxPages(doc, ua.hramota.doc.docx.Fonts(context.assets))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { false }
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(pages) { onDispose { (pages as? java.io.Closeable)?.close() } }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceVariant) {
+            Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+                val p = pages as? ua.hramota.doc.docx.DocxPages
+                TopAppBar(
+                    title = { Text(if (p != null) androidx.compose.ui.res.pluralStringResource(R.plurals.edit_pages_n, p.pageCount, p.pageCount) else stringResource(R.string.edit_pages)) },
+                    navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.edit_close)) } },
+                )
+                when {
+                    pages == null -> androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator() }
+                    p == null -> androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.edit_pages_failed)) }
+                    else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        items(p.pageCount) { i ->
+                            val width = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.let { with(androidx.compose.ui.platform.LocalDensity.current) { it.dp.roundToPx() } }
+                            val img by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, i) { value = p.render(i, width) }
+                            val scope = androidx.compose.runtime.rememberCoroutineScope()
+                            val label = stringResource(R.string.edit_page_n, i + 1)
+                            androidx.compose.foundation.layout.Box(
+                                Modifier.fillMaxWidth().aspectRatio(1f / p.aspect(i)).background(androidx.compose.ui.graphics.Color.White)
+                                    .clickable(onClickLabel = label) {
+                                        // Back to the editor, at the paragraph the page starts with
+                                        scope.launch {
+                                            val text = p.pageText(i).trim().take(40)
+                                            val key = if (text.isEmpty()) null else state.paras.firstOrNull { it.text.isNotBlank() && (it.text.trim().startsWith(text.take(minOf(text.length, it.text.trim().length).coerceAtLeast(1))) || text.startsWith(it.text.trim().take(40))) }?.key
+                                            key?.let { state.moveTo = it to 0 }
+                                            onDismiss()
+                                        }
+                                    }
+                                    .semantics { contentDescription = label },
+                            ) { img?.let { androidx.compose.foundation.Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

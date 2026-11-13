@@ -449,7 +449,17 @@ open class ViewerActivity : ComponentActivity() {
                             onClose = { held.editor = null },
                             author = settings.commentAuthor,
                             onAuthor = { who -> ua.hramota.data.Settings.get(this@ViewerActivity).update { it.copy(commentAuthor = who) } },
-                            startWithComments = held.withComments)
+                            startWithComments = held.withComments,
+                            pagesOf = { list ->
+                                // The edits written into a copy in memory (the file itself untouched)
+                                withContext(Dispatchers.IO) {
+                                    try {
+                                        val out = java.io.ByteArrayOutputStream()
+                                        contentResolver.openInputStream(uri)?.use { input -> EditSaving.docx(editor.edit, list).write(input.buffered(), out) } ?: return@withContext null
+                                        out.toByteArray()
+                                    } catch (e: Exception) { null }
+                                }
+                            })
                         return@Surface
                     }
                     ViewerScreen(
