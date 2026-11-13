@@ -42,7 +42,7 @@ class OdfTest {
             val a = odt.readingText().map { norm(it.text) }.filter { it.isNotEmpty() }
             val b = docx.readingText().map { norm(it.text) }.filter { it.isNotEmpty() }
             // Every paragraph of the original is there (list numbers may be written differently)
-            val missing = b.filter { p -> a.none { it.contains(p.takeLast(40)) } }
+            val missing = b.map { it.trimStart { c -> !c.isLetterOrDigit() } }.filter { p -> a.none { it.contains(p.takeLast(40)) } }
             assertTrue("$n: ${missing.take(3)}", missing.size <= b.size / 10)
             if (n == "04-tables") assertTrue(odt.blocks.any { it is Block.Table })
             val pages = DocxPages(odt, fonts)

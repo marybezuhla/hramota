@@ -150,6 +150,28 @@ object OdpReader {
                     if (bytes != null) { media[href] = bytes; out += SlideShape.Picture(x, y, w, h, 0f, href); return }
                 }
                 e.child("text-box")?.let { tb -> out += SlideShape.Box(x, y, w, h, 0f, "rect", fill, line, 0.75f, paragraphs(tb, styles, presentationClass(e)), anchor = anchor(g)) }
+                // A table: its cells as boxes in a grid (columns by their widths, rows sharing the height)
+                e.child("table")?.let { t ->
+                    val widths = t.all("table-column").flatMap { c -> List((c.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, 64)) { length(styles.props(c.attr("style-name"), "table-column")["column-width"]) } }
+                    val rows = t.all("table-row").take(200)
+                    if (rows.isEmpty()) return@let
+                    val n = rows.maxOf { r -> r.elements.count { it.name == "table-cell" || it.name == "covered-table-cell" } }.coerceAtLeast(1)
+                    val cw = (0 until n).map { widths.getOrNull(it) ?: (w / n) }
+                    val scale = if (cw.sum() > 0f) w / cw.sum() else 1f
+                    val rh = h / rows.size
+                    for ((ri, r) in rows.withIndex()) {
+                        var cx = x
+                        for ((ci, c) in r.elements.filter { it.name == "table-cell" || it.name == "covered-table-cell" }.withIndex()) {
+                            val span = (c.attr("number-columns-spanned")?.toIntOrNull() ?: 1).coerceIn(1, n)
+                            val cellW = (ci until minOf(n, ci + span)).sumOf { (cw[it] * scale).toDouble() }.toFloat()
+                            if (c.name == "table-cell") {
+                                val cp = styles.props(c.attr("style-name"), "graphic") + styles.props(c.attr("style-name"), "table-cell")
+                                out += SlideShape.Box(cx, y + ri * rh, cellW, rh, 0f, "rect", color(cp["fill-color"] ?: cp["background-color"]), 0xFF7F7F7F.toInt(), 0.75f, paragraphs(c, styles, null).map { p -> p.copy(runs = p.runs.map { it.copy(size = minOf(it.size, 14f)) }) }, anchor = "center")
+                            }
+                            cx += (cw.getOrElse(ci) { w / n }) * scale
+                        }
+                    }
+                }
             }
             "custom-shape", "rect", "ellipse", "circle" -> {
                 val geometry = when {
