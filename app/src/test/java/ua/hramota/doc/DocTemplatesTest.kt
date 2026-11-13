@@ -33,8 +33,8 @@ class DocTemplatesTest {
         val s = XlsxReader.read(b.inputStream()).sheets[0]
         val texts = s.rows.flatMap { r -> r.cols.indices.map { s.text(r, it) } }
         // Income 32 000, expenses 29 000 planned: 3 000 left
-        assertTrue(texts.toString(), texts.any { it.replace(' ', ' ').replace(" ", "").replace(",", ".").startsWith("32000") })
-        assertTrue(texts.toString(), texts.any { it.replace(' ', ' ').replace(" ", "").replace(",", ".").startsWith("3000.00") })
+        assertTrue(texts.toString(), texts.any { it.filter(Char::isDigit) == "3200000" })
+        assertEquals(texts.toString(), "300000", texts[texts.indexOf("Залишок") + 1].filter(Char::isDigit))
         keep("template-todo.xlsx", DocTemplates.xlsx("todo", "uk-UA"))
     }
 
