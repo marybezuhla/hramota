@@ -443,6 +443,8 @@ class XlsxEdit private constructor(
         if (target.lockedAreas.isNotEmpty() || target.lockedShared.isNotEmpty() || target.cells.values.any { it.fKind == "array" || it.fKind == "dataTable" }) return RowRefusal.LOCKED
         // Notes added here are anchored to their cells as the file will have them
         if (notes.keys.any { it.sheet == sheet }) return RowRefusal.SHEET
+        // A filter's columns are counted from its first one: not renumbered here
+        if (cols && Regex("<(?:[A-Za-z_][\\w.-]*:)?filterColumn\\b").containsMatchIn(x)) return RowRefusal.SHEET
         if (n > 0) {
             val last = if (cols) maxOf(target.cells.keys.maxOfOrNull { (it and 0x3FFF).toInt() } ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.col } ?: -1)
                 else maxOf(target.rows.lastEntry()?.key ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.row } ?: -1)
@@ -783,15 +785,18 @@ class XlsxEdit private constructor(
                     rels = SheetComments.addRel(rels, SheetComments.COMMENTS_TYPE, "../" + path.removePrefix("xl/")).first
                     added += path
                 }
-                parts[commentsPath] = SheetComments.comments(parts[commentsPath] ?: extra[commentsPath], mine, AUTHOR)
+                // A comments part the sheet links to must be read (never written over with only the new ones)
+                val had = parts[commentsPath] ?: extra[commentsPath]
+                if (had == null && commentsPath !in added) throw IOException("Comments not readable")
+                parts[commentsPath] = SheetComments.comments(had, mine, AUTHOR)
                 // The old-style drawing Excel shows the notes with
                 val vmlExisting = target(SheetComments.VML_TYPE)
                 if (vmlExisting != null) {
-                    val had = parts[vmlExisting] ?: extra[vmlExisting]
-                    if (had != null) parts[vmlExisting] = SheetComments.vml(had, mine, 1)
+                    val had = parts[vmlExisting] ?: extra[vmlExisting] ?: throw IOException("Drawing not readable")
+                    parts[vmlExisting] = SheetComments.vml(had, mine, 1, firstFreeShape())
                 } else {
-                    val (path, n) = free { "xl/drawings/vmlDrawing$it.vml" }
-                    parts[path] = SheetComments.vml(null, mine, n)
+                    val (path, _) = free { "xl/drawings/vmlDrawing$it.vml" }
+                    parts[path] = SheetComments.vml(null, mine, freeIdmap(), firstFreeShape())
                     added += path
                     val (text, id) = SheetComments.addRel(rels, SheetComments.VML_TYPE, "../drawings/" + path.substringAfterLast('/'))
                     rels = text
@@ -958,6 +963,27 @@ class XlsxEdit private constructor(
         return b.append(x, pos, x.length).toString()
     }
 
+    /** Old-style drawings of the whole workbook (their numbers must not be used twice). */
+    private fun drawings() = extra.filterKeys { it.lowercase().endsWith(".vml") }.values
+    private fun freeIdmap(): Int = (drawings().flatMap { d -> Regex("data=\"([0-9, ]+)\"").findAll(d).flatMap { m -> m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() } } }.maxOrNull() ?: 0) + 1
+    private var shapesUsed = 0
+    private fun firstFreeShape(): Int {
+        val most = drawings().flatMap { d -> Regex("_x0000_s(\\d+)").findAll(d).mapNotNull { it.groupValues[1].toIntOrNull() } }.maxOrNull() ?: 0
+        // (and those given to notes earlier in this save)
+        shapesUsed = maxOf(shapesUsed, most, freeIdmap() * 1024) + 1
+        val first = shapesUsed
+        shapesUsed += 2000
+        return first
+    }
+
+    /** Whether notes can be added to [sheet]: not where Excel keeps its newer, threaded comments (they would part from them). */
+    fun canNote(sheet: Int): Boolean {
+        val sh = layout.sheets.getOrNull(sheet) ?: return false
+        val rels = extra[sh.path.substringBeforeLast('/') + "/_rels/" + sh.path.substringAfterLast('/') + ".rels"] ?: return typesXml != null
+        return typesXml != null && !rels.contains("threadedComment") && !rels.contains("/legacyDrawingHF") &&
+            !(Regex("<(?:[A-Za-z_][\\w.-]*:)?legacyDrawing\\b").containsMatchIn(sh.xml) && !rels.contains("/comments\""))
+    }
+
     private fun copy(source: InputStream, out: OutputStream, parts: Map<String, String>, dropped: Set<String>, added: Set<String> = emptySet()) {
         val written = HashSet<String>()
         var total = 0L
@@ -990,7 +1016,7 @@ class XlsxEdit private constructor(
                 z.closeEntry()
             }
             // Parts made here (notes): written after the file's own
-            for (name in added) if (name !in written) { z.putNextEntry(ZipEntry(name)); z.write(parts.getValue(name).toByteArray(Charsets.UTF_8)); z.closeEntry(); written += name }
+            for (name in added) if (name !in written) { z.putNextEntry(ZipEntry(name).apply { time = FIXED_TIME }); z.write(parts.getValue(name).toByteArray(Charsets.UTF_8)); z.closeEntry(); written += name }
             for (name in parts.keys) if (name !in written) throw IOException("$name missing")
             z.finish(); z.flush()
         }
@@ -1005,6 +1031,8 @@ class XlsxEdit private constructor(
         private const val MAX_TOTAL = 1024L * 1024 * 1024
         private const val MAX_ENTRIES = 20_000
         const val MAX_NOTE = 5000
+        /** New parts carry no date of their own (1980-01-01, the earliest ZIP knows). */
+        const val FIXED_TIME = 315532800000L
         /** Who notes added here are by: the app, never the person's name. */
         const val AUTHOR = "Hramota"
 
@@ -1034,7 +1062,7 @@ class XlsxEdit private constructor(
                     if (lower.endsWith(".xml") && (lower.startsWith("xl/worksheets/") || lower.startsWith("xl/tables/") || lower == "xl/workbook.xml" || lower == "xl/sharedstrings.xml") ||
                         lower.startsWith("xl/worksheets/_rels/") && lower.endsWith(".rels") ||
                         lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml" ||
-                        lower.startsWith("xl/") && lower.endsWith(".vml") || lower.startsWith("xl/") && lower.substringAfterLast('/').startsWith("comments") && lower.endsWith(".xml") || lower.startsWith("xl/") && lower.endsWith("styles.xml") && lower.count { it == '/' } == 1) {
+                        lower.startsWith("xl/") && lower.endsWith(".vml") || lower.startsWith("xl/") && "comment" in lower && lower.endsWith(".xml") || lower.startsWith("xl/") && lower.endsWith("styles.xml") && lower.count { it == '/' } == 1) {
                         val b = readAll(zip, MAX_PART)
                         total += b.size
                         if (total > MAX_TOTAL / 4) throw IOException("Too large to edit")
@@ -1089,7 +1117,7 @@ class XlsxEdit private constructor(
             if (parts.isEmpty()) throw IOException("No sheets")
             val stylesPath = relTargets.values.firstOrNull { it.second.endsWith("/styles") }?.first
             // Sheets' relationships, comments and old-style drawings, kept as text for notes added here
-            val extra = raw.keys.filter { k -> val lower = k.lowercase(); lower.endsWith(".rels") && lower.startsWith("xl/worksheets/_rels/") || lower.endsWith(".vml") || lower.substringAfterLast('/').startsWith("comments") }
+            val extra = raw.keys.filter { k -> val lower = k.lowercase(); lower.endsWith(".rels") && lower.startsWith("xl/worksheets/_rels/") || lower.endsWith(".vml") || "comment" in lower && !lower.startsWith("xl/worksheets/") }
                 .associateWith { k -> if (k.lowercase().endsWith(".vml")) String(raw.getValue(k), Charsets.UTF_8) else text(k)!! }
             return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, stylesPath, stylesPath?.let(::text), blockers, extra, names)
         }

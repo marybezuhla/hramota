@@ -102,7 +102,7 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
     }
 
     fun addComment(slide: Int, text: String) {
-        if (text.isBlank()) return
+        if (text.isBlank() || comments[slide].orEmpty().size >= 200) return
         commit(paras, newComments = comments + (slide to comments[slide].orEmpty() + text.trim()))
     }
 

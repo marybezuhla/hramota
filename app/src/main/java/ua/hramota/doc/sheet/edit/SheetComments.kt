@@ -63,14 +63,27 @@ internal object SheetComments {
     }
 
     /** The old-style drawing with a hidden box for each of [notes] (made anew when [existing] is null). */
-    fun vml(existing: String?, notes: List<Note>, drawingNumber: Int): String {
+    fun vml(existing: String?, notes: List<Note>, drawingNumber: Int, firstShape: Int): String {
         val start = existing ?: """<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="$drawingNumber"/></o:shapelayout><v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype></xml>"""
         // A box is known by its cell: the boxes of cells given a new note go (one box to a cell)
-        var x = start
-        for (n in notes) {
-            x = x.replace(Regex("<v:shape\\b(?:(?!</v:shape>).)*?<x:Row>${n.row}</x:Row>\\s*<x:Column>${n.col}</x:Column>.*?</v:shape>", RegexOption.DOT_MATCHES_ALL), "")
+        val cells = notes.mapTo(HashSet()) { it.row to it.col }
+        // One pass over the shapes: those of cells given a new note left out
+        val x = StringBuilder(start.length)
+        var pos = 0
+        while (true) {
+            val s = start.indexOf("<v:shape", pos).takeIf { it >= 0 && !start.startsWith("<v:shapetype", it) }
+                ?: start.indexOf("<v:shape ", pos).takeIf { it >= 0 } ?: break
+            if (start.startsWith("<v:shapetype", s)) { x.append(start, pos, s + 1); pos = s + 1; continue }
+            val e = start.indexOf("</v:shape>", s).takeIf { it >= 0 }?.plus("</v:shape>".length) ?: break
+            val shape = start.substring(s, e)
+            val row = Regex("<x:Row>\\s*(\\d+)").find(shape)?.groupValues?.get(1)?.toIntOrNull()
+            val col = Regex("<x:Column>\\s*(\\d+)").find(shape)?.groupValues?.get(1)?.toIntOrNull()
+            x.append(start, pos, s)
+            if (row == null || col == null || (row to col) !in cells) x.append(shape)
+            pos = e
         }
-        var next = (Regex("_x0000_s(\\d+)").findAll(x).mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull() ?: (drawingNumber * 1024)) + 1
+        x.append(start, pos, start.length)
+        var next = firstShape
         val shapes = notes.joinToString("") { n ->
             val id = next++
             "<v:shape id=\"_x0000_s$id\" type=\"#_x0000_t202\" style=\"position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:108pt;height:59.25pt;z-index:${id % 1024};visibility:hidden\" fillcolor=\"#ffffe1\" o:insetmode=\"auto\">" +

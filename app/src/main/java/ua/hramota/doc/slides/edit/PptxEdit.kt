@@ -516,7 +516,7 @@ class PptxEdit private constructor(
             for (name in changed.keys) if (name !in created && name !in written && "/$name" !in written) throw IOException("$name missing")
             // The new parts (slides added, their links)
             for (name in created.sorted()) {
-                z.putNextEntry(ZipEntry(name))
+                z.putNextEntry(ZipEntry(name).apply { time = 315532800000L })
                 z.write((changed[name] ?: throw IOException("$name empty")).toByteArray(Charsets.UTF_8))
                 z.closeEntry()
             }

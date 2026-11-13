@@ -453,11 +453,12 @@ open class ViewerActivity : ComponentActivity() {
                             pagesOf = { list ->
                                 // The edits written into a copy in memory (the file itself untouched)
                                 withContext(Dispatchers.IO) {
+                                    // (into a temporary file, read back once: a big document is not held twice)
+                                    val temp = java.io.File(java.io.File(cacheDir, "open").apply { mkdirs() }, "pages-${System.nanoTime()}.docx")
                                     try {
-                                        val out = java.io.ByteArrayOutputStream()
-                                        contentResolver.openInputStream(uri)?.use { input -> EditSaving.docx(editor.edit, list).write(input.buffered(), out) } ?: return@withContext null
-                                        out.toByteArray()
-                                    } catch (e: Exception) { null }
+                                        val ok = contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { EditSaving.docx(editor.edit, list).write(input.buffered(), it) }; true } ?: false
+                                        if (!ok || temp.length() > 200L * 1024 * 1024) null else temp.readBytes()
+                                    } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null } finally { temp.delete() }
                                 }
                             })
                         return@Surface

@@ -244,6 +244,18 @@ class XlsxEditTest {
         assertEquals(2, Regex("<v:shape ").findAll(part(out2, "xl/drawings/vmlDrawing1.vml")!!).count())
     }
 
+    /** A workbook whose comments are in a part named otherwise (openpyxl): they stay when a note is added. */
+    @Test fun notesJoinTheCommentsThere() {
+        val before = XlsxReader.read(ByteArrayInputStream(bytes("charts/charts.xlsx"))).comments
+        val (sheet, had) = before.entries.first { it.value.isNotEmpty() }
+        val edit = XlsxEdit.open(ByteArrayInputStream(bytes("charts/charts.xlsx")))
+        edit.setNote(CellKey(sheet, 30, 5), "Нове")
+        val out = save("charts/charts.xlsx", edit, "notes-joined")
+        val after = XlsxReader.read(ByteArrayInputStream(out)).comments[sheet]!!
+        for ((k, v) in had) assertEquals(v, after[k])
+        assertEquals("Hramota: Нове", after[30 to 5])
+    }
+
     @Test fun rowsAreNotMovedUnderTables() {
         val edit = XlsxEdit.open(ByteArrayInputStream(bytes("docs-edit/rows-table.xlsx")))
         assertEquals(XlsxEdit.RowRefusal.SHEET, edit.moveRows(0, 2, 1))

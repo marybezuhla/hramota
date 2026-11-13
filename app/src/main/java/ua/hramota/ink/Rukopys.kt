@@ -32,7 +32,7 @@ object Rukopys {
     private var chars: List<String> = emptyList()
 
     /** Whether this Hramota has the model. */
-    fun available(context: Context): Boolean = try { context.assets.open(MODEL).close(); true } catch (e: Exception) { false }
+    fun available(context: Context): Boolean = try { context.assets.open(MODEL).close(); context.assets.open(ALPHABET).close(); true } catch (e: Exception) { false }
 
     /** The p-th percentile (0..100) of [v], as numpy computes it (linear between neighbours). */
     internal fun percentile(v: FloatArray, p: Float): Float {
@@ -116,6 +116,21 @@ object Rukopys {
         return groups.filter { it.isNotEmpty() }.map { g -> g.sortedBy { it.i }.map { it.s } }
     }
 
+    /** A line in pieces short enough to read (under [MAX_POINTS] once resampled), cut between strokes at the widest gaps. */
+    internal fun pieces(line: List<Stroke>): List<List<Stroke>> {
+        val f = features(line.map { st -> st.points.map { it.x to it.y } })
+        if (f.size / 3 < MAX_POINTS * 9 / 10 || line.size < 2) return listOf(line)
+        // The gap after each stroke: how far right the next one starts beyond everything before
+        var right = Float.NEGATIVE_INFINITY
+        val gaps = ArrayList<Pair<Int, Float>>()
+        for (i in 0 until line.size - 1) {
+            right = max(right, line[i].points.maxOf { it.x })
+            gaps += i to (line[i + 1].points.minOf { it.x } - right)
+        }
+        val cut = gaps.maxBy { it.second }.first + 1
+        return pieces(line.subList(0, cut)) + pieces(line.subList(cut, line.size))
+    }
+
     private suspend fun ready(context: Context): OrtSession = lock.withLock {
         session ?: withContext(Dispatchers.IO) {
             val env = OrtEnvironment.getEnvironment()
@@ -146,10 +161,13 @@ object Rukopys {
         val s = ready(context)
         val env = OrtEnvironment.getEnvironment()
         lines(strokes).map { line ->
-            val f = features(line.map { st -> st.points.map { it.x to it.y } })
-            if (f.isEmpty()) "" else OnnxTensor.createTensor(env, FloatBuffer.wrap(f), longArrayOf(1, (f.size / 3).toLong(), 3)).use { t ->
-                lock.withLock { s.run(mapOf("points" to t)).use { out -> decode(out[0] as OnnxTensor) } }
-            }
+            // A line longer than the model was taught on: read in pieces, cut where the pen jumps furthest
+            pieces(line).map { piece ->
+                val f = features(piece.map { st -> st.points.map { it.x to it.y } })
+                if (f.isEmpty()) "" else OnnxTensor.createTensor(env, FloatBuffer.wrap(f), longArrayOf(1, (f.size / 3).toLong(), 3)).use { t ->
+                    lock.withLock { s.run(mapOf("points" to t)).use { out -> decode(out[0] as OnnxTensor) } }
+                }
+            }.filter { it.isNotEmpty() }.joinToString(" ")
         }.filter { it.isNotEmpty() }.joinToString("\n")
     }
 }

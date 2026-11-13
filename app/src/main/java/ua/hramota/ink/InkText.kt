@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import ua.hramota.ocr.Reflow
 import ua.hramota.ocr.TextRecognizer
+import kotlinx.coroutines.ensureActive
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -63,7 +64,8 @@ object InkText {
         // As fitted to this person's hand in «Мій почерк» (the first way, as written, until then)
         val t = InkTuning.get(context)
         val s = InkTuning.upright(strokes, t.slant)
-        if (t.engine == "r2" && Rukopys.available(context)) return Rukopys.read(context, s)
+        // The second way failing (memory, a damaged model): the first way reads instead
+        if (t.engine == "r2" && Rukopys.available(context)) runCatching { return Rukopys.read(context, s) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
         return readFirst(context, s, cyrillic)
     }
 
@@ -86,6 +88,7 @@ object InkText {
      * that reads most letters right is kept. [progress] gets (done, all). Off the main thread.
      */
     suspend fun fit(context: Context, progress: (Int, Int) -> Unit = { _, _ -> }): InkTuning.Tuning {
+        val cyrillic = java.util.Locale.getDefault().language in CYRILLIC_LANGUAGES
         val samples = MyInk.samples(context).takeLast(MAX_FIT).mapNotNull { o ->
             val text = o.optString("text").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val strokes = runCatching { InkJson.readStrokes(o.getJSONArray("strokes")) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
@@ -107,7 +110,8 @@ object InkText {
             letters += want.length
             for ((k, way) in ways.withIndex()) {
                 val s = InkTuning.upright(strokes, way.second)
-                val got = InkTuning.plain(if (way.first == "r2") Rukopys.read(context, s) else readFirst(context, s, cyrillic = true))
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val got = InkTuning.plain(if (way.first == "r2") runCatching { Rukopys.read(context, s) }.getOrDefault("") else readFirst(context, s, cyrillic))
                 wrong[k] += InkTuning.distance(got, want)
             }
             progress(++done, samples.size)
@@ -116,6 +120,7 @@ object InkText {
         // The way with fewest letters wrong (the first way as written when equal)
         val best = ways.indices.minBy { wrong[it] }
         val t = InkTuning.Tuning(ways[best].first, ways[best].second, scores, samples.size)
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         InkTuning.save(context, t)
         return t
     }

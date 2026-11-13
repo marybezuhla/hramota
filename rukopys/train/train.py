@@ -105,17 +105,24 @@ def main():
     chars = alphabet()
     index = {c: i + 1 for i, c in enumerate(chars)}
     words = corpus.dictionary_words(os.path.join(ROOT, "app/src/main/assets/voice/stress.bin"))
-    real = corpus.sentences(os.path.join(ROOT, "app/src/main/assets/ink/practice_uk.txt"))
+    # The practice sentences are what «Мій почерк» asks people to write: never trained on, so a phone's
+    # check of Р2 on them is fair
+    real = []
     fonts = sorted(glob.glob(os.path.join(a.fonts, "*.[ot]tf")))
     hand = [f for f in fonts if not os.path.basename(f).startswith("print-")]
     held = hand[-a.held_out:] if a.held_out else []
     train_fonts = [f for f in fonts if f not in held]
+    # Too few fonts came (downloads refused): no fair test, no model
+    if len(held) != a.held_out or len([f for f in train_fonts if f in hand]) < 3:
+        sys.exit(f"too few handwriting fonts: {len(hand)}")
     print("training fonts:", [os.path.basename(f) for f in train_fonts], flush=True)
     print("held-out fonts:", [os.path.basename(f) for f in held], flush=True)
 
     t0 = time.time()
     train = data.make(a.train_n, train_fonts, a.seed, words, real, set(chars))
-    val = data.make(a.val_n, held or train_fonts, a.seed + 7, words, real, set(chars), keep_strokes=True)
+    val = data.make(a.val_n, held, a.seed + 7, words, real, set(chars), keep_strokes=True)
+    # The first part picks the best checkpoint; the rest (never used for that) is the test
+    pick, val = val[:min(500, len(val) // 3)], val[min(500, len(val) // 3):]
     print(f"made {len(train)} training and {len(val)} test lines in {time.time() - t0:.0f} s", flush=True)
 
     model = Rukopys(len(chars) + 1)
@@ -150,13 +157,13 @@ def main():
             if step % 100 == 0:
                 print(f"epoch {epoch} step {step} loss {loss.item():.3f}", flush=True)
             if step % 2000 == 0:
-                c = cer(model, val[:500], chars)
+                c = cer(model, pick, chars)
                 history.append({"step": step, "cer": c})
                 print(f"  test letters wrong: {c:.3%}", flush=True)
                 if c < best:
                     best = c
                     torch.save(model.state_dict(), os.path.join(a.out, "best.pt"))
-    c = cer(model, val[:500], chars)
+    c = cer(model, pick, chars)
     if c < best:
         best = c
         torch.save(model.state_dict(), os.path.join(a.out, "best.pt"))

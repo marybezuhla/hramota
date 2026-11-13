@@ -1,4 +1,4 @@
-"""Lines of Ukrainian to write: real sentences (Hramota's practice text) and lines made of words from
+"""Lines of Ukrainian to write: lines made of words from
 the stress dictionary built into Hramota (2.9 million word forms, ukrainian-word-stress, MIT), with
 capitals, numbers and punctuation now and then, as people write them.
 """
@@ -47,7 +47,7 @@ def dictionary_words(path):
 
 
 def sentences(path):
-    text = open(path, encoding="utf-8").read()
+    text = "\n".join(l for l in open(path, encoding="utf-8").read().split("\n") if not l.strip().startswith("#"))
     return [s.strip() for s in text.replace("\n", " ").split(".") if len(s.strip()) > 3]
 
 

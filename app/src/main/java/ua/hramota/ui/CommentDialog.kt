@@ -27,7 +27,7 @@ fun CommentDialog(start: String, onDismiss: () -> Unit, onDone: (String) -> Unit
             OutlinedTextField(text, { text = it.take(MAX) }, placeholder = { Text(stringResource(R.string.cell_note_hint)) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp))
         },
-        confirmButton = { TextButton(onClick = { onDone(text.trim()) }, enabled = text.isNotBlank()) { Text(stringResource(R.string.ok)) } },
+        confirmButton = { TextButton(onClick = { onDone(text.trim()) }, enabled = text.isNotBlank() || start.isNotBlank()) { Text(stringResource(R.string.ok)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }

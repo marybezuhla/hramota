@@ -145,6 +145,7 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
     var about by rememberSaveable { mutableStateOf(false) }
     // Fitting recognition to the samples: how far along, then what came of it
     var fitting by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var fitJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var fitted by remember { mutableStateOf<InkTuning.Tuning?>(null) }
     fitted?.let { t ->
         AlertDialog(
@@ -167,7 +168,8 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
     }
     fitting?.let { (done, all) ->
         AlertDialog(onDismissRequest = {}, title = { Text(stringResource(R.string.ink_fit_title)) },
-            text = { Text(stringResource(R.string.ink_fit_progress, done, all)) }, confirmButton = {})
+            text = { Text(stringResource(R.string.ink_fit_progress, done, all)) }, confirmButton = {},
+            dismissButton = { TextButton(onClick = { fitJob?.cancel(); fitting = null }) { Text(stringResource(R.string.cancel)) } })
     }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/jsonl")) { uri ->
         if (uri != null) scope.launch {
@@ -201,9 +203,9 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_fit)) }, enabled = (written?.size ?: 0) >= 3 && fitting == null, onClick = {
                         menu = false
                         fitting = 0 to 0
-                        scope.launch {
+                        fitJob = scope.launch {
                             val t = try {
-                                withContext(Dispatchers.Default) { InkText.fit(context) { d, a -> scope.launch { fitting = d to a } } }
+                                withContext(Dispatchers.Default) { InkText.fit(context) { d, a -> scope.launch { if (fitting != null) fitting = d to a } } }
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { null }
                             fitting = null
                             if (t == null) Toast.makeText(context, context.getString(R.string.ink_fit_failed), Toast.LENGTH_SHORT).show() else fitted = t

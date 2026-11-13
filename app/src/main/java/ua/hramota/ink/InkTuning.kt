@@ -18,16 +18,19 @@ object InkTuning {
 
     @Volatile private var cached: Tuning? = null
 
-    fun get(context: Context): Tuning = cached ?: (try {
-        Vault.readSmall(context, FILE)?.let { b ->
+    fun get(context: Context): Tuning {
+        // Locked: the fitted choice is not used (nor kept in memory) until unlocked
+        if (Vault.locked(context)) { cached = null; return Tuning() }
+        cached?.let { return it }
+        return (try { Vault.readSmall(context, FILE)?.let { b ->
             val o = JSONObject(String(b))
             val sc = o.optJSONObject("scores")
             Tuning(o.optString("engine", "r1"), o.optDouble("slant", 0.0).toFloat().coerceIn(-1f, 1f),
                 sc?.keys()?.asSequence()?.associateWith { sc.optDouble(it).toFloat() }.orEmpty(), o.optInt("samples"))
-        }
-    } catch (e: Exception) { null } ?: Tuning()).also { cached = it }
+        } } catch (e: Exception) { null } ?: Tuning()).also { cached = it }
+    }
 
-    fun save(context: Context, t: Tuning) {
+    fun save(context: Context, t: Tuning) = synchronized(MyInk) {
         Vault.writeSmall(context, FILE, JSONObject().apply {
             put("engine", t.engine); put("slant", t.slant.toDouble()); put("samples", t.samples)
             put("scores", JSONObject().apply { for ((k, v) in t.scores) put(k, v.toDouble()) })
@@ -53,16 +56,20 @@ object InkTuning {
         for (s in strokes) for (i in 1 until s.points.size) {
             val dx = s.points[i].x - s.points[i - 1].x
             val dy = s.points[i].y - s.points[i - 1].y
-            if (abs(dy) > 0.5f && abs(dy) > 1.5f * abs(dx)) leans += -dx / dy
+            if (abs(dy) > 0.5f && abs(dy) > abs(dx)) leans += -dx / dy
         }
         if (leans.size < 10) return 0f
         leans.sort()
         return leans[leans.size / 2].coerceIn(-1f, 1f)
     }
 
-    /** The strokes with [slant] taken out (letters stood upright). */
-    fun upright(strokes: List<Stroke>, slant: Float): List<Stroke> =
-        if (slant == 0f) strokes else strokes.map { s -> s.copy(points = s.points.map { p -> p.copy(x = p.x + slant * p.y) }) }
+    /** The strokes with [slant] taken out (letters stood upright), turned about their middle height. */
+    fun upright(strokes: List<Stroke>, slant: Float): List<Stroke> {
+        if (slant == 0f || strokes.isEmpty()) return strokes
+        val ys = strokes.flatMap { s -> s.points.map { it.y } }.sorted()
+        val mid = if (ys.isEmpty()) 0f else ys[ys.size / 2]
+        return strokes.map { s -> s.copy(points = s.points.map { p -> p.copy(x = p.x + slant * (p.y - mid)) }) }
+    }
 
     /** Letters to change to turn [a] into [b] (Levenshtein). */
     fun distance(a: String, b: String): Int {

@@ -736,7 +736,7 @@ private fun EditedPages(state: EditorState, make: suspend (List<EditPara>) -> By
                                         // Back to the editor, at the paragraph the page starts with
                                         scope.launch {
                                             val text = p.pageText(i).trim().take(40)
-                                            val key = if (text.isEmpty()) null else state.paras.firstOrNull { it.text.isNotBlank() && (it.text.trim().startsWith(text.take(minOf(text.length, it.text.trim().length).coerceAtLeast(1))) || text.startsWith(it.text.trim().take(40))) }?.key
+                                            val key = if (text.isEmpty()) null else state.paras.firstOrNull { it.text.trim().length >= 4 && (it.text.trim().startsWith(text.take(minOf(text.length, it.text.trim().length).coerceAtLeast(1))) || text.startsWith(it.text.trim().take(40))) }?.key
                                             key?.let { state.moveTo = it to 0 }
                                             onDismiss()
                                         }

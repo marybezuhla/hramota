@@ -250,6 +250,8 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
         // Anything typed was put in before (or dropped): it must not land in a row that moved
         draft = null; typing = false
+        // The filter's rows and column moved under it: taken off
+        if (filter?.sheet == sheet) { filter = null }
         busy = true
         // Finished even when the screen goes meanwhile (turned): a half-done change would leave the shown rows behind the workbook
         try { withContext(kotlinx.coroutines.NonCancellable) {
@@ -273,13 +275,20 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
         return edit.noteChanges[CellKey(s, row, col)] ?: original.comments[sheet]?.get(row to col)
     }
 
-    /** Puts a note on a cell (Excel's comment), written into the file when it is saved. */
+    /** Whether notes can be put on cells of shown sheet [sheet]. */
+    fun canNote(sheet: Int) = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 }?.let { edit.canNote(it) } == true
+
+    /** The words of a note added here (to change it), else nothing. */
+    fun ownNote(sheet: Int, row: Int, col: Int): String? = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 }?.let { edit.noteChanges[CellKey(it, row, col)] }
+
+    /** Puts a note on a cell (Excel's comment), written into the file when it is saved; empty words take one added here away. */
     fun setNote(sheet: Int, row: Int, col: Int, text: String) {
         val s = shownSheets.getOrNull(sheet)?.takeIf { it >= 0 } ?: return
-        if (busy || text.isBlank()) return
+        if (busy) return
         val key = CellKey(s, row, col)
         val before = edit.noteChanges[key]
-        edit.setNote(key, text.trim())
+        if (text.isBlank() && before == null) return
+        edit.setNote(key, text.trim().ifEmpty { null })
         push(NoteStep(key, before, edit.noteChanges[key]))
         changed()
     }
@@ -610,7 +619,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                             ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) },
                             ctx.getString(R.string.sheet_sort_down) to { state.sort(sheet, row, col, descending = true, headings = true) },
                             ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },
-                            ctx.getString(if (state.note(sheet, row, col) == null) R.string.cell_note_add else R.string.cell_note_change) to { noting = Triple(sheet, row, col) },
+                            if (!state.canNote(sheet)) null else ctx.getString(if (state.note(sheet, row, col) == null) R.string.cell_note_add else R.string.cell_note_change) to { noting = Triple(sheet, row, col) },
                             if (state.filter != null) ctx.getString(R.string.sheet_filter_off) to { state.setFilter(sheet, row, col, null) } else null,
                         )
                     },
@@ -620,7 +629,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
         }
     }
     noting?.let { (sheet, row, col) ->
-        CommentDialog(state.note(sheet, row, col)?.removePrefix(XlsxEdit.AUTHOR + ": ").orEmpty(), onDismiss = { noting = null }) { text ->
+        CommentDialog(state.ownNote(sheet, row, col).orEmpty(), onDismiss = { noting = null }) { text ->
             noting = null
             state.setNote(sheet, row, col, text)
         }

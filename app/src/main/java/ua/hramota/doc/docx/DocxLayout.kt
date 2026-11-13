@@ -187,7 +187,8 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
                         p.shading?.let { items += PageItem.Fill(RectF(left + p.shadeLeft, y, left + contentWidth - p.shadeRight, y + sliceH), it) }
                         // The paragraph's floating picture, beside its first lines
                         if (line == 0) p.float?.let { f ->
-                            val top = y + f.y
+                            // Kept on the page, as Word keeps anchored pictures
+                            val top = max(y, min(y + f.y, bottom - f.h))
                             items += PageItem.Image(RectF(left + f.x, top, left + f.x + f.w, top + f.h)) { pw, ph -> pictures(f.picture.rel, pw, ph) }
                             floatSide = f.region; floatBottom = y + f.region.until
                         }
@@ -375,9 +376,18 @@ class DocxLayout(private val doc: DocxDocument, private val fonts: Fonts, privat
         val skip = pic
         val first = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields, skip, null) }.fresh()
         // Lines beside the picture are made narrower: laid out once to see where lines fall, then again
-        val beside = region?.let { r -> (0 until first.lineCount).count { first.getLineTop(it) < r.until } }?.takeIf { it > 0 }
-        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields, skip, beside?.let { region!! to it }) }
-        val measured = if (beside == null) first else source.fresh()
+        var beside = region?.let { r -> (0 until first.lineCount).count { first.getLineTop(it) < r.until } }?.takeIf { it > 0 }
+        // Narrower lines wrap into more of them: counted again on the narrowed layout until it holds
+        var measured = first
+        if (beside != null) for (pass in 0 until 4) {
+            val n = beside!!
+            measured = build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields, skip, region!! to n)
+            val again = (0 until measured.lineCount).count { measured.getLineTop(it) < region!!.until }
+            if (again <= n) break
+            beside = again
+        }
+        val narrow = beside
+        val source = TextSource(cache) { build(b, width, baseX, firstIndent, restIndent, layoutWidth, fields, skip, narrow?.let { region!! to it }) }
         val n = measured.lineCount
         val tops = FloatArray(n + 1) { if (it < n) measured.getLineTop(it).toFloat() else measured.getLineBottom(n - 1).toFloat() }
         source.text = measured.text.toString()

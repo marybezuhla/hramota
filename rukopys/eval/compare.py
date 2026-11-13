@@ -110,8 +110,9 @@ def main():
     letters = words = 0
     examples = []
     for i, (text, strokes) in enumerate(test):
-        got1 = r1(render(strokes))
-        got2 = r2(strokes)
+        text = text.replace("’", "'")
+        got1 = r1(render(strokes)).replace("’", "'")
+        got2 = r2(strokes).replace("’", "'")
         for k, got in (("r1", got1), ("r2", got2)):
             score[k][0] += distance(got, text)
             score[k][1] += distance(got.split(), text.split())
@@ -123,6 +124,7 @@ def main():
     report = {k: {"letters_wrong": v[0] / letters, "words_wrong": v[1] / words, "lines_right": v[2] / len(test)} for k, v in score.items()}
     report["lines"] = len(test)
     report["r2_better"] = report["r2"]["letters_wrong"] < report["r1"]["letters_wrong"]
+    report["note"] = "made-up writing (fonts traced into strokes) in fonts never trained on; real hands are checked on each phone"
     report["examples"] = examples
     print(json.dumps(report, ensure_ascii=False, indent=1))
 
