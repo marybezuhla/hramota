@@ -1,5 +1,7 @@
 package ua.hramota.ui
 
+import androidx.compose.ui.graphics.asImageBitmap
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.selection.selectable
@@ -154,6 +156,24 @@ fun WorkbookDocument(
             val text = if (row != null && k >= 0) sheet.text(row, k) else ""
             CellBar("${columnName(c)}${r + 1}", text) { selected = null }
         }
+        // The sheet's charts, drawn from the values saved with them
+        val charts = workbook.charts[index].orEmpty()
+        var showCharts by remember(index) { mutableStateOf(false) }
+        if (charts.isNotEmpty()) Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+            TextButton(onClick = { showCharts = true }, modifier = Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.sheet_charts, charts.size)) }
+        }
+        if (showCharts) androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showCharts = false },
+            confirmButton = { TextButton(onClick = { showCharts = false }) { Text(stringResource(R.string.insp_close)) } },
+            text = {
+                androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                    items(charts.size) { i ->
+                        val img = remember(charts[i]) { android.graphics.BitmapFactory.decodeByteArray(charts[i], 0, charts[i].size)?.asImageBitmap() }
+                        img?.let { androidx.compose.foundation.Image(it, contentDescription = stringResource(R.string.sheet_chart_n, i + 1), modifier = Modifier.fillMaxWidth()) }
+                    }
+                }
+            },
+        )
         if (workbook.sheets.size > 1) SheetTabs(workbook.sheets.map { it.name }, sheetIndex, onSheet)
     }
 }

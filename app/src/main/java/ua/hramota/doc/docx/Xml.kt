@@ -36,8 +36,8 @@ class XmlNode(val name: String, val attrs: Map<String, String>) {
     }
 }
 
-/** Elements whose text is kept: document text, field codes, and document properties. */
-private val TEXT_ELEMENTS = setOf("t", "instrText", "delText", "creator", "lastModifiedBy", "title")
+/** Elements whose text is kept: document text, field codes, document properties, and the values saved with charts. */
+private val TEXT_ELEMENTS = setOf("t", "instrText", "delText", "creator", "lastModifiedBy", "title", "v", "formatCode", "f")
 
 object Xml {
     /** Office parts never declare a DOCTYPE; one is refused, so entity tricks cannot expand. */

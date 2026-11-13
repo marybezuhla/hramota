@@ -730,4 +730,6 @@
     <string name="tpl_design_classic">Design: Classic (light)</string>
     <string name="tpl_design_night">Design: Night (dark)</string>
     <string name="tpl_design_meadow">Design: Meadow (green)</string>
+    <string name="sheet_charts">Charts on this sheet: %1$d</string>
+    <string name="sheet_chart_n">Chart %1$d</string>
 </resources>

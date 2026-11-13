@@ -100,7 +100,9 @@ private data class Level(
 /** A slide, layout or master: its shapes and relationships. */
 private class Part(val path: String, val root: XmlNode, val rels: Map<String, String>)
 
-private class Builder(private val parts: Map<String, ByteArray>, private val media: Map<String, ByteArray>) {
+private class Builder(private val parts: Map<String, ByteArray>, private val fileMedia: Map<String, ByteArray>) {
+    /** The file's pictures, and charts drawn as pictures (by their chart part's path). */
+    private val media = HashMap(fileMedia)
     private val trees = HashMap<String, XmlNode?>()
     /** Layouts, masters, themes and relationships are kept (slides share them); a slide's own tree is not. */
     private fun tree(path: String): XmlNode? {
@@ -384,7 +386,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
                     (t.sx * (if (cw > 0) gw / cw else 1f)).coerceIn(1e-3f, 1e3f), (t.sy * (if (ch > 0) gh / ch else 1f)).coerceIn(1e-3f, 1e3f))
                 for (c in n.children) shapeOf(c, p, layout, master, styles, out, inner, decoration, depth + 1)
             }
-            "graphicFrame" -> table(n, t, styles, out)
+            "graphicFrame" -> if (n.find("chart") != null && n.find("tbl") == null) chart(n, p, t)?.let { out += it } else table(n, t, styles, out)
             "AlternateContent" -> n.child("Fallback")?.children?.forEach { shapeOf(it, p, layout, master, styles, out, t, decoration, depth + 1) }
         }
     }
@@ -521,6 +523,20 @@ private class Builder(private val parts: Map<String, ByteArray>, private val med
         var x = n; val sb = StringBuilder()
         for (i in v.indices) while (x >= v[i]) { sb.append(s[i]); x -= v[i] }
         return sb.toString()
+    }
+
+    /** A chart, drawn from the values saved with it, as a picture where it stands. */
+    private fun chart(frame: XmlNode, p: Part, t: Transform): SlideShape.Picture? {
+        val r = rect(frame.child("xfrm"), t) ?: return null
+        val path = frame.find("chart")?.attr("id")?.let { p.rels[it] } ?: return null
+        if (path !in media) {
+            if (media.count { it.key.startsWith("chart:") } >= 50) return null
+            val tree = tree(path) ?: return null
+            val chart = ua.hramota.doc.Chart.parse(tree, scheme) ?: return null
+            // Drawn at twice the size in points: sharp enough on a phone and in a PDF
+            media["chart:" + path] = try { chart.png((r.w * 2).toInt(), (r.h * 2).toInt()) } catch (e: Exception) { return null }
+        }
+        return SlideShape.Picture(r.x, r.y, r.w, r.h, r.rot, "chart:" + path)
     }
 
     private fun picture(pic: XmlNode, p: Part, t: Transform): SlideShape.Picture? {

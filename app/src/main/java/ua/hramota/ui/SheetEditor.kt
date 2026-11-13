@@ -251,7 +251,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
             if (refusal != null) { notice = refusalText(refusal); return@withContext }
-            original = try { withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) sh.withRowsMoved(at, n) else sh }, original.inspection) } }
+            original = try { withContext(Dispatchers.Default) { Workbook(original.sheets.mapIndexed { i, sh -> if (i == sheet) sh.withRowsMoved(at, n) else sh }, original.inspection, charts = original.charts) } }
                 catch (e: kotlinx.coroutines.CancellationException) { edit.restore(before); throw e }
                 catch (e: Throwable) { edit.restore(before); notice = R.string.rows_failed; return@withContext }
             push(RowStep(before, edit.snapshot(), shownBefore, original))
@@ -419,7 +419,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
             }
             sh.withRows(rows.values.toList())
         }
-        return Workbook(sheets.mapIndexed { i, sh -> dressed(i, sh) }, original.inspection)
+        return Workbook(sheets.mapIndexed { i, sh -> dressed(i, sh) }, original.inspection, charts = original.charts)
     }
 
     /** Looks, widths and the filter put on a shown sheet. */

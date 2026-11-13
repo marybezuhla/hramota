@@ -135,15 +135,57 @@ object XlsxReader {
         val styles = styles(tree("xl/styles.xml"), theme)
 
         val sheets = ArrayList<Sheet>()
+        val charts = HashMap<Int, List<ByteArray>>()
+        val chartPaths = ArrayList<Pair<Int, List<String>>>()
+        var chartCount = 0
         for (s in wb.child("sheets")?.all("sheet").orEmpty().take(SheetLimits.MAX_SHEETS)) {
             if (s.attr("state") == "hidden" || s.attr("state") == "veryHidden") continue
             val target = rels[s.attr("id")] ?: continue
             val path = if (target.startsWith("/")) target.removePrefix("/") else "xl/" + target.removePrefix("./")
             val b = built[path] ?: continue
             sheets += b.build(styles, date1904, strings, s.attr("name") ?: "Sheet")
+            chartPaths += (sheets.size - 1) to related(parts, path, "/drawing").flatMap { related(parts, it, "/chart") }
+        }
+        // Charts, once all sheets are read (a chart saved without its values reads them from the cells)
+        val resolve = { ref: String -> cellsOf(sheets, ref) }
+        for ((i, list) in chartPaths) {
+            val pictures = ArrayList<ByteArray>()
+            for (chartPath in list) {
+                if (chartCount >= 40) break
+                val chart = tree(chartPath)?.let { ua.hramota.doc.Chart.parse(it, resolve = resolve) } ?: continue
+                try { pictures += chart.png(1000, 620); chartCount++ } catch (e: Exception) {}
+            }
+            if (pictures.isNotEmpty()) charts[i] = pictures
         }
         if (sheets.isEmpty()) throw IOException("No sheets")
-        return Workbook(sheets, Inspection(macros = macros, embedded = embedded.take(100), remoteResources = external))
+        return Workbook(sheets, Inspection(macros = macros, embedded = embedded.take(100), remoteResources = external), charts = charts)
+    }
+
+    /** The texts of the cells "'Sheet'!$A$1:$A$5" names, row by row (empty for cells not filled). */
+    private fun cellsOf(sheets: List<Sheet>, ref: String): List<String> {
+        val m = Regex("^(?:'((?:[^']|'')+)'|([^!]+))!\\$?([A-Za-z]{1,3})\\$?(\\d+)(?::\\$?([A-Za-z]{1,3})\\$?(\\d+))?$").matchEntire(ref.trim()) ?: return emptyList()
+        val name = m.groupValues[1].replace("''", "'").ifEmpty { m.groupValues[2] }
+        val sh = sheets.firstOrNull { it.name == name } ?: return emptyList()
+        fun col(l: String) = l.uppercase().fold(0) { a, c -> a * 26 + (c - 'A' + 1) } - 1
+        val c1 = col(m.groupValues[3]); val r1 = m.groupValues[4].toInt() - 1
+        val c2 = m.groupValues[5].ifEmpty { m.groupValues[3] }.let(::col); val r2 = (m.groupValues[6].ifEmpty { m.groupValues[4] }).toInt() - 1
+        val out = ArrayList<String>()
+        for (r in minOf(r1, r2)..minOf(maxOf(r1, r2), minOf(r1, r2) + 2000)) for (c in minOf(c1, c2)..minOf(maxOf(c1, c2), minOf(c1, c2) + 50)) {
+            val row = sh.row(r); val k = row?.find(c) ?: -1
+            out += if (row != null && k >= 0) (if (sh.isNumber(row, k)) row.numbers[k].toString() else sh.text(row, k)) else ""
+        }
+        return out
+    }
+
+    /** The parts [path] points at with a relationship whose type ends with [type], as paths. */
+    private fun related(parts: Map<String, ByteArray>, path: String, type: String): List<String> {
+        val dir = path.substringBeforeLast('/')
+        val relsPath = "$dir/_rels/${path.substringAfterLast('/')}.rels"
+        val tree = parts[relsPath]?.let { try { Xml.tree(ByteArrayInputStream(it)) } catch (e: Exception) { null } } ?: return emptyList()
+        return tree.all("Relationship").filter { it.attr("Type")?.endsWith(type) == true && it.attr("TargetMode") != "External" }.mapNotNull { r ->
+            val t = r.attr("Target") ?: return@mapNotNull null
+            if (t.startsWith("/")) t.removePrefix("/") else java.io.File(dir, t).normalize().path.replace('\\', '/')
+        }
     }
 
     /** Counts what the sheets unpack to, across all of them, and stops at [limit]. */
