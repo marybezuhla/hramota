@@ -75,7 +75,7 @@ class OdfTest {
         val text = { d: ua.hramota.doc.slides.Deck -> d.slides.flatMap { s -> s.shapes.filterIsInstance<ua.hramota.doc.slides.SlideShape.Box>().flatMap { it.paragraphs } }.joinToString(" ") { p -> p.runs.joinToString("") { it.text } } }
         val words = norm(text(pptx)).split(' ').filter { it.length > 3 }.toSet()
         val got = norm(text(odp))
-        assertTrue(words.filter { it !in got }.take(5).toString(), words.count { it in got } >= words.size * 9 / 10)
+        assertTrue(words.filter { it !in got }.take(5).toString() + " in " + got.take(3000) + " shapes " + odp.slides.map { s -> s.shapes.size }, words.count { it in got } >= words.size * 9 / 10)
         val pages = SlidePages(odp, fonts)
         pages.render(0, 800)?.let { keep("odp-01-project.png", it.asAndroidBitmap()) }
     }
