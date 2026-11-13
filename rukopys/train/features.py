@@ -13,7 +13,7 @@ must be made there too, and the model trained again.
 """
 import numpy as np
 
-STEP = 0.05
+STEP = 0.1
 CLIP = 5.0
 MAX_POINTS = 3000
 

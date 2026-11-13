@@ -124,6 +124,13 @@ def main():
     # The first part picks the best checkpoint; the rest (never used for that) is the test
     pick, val = val[:min(500, len(val) // 3)], val[min(500, len(val) // 3):]
     print(f"made {len(train)} training and {len(val)} test lines in {time.time() - t0:.0f} s", flush=True)
+    # A line with fewer steps than letters cannot be learned from (CTC needs a step for each)
+    fits = [s for s in train if int(Rukopys.steps(torch.tensor(len(s[0])))) >= 2 * len(s[1])]
+    lens = sorted(len(s[0]) for s in train)
+    print(f"points per line: median {lens[len(lens) // 2]}, 90% under {lens[len(lens) * 9 // 10]}; "
+          f"points per letter: {sum(lens) / max(1, sum(len(s[1]) for s in train)):.1f}; "
+          f"{len(train) - len(fits)} lines too short for their letters left out", flush=True)
+    train = fits
 
     model = Rukopys(len(chars) + 1)
     print("weights:", sum(p.numel() for p in model.parameters()), flush=True)
@@ -135,6 +142,10 @@ def main():
     epoch = 0
     history = []
     lr0 = 2e-3
+    # Checked on the picking lines every so often by the clock, so a slow machine still checks
+    every = max(120.0, a.hours * 3600 / 30)
+    last_check = time.time()
+    started = time.time()
     while time.time() < deadline:
         epoch += 1
         for idx in batches(train, a.batch, rnd):
@@ -155,8 +166,9 @@ def main():
             opt.step()
             step += 1
             if step % 100 == 0:
-                print(f"epoch {epoch} step {step} loss {loss.item():.3f}", flush=True)
-            if step % 2000 == 0:
+                print(f"epoch {epoch} step {step} loss {loss.item():.3f} ({(time.time() - started) / step:.2f} s a step)", flush=True)
+            if time.time() - last_check > every:
+                last_check = time.time()
                 c = cer(model, pick, chars)
                 history.append({"step": step, "cer": c})
                 print(f"  test letters wrong: {c:.3%}", flush=True)

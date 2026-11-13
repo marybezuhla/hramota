@@ -23,7 +23,7 @@ import kotlin.math.sqrt
 object Rukopys {
     private const val MODEL = "ink/rukopys.onnx"
     private const val ALPHABET = "ink/rukopys_alphabet.txt"
-    const val STEP = 0.05f
+    const val STEP = 0.1f
     const val CLIP = 5f
     const val MAX_POINTS = 3000
 

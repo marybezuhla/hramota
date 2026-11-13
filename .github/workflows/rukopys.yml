@@ -46,7 +46,7 @@ jobs:
         run: .venv/bin/python rukopys/synth/fonts.py fonts
       - name: Train
         env:
-          HOURS: ${{ inputs.hours || (github.ref_name == 'rukopys-smoke' && '0.03' || '4.5') }}
+          HOURS: ${{ inputs.hours || (github.ref_name == 'rukopys-smoke' && '0.3' || '4.5') }}
           REF: ${{ github.ref_name }}
           LINES: ${{ inputs.lines || (github.ref_name == 'rukopys-smoke' && '3000' || '120000') }}
         run: |
