@@ -117,6 +117,8 @@ open class ViewerActivity : ComponentActivity() {
         var convertAsk by mutableStateOf<String?>(null)
         // Pages as pictures for a post: which ones and in what shape
         var imagesAsk by mutableStateOf<ua.hramota.doc.Pages?>(null)
+        // A PDF form being filled (and signed): its fields
+        var formOpen by mutableStateOf<List<ua.hramota.pdf.PdfField>?>(null)
         // A DOCX being edited lives through turning the phone
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
 
@@ -388,6 +390,18 @@ open class ViewerActivity : ComponentActivity() {
                     val editor = held.editor
                     // A save finished (perhaps while the window was being made again): said and acted on here
                     held.outcome?.let { o -> LaunchedEffect(o) { held.outcome = null; showOutcome(o, name) } }
+                    formOpen?.let { fields ->
+                        val pdf = (state as? ViewerState.Paged)?.pages as? PdfiumPages
+                        if (pdf == null) { formOpen = null; return@Surface }
+                        androidx.activity.compose.BackHandler { formOpen = null }
+                        ua.hramota.ui.PdfFormScreen(fields, pdf.pageCount, { pdf.aspect(it) }, { i, w -> pdf.render(i, w) }, held.formSaving,
+                            onClose = { formOpen = null },
+                            onSave = { values, sig ->
+                                pendingForm = Triple(pdf, values, sig)
+                                saveForm.launch(name.substringBeforeLast('.', name) + " (" + getString(R.string.form_filled_suffix) + ").pdf")
+                            })
+                        return@Surface
+                    }
                     held.slides?.let { slideEditor ->
                         val pages = (state as? ViewerState.Paged)?.pages
                         ua.hramota.ui.SlideEditorScreen(name, slideEditor, held.saving, onSave = { saveEdits(uri, docId, name) }, onClose = { held.slides = null },
@@ -453,6 +467,13 @@ open class ViewerActivity : ComponentActivity() {
                                     getString(R.string.save_as_pdf) to {
                                         val go = { pendingPdf = pg; savePdf.launch(name.substringBeforeLast('.', name) + ".pdf") }
                                         if (protectedDoc) held.unprotectedAsk = go else go()
+                                        Unit
+                                    }
+                                },
+                                // A PDF form: filled in and signed, into a copy (a protected PDF is not: its copy would lose the protection)
+                                ((state as? ViewerState.Paged)?.pages as? PdfiumPages)?.takeIf { format == Format.PDF && !protectedDoc }?.let { pdf ->
+                                    getString(R.string.form_menu) to {
+                                        lifecycleScope.launch { formOpen = pdf.formFields() ?: emptyList() }
                                         Unit
                                     }
                                 },
@@ -562,6 +583,31 @@ open class ViewerActivity : ComponentActivity() {
         }
     }
     private var currentId: String? = null
+
+    // A filled form waiting for the place of its copy: the document, the values and the signature
+    private var pendingForm: Triple<PdfiumPages, Map<String, String>, ua.hramota.pdf.PdfSignature?>? = null
+    private val saveForm = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/pdf")) { target ->
+        val (pdf, values, sig) = pendingForm ?: return@registerForActivityResult
+        pendingForm = null
+        if (target == null) return@registerForActivityResult
+        val app = applicationContext
+        val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
+        held.scope.launch {
+            held.formSaving = true
+            var wasEmpty = false
+            val ok = try {
+                withContext(Dispatchers.IO) {
+                    try {
+                        // Only into a file just made (one chosen from those already there is not written over)
+                        wasEmpty = EditSaving.isEmpty(app, target)
+                        wasEmpty && app.contentResolver.openFileDescriptor(target, "wt")?.use { pdf.saveForm(values, sig, it) } == true
+                    } catch (e: Exception) { false }
+                }
+            } finally { held.formSaving = false }
+            if (!ok && wasEmpty) withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { try { EditSaving.remove(app, target) } catch (e: Exception) {} }
+            android.widget.Toast.makeText(app, app.getString(if (ok) R.string.form_saved else R.string.form_not_saved), android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     // The pages waiting for the place of their PDF
     private var pendingPdf: ua.hramota.doc.PrintPages? = null
@@ -1059,6 +1105,7 @@ open class ViewerActivity : ComponentActivity() {
         var coverAsk by mutableStateOf(false)
         var coverDone by mutableStateOf<CoverUndo?>(null)
         var editor by mutableStateOf<ua.hramota.ui.EditorState?>(null)
+        var formSaving by mutableStateOf(false)
         var sheet by mutableStateOf<ua.hramota.ui.SheetEditorState?>(null)
         var slides by mutableStateOf<ua.hramota.ui.SlideEditorState?>(null)
 

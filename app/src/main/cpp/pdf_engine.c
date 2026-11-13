@@ -20,6 +20,7 @@
 #include "fpdf_text.h"
 #include "fpdf_annot.h"
 #include "fpdf_save.h"
+#include "fpdf_edit.h"
 
 typedef struct {
     int fd;
@@ -409,4 +410,282 @@ JNIEXPORT jint JNICALL Java_ua_hramota_pdf_PdfiumNative_annotCount(JNIEnv* env, 
     int n = FPDFPage_GetAnnotCount(page);
     FPDF_ClosePage(page);
     return n;
+}
+
+
+// ---- Forms ----
+
+// A form environment without JavaScript or XFA: fields are read and filled, nothing in the file runs.
+static FPDF_FORMHANDLE form_env(FPDF_DOCUMENT doc, FPDF_FORMFILLINFO* info) {
+    memset(info, 0, sizeof(*info));
+    info->version = 1;
+    return FPDFDOC_InitFormFillEnvironment(doc, info);
+}
+
+typedef unsigned long (*AnnotText)(FPDF_FORMHANDLE, FPDF_ANNOTATION, FPDF_WCHAR*, unsigned long);
+
+static jstring annot_text(JNIEnv* env, FPDF_FORMHANDLE form, FPDF_ANNOTATION a, AnnotText get) {
+    unsigned long n = get(form, a, NULL, 0);
+    if (n <= 2 || n > 65536) return (*env)->NewStringUTF(env, "");
+    unsigned short* buf = malloc(n);
+    if (!buf) return (*env)->NewStringUTF(env, "");
+    get(form, a, (FPDF_WCHAR*)buf, n);
+    jstring s = utf16(env, buf, n);
+    free(buf);
+    return s;
+}
+
+static jstring option_label(JNIEnv* env, FPDF_FORMHANDLE form, FPDF_ANNOTATION a, int i) {
+    unsigned long n = FPDFAnnot_GetOptionLabel(form, a, i, NULL, 0);
+    if (n <= 2 || n > 4096) return (*env)->NewStringUTF(env, "");
+    unsigned short* buf = malloc(n);
+    if (!buf) return (*env)->NewStringUTF(env, "");
+    FPDFAnnot_GetOptionLabel(form, a, i, (FPDF_WCHAR*)buf, n);
+    jstring s = utf16(env, buf, n);
+    free(buf);
+    return s;
+}
+
+// The form's widgets, at most [max]: for each, 9 strings in a row: page, type, flags, name,
+// alternate name (the label for people), value, checked ("1"/"0"), export value, and
+// "left,top,right,bottom" on a devW x devH drawing of its page; then its options as one string
+// joined by U+001F. Null when the document has no form.
+JNIEXPORT jobjectArray JNICALL Java_ua_hramota_pdf_PdfiumNative_fields(JNIEnv* env, jclass cls, jlong handle, jint max, jint devW, jint devH) {
+    (void)cls;
+    FPDF_DOCUMENT doc = ((Doc*)(intptr_t)handle)->doc;
+    if (FPDF_GetFormType(doc) == FORMTYPE_NONE) return NULL;
+    FPDF_FORMFILLINFO info;
+    FPDF_FORMHANDLE form = form_env(doc, &info);
+    if (!form) return NULL;
+    jclass str = (*env)->FindClass(env, "java/lang/String");
+    const int per = 10;
+    jobjectArray out = (*env)->NewObjectArray(env, max * per, str, NULL);
+    int k = 0;
+    int pages = FPDF_GetPageCount(doc);
+    for (int p = 0; p < pages && k < max; p++) {
+        FPDF_PAGE page = FPDF_LoadPage(doc, p);
+        if (!page) continue;
+        FORM_OnAfterLoadPage(page, form);
+        int n = FPDFPage_GetAnnotCount(page);
+        for (int i = 0; i < n && k < max; i++) {
+            FPDF_ANNOTATION a = FPDFPage_GetAnnot(page, i);
+            if (!a) continue;
+            if (FPDFAnnot_GetSubtype(a) == FPDF_ANNOT_WIDGET) {
+                int type = FPDFAnnot_GetFormFieldType(form, a);
+                FS_RECTF r;
+                char buf[160];
+                int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+                if (FPDFAnnot_GetRect(a, &r)) {
+                    FPDF_PageToDevice(page, 0, 0, devW, devH, 0, r.left, r.top, &x1, &y1);
+                    FPDF_PageToDevice(page, 0, 0, devW, devH, 0, r.right, r.bottom, &x2, &y2);
+                }
+                int base = k * per;
+                snprintf(buf, sizeof(buf), "%d", p);
+                (*env)->SetObjectArrayElement(env, out, base, (*env)->NewStringUTF(env, buf));
+                snprintf(buf, sizeof(buf), "%d", type);
+                (*env)->SetObjectArrayElement(env, out, base + 1, (*env)->NewStringUTF(env, buf));
+                snprintf(buf, sizeof(buf), "%d", FPDFAnnot_GetFormFieldFlags(form, a));
+                (*env)->SetObjectArrayElement(env, out, base + 2, (*env)->NewStringUTF(env, buf));
+                jstring s;
+                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldName); (*env)->SetObjectArrayElement(env, out, base + 3, s); (*env)->DeleteLocalRef(env, s);
+                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldAlternateName); (*env)->SetObjectArrayElement(env, out, base + 4, s); (*env)->DeleteLocalRef(env, s);
+                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldValue); (*env)->SetObjectArrayElement(env, out, base + 5, s); (*env)->DeleteLocalRef(env, s);
+                (*env)->SetObjectArrayElement(env, out, base + 6, (*env)->NewStringUTF(env, FPDFAnnot_IsChecked(form, a) ? "1" : "0"));
+                s = annot_text(env, form, a, FPDFAnnot_GetFormFieldExportValue); (*env)->SetObjectArrayElement(env, out, base + 7, s); (*env)->DeleteLocalRef(env, s);
+                snprintf(buf, sizeof(buf), "%d,%d,%d,%d", x1 < x2 ? x1 : x2, y1 < y2 ? y1 : y2, x1 < x2 ? x2 : x1, y1 < y2 ? y2 : y1);
+                (*env)->SetObjectArrayElement(env, out, base + 8, (*env)->NewStringUTF(env, buf));
+                // The choices of a list or a drop-down, joined
+                int options = (type == FPDF_FORMFIELD_COMBOBOX || type == FPDF_FORMFIELD_LISTBOX) ? FPDFAnnot_GetOptionCount(form, a) : 0;
+                if (options > 500) options = 500;
+                jstring joined = (*env)->NewStringUTF(env, "");
+                for (int o = 0; o < options; o++) {
+                    jstring label = option_label(env, form, a, o);
+                    jclass sc = (*env)->GetObjectClass(env, joined);
+                    jmethodID concat = (*env)->GetMethodID(env, sc, "concat", "(Ljava/lang/String;)Ljava/lang/String;");
+                    jstring sep = (*env)->NewStringUTF(env, o == 0 ? "" : "\x1f");
+                    jstring a1 = (jstring)(*env)->CallObjectMethod(env, joined, concat, sep);
+                    jstring a2 = (jstring)(*env)->CallObjectMethod(env, a1, concat, label);
+                    (*env)->DeleteLocalRef(env, joined); (*env)->DeleteLocalRef(env, a1); (*env)->DeleteLocalRef(env, sep); (*env)->DeleteLocalRef(env, label); (*env)->DeleteLocalRef(env, sc);
+                    joined = a2;
+                }
+                (*env)->SetObjectArrayElement(env, out, base + 9, joined);
+                (*env)->DeleteLocalRef(env, joined);
+                k++;
+            }
+            FPDFPage_CloseAnnot(a);
+        }
+        FORM_OnBeforeClosePage(page, form);
+        FPDF_ClosePage(page);
+    }
+    FPDFDOC_ExitFormFillEnvironment(form);
+    // Only the rows filled
+    jobjectArray trimmed = (*env)->NewObjectArray(env, k * per, str, NULL);
+    for (int i = 0; i < k * per; i++) {
+        jobject o = (*env)->GetObjectArrayElement(env, out, i);
+        (*env)->SetObjectArrayElement(env, trimmed, i, o);
+        if (o) (*env)->DeleteLocalRef(env, o);
+    }
+    return trimmed;
+}
+
+static int same_text(JNIEnv* env, jstring a, FPDF_FORMHANDLE form, FPDF_ANNOTATION an, AnnotText get) {
+    jstring b = annot_text(env, form, an, get);
+    const jchar* ca = (*env)->GetStringChars(env, a, NULL);
+    const jchar* cb = (*env)->GetStringChars(env, b, NULL);
+    jsize la = (*env)->GetStringLength(env, a), lb = (*env)->GetStringLength(env, b);
+    int same = la == lb && memcmp(ca, cb, (size_t)la * 2) == 0;
+    (*env)->ReleaseStringChars(env, a, ca);
+    (*env)->ReleaseStringChars(env, b, cb);
+    (*env)->DeleteLocalRef(env, b);
+    return same;
+}
+
+static FPDF_WIDESTRING wide(JNIEnv* env, jstring s) {
+    jsize len = (*env)->GetStringLength(env, s);
+    unsigned short* w = malloc(((size_t)len + 1) * 2);
+    if (!w) return NULL;
+    (*env)->GetStringRegion(env, s, 0, len, (jchar*)w);
+    w[len] = 0;
+    return (FPDF_WIDESTRING)w;
+}
+
+// Writes a filled copy to outFd: names[i] gets values[i] (text; for a check box "1"/"0"; for radio
+// buttons the export value of the one chosen; for lists the option's label). With [sigPixels]
+// (RGBA, sigW x sigH) a picture of a hand-drawn signature is put on page [sigPage] at sigRect
+// (left, top, right, bottom on a devW x devH drawing of the page). The original stays as it is: the
+// changes are added after it (an incremental update).
+JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveForm(JNIEnv* env, jclass cls, jlong handle, jint outFd,
+                                                                   jobjectArray names, jobjectArray values,
+                                                                   jint sigPage, jintArray sigRect, jobject sigPixels, jint sigW, jint sigH, jint devW, jint devH) {
+    (void)cls;
+    Doc* d = (Doc*)(intptr_t)handle;
+    if (!d || outFd < 0 || devW <= 0 || devH <= 0) return JNI_FALSE;
+    jsize n = (*env)->GetArrayLength(env, names);
+    if (n < 0 || n > 5000 || (*env)->GetArrayLength(env, values) != n) return JNI_FALSE;
+    FPDF_DOCUMENT doc = FPDF_LoadCustomDocument(&d->access, NULL);
+    if (!doc) return JNI_FALSE;
+    int ok = 1;
+    if (n > 0) {
+        FPDF_FORMFILLINFO info;
+        FPDF_FORMHANDLE form = form_env(doc, &info);
+        if (!form) { FPDF_CloseDocument(doc); return JNI_FALSE; }
+        int pages = FPDF_GetPageCount(doc);
+        for (int p = 0; p < pages; p++) {
+            FPDF_PAGE page = FPDF_LoadPage(doc, p);
+            if (!page) continue;
+            FORM_OnAfterLoadPage(page, form);
+            int count = FPDFPage_GetAnnotCount(page);
+            for (int i = 0; i < count; i++) {
+                FPDF_ANNOTATION a = FPDFPage_GetAnnot(page, i);
+                if (!a) continue;
+                if (FPDFAnnot_GetSubtype(a) != FPDF_ANNOT_WIDGET || (FPDFAnnot_GetFormFieldFlags(form, a) & FPDF_FORMFLAG_READONLY)) { FPDFPage_CloseAnnot(a); continue; }
+                for (jsize j = 0; j < n; j++) {
+                    jstring name = (jstring)(*env)->GetObjectArrayElement(env, names, j);
+                    if (!name || !same_text(env, name, form, a, FPDFAnnot_GetFormFieldName)) { if (name) (*env)->DeleteLocalRef(env, name); continue; }
+                    jstring value = (jstring)(*env)->GetObjectArrayElement(env, values, j);
+                    int type = FPDFAnnot_GetFormFieldType(form, a);
+                    FS_RECTF r;
+                    int haveRect = FPDFAnnot_GetRect(a, &r);
+                    double cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+                    if (value) {
+                        if (type == FPDF_FORMFIELD_TEXTFIELD || type == FPDF_FORMFIELD_COMBOBOX && !same_text(env, value, form, a, FPDFAnnot_GetFormFieldValue)) {
+                            if (FORM_SetFocusedAnnot(form, a)) {
+                                if (type == FPDF_FORMFIELD_COMBOBOX) {
+                                    int options = FPDFAnnot_GetOptionCount(form, a);
+                                    int chosen = -1;
+                                    for (int o = 0; o < options && o < 500 && chosen < 0; o++) {
+                                        jstring label = option_label(env, form, a, o);
+                                        const jchar* c1 = (*env)->GetStringChars(env, label, NULL);
+                                        const jchar* c2 = (*env)->GetStringChars(env, value, NULL);
+                                        jsize l1 = (*env)->GetStringLength(env, label), l2 = (*env)->GetStringLength(env, value);
+                                        if (l1 == l2 && memcmp(c1, c2, (size_t)l1 * 2) == 0) chosen = o;
+                                        (*env)->ReleaseStringChars(env, label, c1); (*env)->ReleaseStringChars(env, value, c2);
+                                        (*env)->DeleteLocalRef(env, label);
+                                    }
+                                    if (chosen >= 0) FORM_SetIndexSelected(form, page, chosen, 1);
+                                    else { FORM_SelectAllText(form, page); FPDF_WIDESTRING w = wide(env, value); if (w) { FORM_ReplaceSelection(form, page, w); free((void*)w); } }
+                                } else {
+                                    FORM_SelectAllText(form, page);
+                                    FPDF_WIDESTRING w = wide(env, value);
+                                    if (w) { FORM_ReplaceSelection(form, page, w); free((void*)w); }
+                                }
+                                FORM_ForceToKillFocus(form);
+                            }
+                        } else if (type == FPDF_FORMFIELD_LISTBOX) {
+                            if (FORM_SetFocusedAnnot(form, a)) {
+                                int options = FPDFAnnot_GetOptionCount(form, a);
+                                for (int o = 0; o < options && o < 500; o++) {
+                                    jstring label = option_label(env, form, a, o);
+                                    const jchar* c1 = (*env)->GetStringChars(env, label, NULL);
+                                    const jchar* c2 = (*env)->GetStringChars(env, value, NULL);
+                                    jsize l1 = (*env)->GetStringLength(env, label), l2 = (*env)->GetStringLength(env, value);
+                                    int match = l1 == l2 && memcmp(c1, c2, (size_t)l1 * 2) == 0;
+                                    (*env)->ReleaseStringChars(env, label, c1); (*env)->ReleaseStringChars(env, value, c2);
+                                    (*env)->DeleteLocalRef(env, label);
+                                    if (match) { FORM_SetIndexSelected(form, page, o, 1); break; }
+                                }
+                                FORM_ForceToKillFocus(form);
+                            }
+                        } else if ((type == FPDF_FORMFIELD_CHECKBOX || type == FPDF_FORMFIELD_RADIOBUTTON) && haveRect) {
+                            const char* v = (*env)->GetStringUTFChars(env, value, NULL);
+                            int want;
+                            if (type == FPDF_FORMFIELD_CHECKBOX) want = v && v[0] == '1';
+                            // A radio button: on if its export value is the one chosen
+                            else want = same_text(env, value, form, a, FPDFAnnot_GetFormFieldExportValue);
+                            if (v) (*env)->ReleaseStringUTFChars(env, value, v);
+                            int now = FPDFAnnot_IsChecked(form, a) ? 1 : 0;
+                            // A radio button is never turned off by tapping it; another one is turned on instead
+                            if (want != now && (type == FPDF_FORMFIELD_CHECKBOX || want)) {
+                                FORM_OnLButtonDown(form, page, 0, cx, cy);
+                                FORM_OnLButtonUp(form, page, 0, cx, cy);
+                                FORM_ForceToKillFocus(form);
+                            }
+                        }
+                        (*env)->DeleteLocalRef(env, value);
+                    }
+                    (*env)->DeleteLocalRef(env, name);
+                    break;
+                }
+                FPDFPage_CloseAnnot(a);
+            }
+            FORM_OnBeforeClosePage(page, form);
+            FPDF_ClosePage(page);
+        }
+        FPDFDOC_ExitFormFillEnvironment(form);
+    }
+    // The signature, as a picture on the page
+    if (sigPixels && sigPage >= 0 && sigW > 0 && sigH > 0 && sigW <= 4096 && sigH <= 4096 && (*env)->GetArrayLength(env, sigRect) == 4) {
+        void* pixels = (*env)->GetDirectBufferAddress(env, sigPixels);
+        jlong cap = (*env)->GetDirectBufferCapacity(env, sigPixels);
+        jint* rc = (*env)->GetIntArrayElements(env, sigRect, NULL);
+        FPDF_PAGE page = (pixels && cap >= (jlong)sigW * sigH * 4 && rc) ? FPDF_LoadPage(doc, sigPage) : NULL;
+        if (page) {
+            double l, t, r, b;
+            FPDF_DeviceToPage(page, 0, 0, devW, devH, 0, rc[0], rc[1], &l, &t);
+            FPDF_DeviceToPage(page, 0, 0, devW, devH, 0, rc[2], rc[3], &r, &b);
+            double left = l < r ? l : r, bottom = t < b ? t : b, width = l < r ? r - l : l - r, height = t < b ? b - t : t - b;
+            FPDF_PAGEOBJECT img = FPDFPageObj_NewImageObj(doc);
+            FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(sigW, sigH, FPDFBitmap_BGRA, pixels, sigW * 4);
+            if (img && bitmap && width > 0 && height > 0 && FPDFImageObj_SetBitmap(&page, 1, img, bitmap)) {
+                FPDFImageObj_SetMatrix(img, width, 0, 0, height, left, bottom);
+                FPDFPage_InsertObject(page, img);
+                if (!FPDFPage_GenerateContent(page)) ok = 0;
+            } else {
+                ok = 0;
+                if (img) FPDFPageObj_Destroy(img);
+            }
+            if (bitmap) FPDFBitmap_Destroy(bitmap);
+            FPDF_ClosePage(page);
+        } else ok = 0;
+        if (rc) (*env)->ReleaseIntArrayElements(env, sigRect, rc, JNI_ABORT);
+    }
+    FdWriter w;
+    memset(&w, 0, sizeof(w));
+    w.base.version = 1;
+    w.base.WriteBlock = write_block;
+    w.fd = outFd;
+    w.ok = 1;
+    FPDF_BOOL saved = ok && FPDF_SaveAsCopy(doc, &w.base, FPDF_INCREMENTAL);
+    FPDF_CloseDocument(doc);
+    return (saved && w.ok) ? JNI_TRUE : JNI_FALSE;
 }

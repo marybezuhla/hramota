@@ -692,4 +692,23 @@
     <string name="sheet_filter_none">None</string>
     <string name="sheet_filter_empty">(empty)</string>
     <string name="sheet_filter_hint">Rows are only hidden on the screen; nothing is deleted.</string>
+    <string name="form_title">Fill in and sign</string>
+    <string name="form_fields">Fields: %1$d</string>
+    <string name="form_none">This PDF has no form fields; you can still sign it.</string>
+    <string name="form_save">Save a filled copy</string>
+    <string name="form_filled_suffix">filled</string>
+    <string name="form_menu">Fill in the form / sign</string>
+    <string name="form_saved">The filled copy is saved.</string>
+    <string name="form_not_saved">Could not save the filled copy.</string>
+    <string name="sign_title">Signature</string>
+    <string name="sign_hint">Draw it with a finger or a stylus; it goes onto the page as a picture. This is a hand-drawn signature, not a qualified electronic one.</string>
+    <string name="sign_draw">Draw a signature</string>
+    <string name="sign_redraw">Draw again</string>
+    <string name="sign_use_saved">Use my saved signature</string>
+    <string name="sign_move">Place it</string>
+    <string name="sign_on_page">On page %1$d</string>
+    <string name="sign_keep">Keep it for next time (only on this phone)</string>
+    <string name="sign_place">Where to sign</string>
+    <string name="sign_place_hint">Tap where the signature goes; set its size below.</string>
+    <string name="sign_size">Size</string>
 </resources>

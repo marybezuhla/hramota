@@ -152,4 +152,31 @@ class PdfEngineTest {
             assertNotNull(pages.render(0, 300))
         } finally { pages.close() }
     }
+
+    /** A form filled and signed: a copy with the new values (and the picture of the signature); the original unchanged. */
+    @Test fun formsAreFilledAndSigned() = runBlocking {
+        val pages = PdfiumPages.open(context, asset("form.pdf"))
+        val out = File(context.cacheDir, "form-filled.pdf")
+        try {
+            val fields = pages.formFields()!!
+            assertEquals(fields.toString(), setOf("name" to "text", "agree" to "check", "size" to "radio", "city" to "choice"), fields.map { it.name to it.kind }.toSet())
+            assertEquals(listOf("small", "large"), fields.first { it.name == "size" }.options)
+            assertEquals(listOf("Kyiv", "Lviv", "Odesa"), fields.first { it.name == "city" }.options)
+            val (w, h, bgra) = ua.hramota.ui.SavedSignature.picture(listOf(ua.hramota.ink.Stroke((0..30).map { ua.hramota.ink.InkPoint(it * 4f, 20f + (it % 5) * 3f, it * 10L, 0.5f) })))!!
+            val sig = PdfSignature(0, PageRect(0.5f, 0.8f, 0.8f, 0.86f), w, h, bgra)
+            val ok = ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_WRITE_ONLY).use {
+                pages.saveForm(mapOf("name" to "Олена Коваль", "agree" to "1", "size" to "large", "city" to "Lviv"), sig, it)
+            }
+            assertTrue(ok)
+        } finally { pages.close() }
+        val again = PdfiumPages.open(context, ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_ONLY))
+        try {
+            val f = again.formFields()!!.associate { it.name to it.value }
+            assertEquals("Олена Коваль", f["name"])
+            assertEquals("1", f["agree"])
+            assertEquals("large", f["size"])
+            assertEquals("Lviv", f["city"])
+            assertNotNull(again.render(0, 600))
+        } finally { again.close() }
+    }
 }

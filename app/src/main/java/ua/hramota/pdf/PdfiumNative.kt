@@ -23,4 +23,7 @@ internal object PdfiumNative {
     @JvmStatic external fun saveNotes(handle: Long, outFd: Int, pages: IntArray, starts: IntArray, counts: IntArray, colors: IntArray, texts: Array<String?>): Boolean
     @JvmStatic external fun annotCount(handle: Long, index: Int): Int
     @JvmStatic external fun charAt(handle: Long, index: Int, x: Int, y: Int, devW: Int, devH: Int): Int
+    /** The form's widgets, 10 strings each (see pdf_engine.c); null without a form. */
+    @JvmStatic external fun fields(handle: Long, max: Int, devW: Int, devH: Int): Array<String?>?
+    @JvmStatic external fun saveForm(handle: Long, outFd: Int, names: Array<String>, values: Array<String>, sigPage: Int, sigRect: IntArray, sigPixels: ByteBuffer?, sigW: Int, sigH: Int, devW: Int, devH: Int): Boolean
 }

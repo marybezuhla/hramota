@@ -240,6 +240,38 @@ class PdfiumPages private constructor(
         }
     }
 
+    /** The form's fields, one per name (a group of radio buttons is one field); null if the PDF has no form. */
+    suspend fun formFields(): List<PdfField>? = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (closed || engineDied) return@withLock null
+            val raw = call(PdfEngineService.FIELDS) { it.createStringArray() } ?: return@withLock null
+            PdfField.from(raw, pageCount)
+        }
+    }
+
+    /**
+     * Writes a filled copy to [out]: [values] by field name (see [PdfField]); with [signature], its
+     * picture on a page. The open document is not changed.
+     */
+    suspend fun saveForm(values: Map<String, String>, signature: PdfSignature?, out: android.os.ParcelFileDescriptor): Boolean = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (closed || engineDied) return@withLock false
+            val list = values.entries.take(PdfEngineService.MAX_FIELDS)
+            val g = PdfEngineService.GRID
+            call(PdfEngineService.SAVE_FORM, { d ->
+                d.writeFileDescriptor(out.fileDescriptor)
+                d.writeInt(list.size)
+                // Kept short: the whole request must fit one message between processes
+                for ((k, v) in list) { d.writeString(k.take(500)); d.writeString(v.take(2000)) }
+                d.writeInt(signature?.page ?: -1)
+                val r = signature?.box
+                d.writeInt(((r?.left ?: 0f) * g).toInt()); d.writeInt(((r?.top ?: 0f) * g).toInt()); d.writeInt(((r?.right ?: 0f) * g).toInt()); d.writeInt(((r?.bottom ?: 0f) * g).toInt())
+                d.writeInt(signature?.width ?: 0); d.writeInt(signature?.height ?: 0)
+                d.writeByteArray(signature?.bgra)
+            }) { it.readInt() } == PdfEngineService.R_OK
+        }
+    }
+
     /** How many annotations a page has (for tests). */
     suspend fun annotations(index: Int): Int = withContext(Dispatchers.IO) {
         lock.withLock { if (closed) -1 else call(PdfEngineService.ANNOTS, { it.writeInt(index) }) { it.readInt() } ?: -1 }

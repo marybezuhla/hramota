@@ -702,4 +702,23 @@
     <string name="sheet_filter_none">Жодного</string>
     <string name="sheet_filter_empty">(порожньо)</string>
     <string name="sheet_filter_hint">Рядки лише ховаються на екрані; нічого не видаляється.</string>
+    <string name="form_title">Заповнити й підписати</string>
+    <string name="form_fields">Полів: %1$d</string>
+    <string name="form_none">У цьому PDF немає полів форми, але підписати його можна.</string>
+    <string name="form_save">Зберегти заповнену копію</string>
+    <string name="form_filled_suffix">заповнено</string>
+    <string name="form_menu">Заповнити форму / підписати</string>
+    <string name="form_saved">Заповнену копію збережено.</string>
+    <string name="form_not_saved">Не вдалося зберегти заповнену копію.</string>
+    <string name="sign_title">Підпис</string>
+    <string name="sign_hint">Намалюйте його пальцем чи стилусом: на сторінку він ляже картинкою. Це власноручний підпис, а не кваліфікований електронний.</string>
+    <string name="sign_draw">Намалювати підпис</string>
+    <string name="sign_redraw">Намалювати ще раз</string>
+    <string name="sign_use_saved">Мій збережений підпис</string>
+    <string name="sign_move">Розмістити</string>
+    <string name="sign_on_page">На сторінці %1$d</string>
+    <string name="sign_keep">Зберегти на наступний раз (лише на цьому телефоні)</string>
+    <string name="sign_place">Де підписати</string>
+    <string name="sign_place_hint">Торкніться місця для підпису; розмір — нижче.</string>
+    <string name="sign_size">Розмір</string>
 </resources>

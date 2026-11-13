@@ -165,6 +165,26 @@ class PdfEngineService : Service() {
                         reply?.writeNoException()
                         reply?.writeInt(if (handle > 0) PdfiumNative.annotCount(handle, index) else -1)
                     }
+                    FIELDS -> {
+                        reply?.writeNoException()
+                        reply?.writeStringArray(if (handle > 0) PdfiumNative.fields(handle, MAX_FIELDS, GRID, GRID) else null)
+                    }
+                    SAVE_FORM -> {
+                        // A filled (and perhaps signed) copy, written to the file the app passes
+                        val out: ParcelFileDescriptor? = data.readFileDescriptor()
+                        val n = data.readInt().coerceIn(0, MAX_FIELDS)
+                        val names = Array(n) { "" }; val values = Array(n) { "" }
+                        for (i in 0 until n) { names[i] = data.readString() ?: ""; values[i] = data.readString() ?: "" }
+                        val sigPage = data.readInt()
+                        val rect = IntArray(4) { data.readInt() }
+                        val sigW = data.readInt(); val sigH = data.readInt()
+                        val pixels = data.createByteArray()
+                        val buffer = if (pixels != null && sigW in 1..MAX_SIGNATURE && sigH in 1..MAX_SIGNATURE && pixels.size == sigW * sigH * 4)
+                            java.nio.ByteBuffer.allocateDirect(pixels.size).apply { put(pixels); rewind() } else null
+                        val ok = out?.use { handle > 0 && PdfiumNative.saveForm(handle, it.fd, names, values, if (buffer != null) sigPage else -1, rect, buffer, sigW, sigH, GRID, GRID) } ?: false
+                        reply?.writeNoException()
+                        reply?.writeInt(if (ok) R_OK else R_FAILED)
+                    }
                     CLOSE -> {
                         if (handle > 0) PdfiumNative.close(handle)
                         handle = 0
@@ -191,6 +211,11 @@ class PdfEngineService : Service() {
         const val PIXELS = IBinder.FIRST_CALL_TRANSACTION + 9
         const val SAVE_NOTES = IBinder.FIRST_CALL_TRANSACTION + 10
         const val ANNOTS = IBinder.FIRST_CALL_TRANSACTION + 11
+        const val FIELDS = IBinder.FIRST_CALL_TRANSACTION + 12
+        const val SAVE_FORM = IBinder.FIRST_CALL_TRANSACTION + 13
+        const val MAX_FIELDS = 2000
+        /** Largest side of a signature picture (it travels between processes in one message). */
+        const val MAX_SIGNATURE = 600
         /** Render results. */
         const val R_OK = 0
         const val R_FAILED = 1

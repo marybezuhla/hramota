@@ -258,8 +258,6 @@ class XlsxEdit private constructor(
     fun recalc(): Map<CellKey, Value> {
         // What was typed, taken at once: the screen can go on changing cells while this works
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
-        val lookNow: Map<CellKey, CellLook> = synchronized(this) { HashMap(looks) }
-        val widthNow: Map<Pair<Int, Int>, Float> = synchronized(this) { HashMap(widths) }
         return recalcOf(snapshot)
     }
 
@@ -655,6 +653,8 @@ class XlsxEdit private constructor(
     fun save(source: InputStream, out: OutputStream) {
         // Taken at once, and worked on without holding the workbook: the screen does not wait for the save
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
+        val lookNow: Map<CellKey, CellLook> = synchronized(this) { HashMap(looks) }
+        val widthNow: Map<Pair<Int, Int>, Float> = synchronized(this) { HashMap(widths) }
         val inputs = snapshot.first
         val values = recalcOf(snapshot)
         val l = snapshot.third
