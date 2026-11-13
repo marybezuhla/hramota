@@ -720,4 +720,14 @@
     <string name="revisions_rejected_suffix">changes rejected</string>
     <string name="revisions_saved">Saved in a new file.</string>
     <string name="revisions_not_saved">Could not save the new file.</string>
+    <string name="tpl_empty_doc">Empty document</string>
+    <string name="tpl_letter">Letter</string>
+    <string name="tpl_application">Application</string>
+    <string name="tpl_minutes_doc">Minutes of a meeting</string>
+    <string name="tpl_empty_sheet">Empty workbook</string>
+    <string name="tpl_budget">Family budget</string>
+    <string name="tpl_todo_sheet">To-do list</string>
+    <string name="tpl_design_classic">Design: Classic (light)</string>
+    <string name="tpl_design_night">Design: Night (dark)</string>
+    <string name="tpl_design_meadow">Design: Meadow (green)</string>
 </resources>

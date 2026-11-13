@@ -64,6 +64,9 @@ class MainActivity : ComponentActivity() {
     private val createPptx = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.presentationml.presentation")) { uri -> onCreated(uri, "pptx") }
 
     /** Writes the empty document into the new file and opens it ready to edit. */
+    /** The template chosen for the file being created (null: empty). */
+    private var pendingTemplate: String? = null
+
     private fun onCreated(uri: Uri?, kind: String) {
         if (uri == null) return
         lifecycleScope.launch {
@@ -75,10 +78,11 @@ class MainActivity : ComponentActivity() {
                 if (!EditSaving.isEmpty(app, uri)) return@withContext R.string.create_exists
                 val ok = try {
                     val lang = java.util.Locale.getDefault().stripExtensions().toLanguageTag()
+                    val template = pendingTemplate
                     val bytes = when (kind) {
-                        "docx" -> ua.hramota.doc.Templates.docx(lang)
-                        "pptx" -> ua.hramota.doc.Templates.pptx(lang)
-                        else -> ua.hramota.doc.Templates.xlsx(sheetName)
+                        "docx" -> if (template in ua.hramota.doc.DocTemplates.WORD) ua.hramota.doc.DocTemplates.docx(template!!, lang) else ua.hramota.doc.Templates.docx(lang)
+                        "pptx" -> ua.hramota.doc.Templates.pptx(lang, template?.takeIf { it in ua.hramota.doc.Templates.DESIGNS } ?: "classic")
+                        else -> if (template in ua.hramota.doc.DocTemplates.EXCEL) ua.hramota.doc.DocTemplates.xlsx(template!!, lang) else ua.hramota.doc.Templates.xlsx(sheetName)
                     }
                     EditSaving.writeChecked(object : EditSaving.Io {
                         override fun read() = app.contentResolver.openInputStream(uri)
@@ -164,10 +168,30 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { creating = false },
                         title = { androidx.compose.material3.Text(getString(R.string.create_new)) },
                         text = {
-                            androidx.compose.foundation.layout.Column {
-                                androidx.compose.material3.TextButton(onClick = { creating = false; createDocx.launch(getString(R.string.new_document_name) + ".docx") }) { androidx.compose.material3.Text(getString(R.string.create_docx)) }
-                                androidx.compose.material3.TextButton(onClick = { creating = false; createXlsx.launch(getString(R.string.new_sheet_file_name) + ".xlsx") }) { androidx.compose.material3.Text(getString(R.string.create_xlsx)) }
-                                androidx.compose.material3.TextButton(onClick = { creating = false; createPptx.launch(getString(R.string.new_presentation_name) + ".pptx") }) { androidx.compose.material3.Text(getString(R.string.create_pptx)) }
+                            // A kind of file, then what to start from (empty, or a ready-made one)
+                            var kind by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+                            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                                fun go(k: String, template: String?, title: String) {
+                                    creating = false; pendingTemplate = template
+                                    when (k) {
+                                        "docx" -> createDocx.launch("$title.docx")
+                                        "xlsx" -> createXlsx.launch("$title.xlsx")
+                                        else -> createPptx.launch("$title.pptx")
+                                    }
+                                }
+                                when (kind) {
+                                    null -> {
+                                        androidx.compose.material3.TextButton(onClick = { kind = "docx" }) { androidx.compose.material3.Text(getString(R.string.create_docx)) }
+                                        androidx.compose.material3.TextButton(onClick = { kind = "xlsx" }) { androidx.compose.material3.Text(getString(R.string.create_xlsx)) }
+                                        androidx.compose.material3.TextButton(onClick = { kind = "pptx" }) { androidx.compose.material3.Text(getString(R.string.create_pptx)) }
+                                    }
+                                    "docx" -> for ((t, label) in listOf(null to R.string.tpl_empty_doc, "letter" to R.string.tpl_letter, "application" to R.string.tpl_application, "minutes" to R.string.tpl_minutes_doc))
+                                        androidx.compose.material3.TextButton(onClick = { go("docx", t, if (t == null) getString(R.string.new_document_name) else getString(label)) }) { androidx.compose.material3.Text(getString(label)) }
+                                    "xlsx" -> for ((t, label) in listOf(null to R.string.tpl_empty_sheet, "budget" to R.string.tpl_budget, "todo" to R.string.tpl_todo_sheet))
+                                        androidx.compose.material3.TextButton(onClick = { go("xlsx", t, if (t == null) getString(R.string.new_sheet_file_name) else getString(label)) }) { androidx.compose.material3.Text(getString(label)) }
+                                    else -> for ((t, label) in listOf("classic" to R.string.tpl_design_classic, "night" to R.string.tpl_design_night, "meadow" to R.string.tpl_design_meadow))
+                                        androidx.compose.material3.TextButton(onClick = { go("pptx", t, getString(R.string.new_presentation_name)) }) { androidx.compose.material3.Text(getString(label)) }
+                                }
                             }
                         },
                         confirmButton = {},

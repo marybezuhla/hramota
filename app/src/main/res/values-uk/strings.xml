@@ -730,4 +730,14 @@
     <string name="revisions_rejected_suffix">зміни відхилено</string>
     <string name="revisions_saved">Збережено в новий файл.</string>
     <string name="revisions_not_saved">Не вдалося зберегти новий файл.</string>
+    <string name="tpl_empty_doc">Порожній документ</string>
+    <string name="tpl_letter">Лист</string>
+    <string name="tpl_application">Заява</string>
+    <string name="tpl_minutes_doc">Протокол зборів</string>
+    <string name="tpl_empty_sheet">Порожня таблиця</string>
+    <string name="tpl_budget">Бюджет родини</string>
+    <string name="tpl_todo_sheet">Список справ</string>
+    <string name="tpl_design_classic">Оформлення: Класика (світле)</string>
+    <string name="tpl_design_night">Оформлення: Ніч (темне)</string>
+    <string name="tpl_design_meadow">Оформлення: Луг (зелене)</string>
 </resources>

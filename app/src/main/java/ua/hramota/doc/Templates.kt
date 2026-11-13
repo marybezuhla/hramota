@@ -84,12 +84,19 @@ object Templates {
      * An empty presentation: a 16:9 title slide (title and subtitle to fill in), with "Title and Content"
      * ready for the slides added after it. Plain colours, nothing animated.
      */
-    fun pptx(lang: String): ByteArray = presentation(lang, 12192000L, 6858000L, listOf(PresentationSlide(
+    fun pptx(lang: String, design: String = "classic"): ByteArray = presentation(lang, 12192000L, 6858000L, listOf(PresentationSlide(
         HEAD + "<p:sld xmlns:a=\"$A\" xmlns:r=\"$R\" xmlns:p=\"$P\"><p:cSld><p:spTree>" + GROUP +
             placeholder(2, "Title 1", "<p:ph type=\"ctrTitle\"/>", lang) + placeholder(3, "Subtitle 2", "<p:ph type=\"subTitle\" idx=\"1\"/>", lang) +
             "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>",
         layout = 1,
-    )), emptyMap())
+    )), emptyMap(), design)
+
+    /** Presentation designs: the theme's colours (dark ones draw light text on a dark background). */
+    val DESIGNS = listOf("classic", "night", "meadow")
+    private val SCHEMES = mapOf(
+        "night" to listOf("14213D", "F4F1EA", "0B1426", "C9D3E6", "F6C453", "7FB8F0", "8ED081", "F2A0C0", "C8A2E8", "6FD3DC", "F6C453", "C8A2E8"),
+        "meadow" to listOf("1F3B1F", "F6FAF3", "2E5E3A", "E2F0DA", "2E7D4F", "C8963E", "3B5B92", "A33B3B", "6B4E9B", "2C8C99", "2E7D4F", "6B4E9B"),
+    )
 
     /** A slide for [presentation]: its XML, its layout (1: title, 2: title and content) and its pictures' links (id, file in ppt/media). */
     class PresentationSlide(val xml: String, val layout: Int, val pictures: List<Pair<String, String>> = emptyList())
@@ -98,7 +105,7 @@ object Templates {
      * A presentation with the theme, master and the two layouts kept with the code, slides of [cx] × [cy]
      * EMU and the [slides] given; [media] are picture files by their names in ppt/media.
      */
-    internal fun presentation(lang: String, cx: Long, cy: Long, slides: List<PresentationSlide>, media: Map<String, ByteArray>): ByteArray {
+    internal fun presentation(lang: String, cx: Long, cy: Long, slides: List<PresentationSlide>, media: Map<String, ByteArray>, design: String = "classic"): ByteArray {
         val l = esc(lang)
         fun withLang(x: String) = x.replace("lang=\"uk-UA\"", "lang=\"$l\"")
         fun links(vararg r: Pair<String, String>) = rels(r.withIndex().map { (i, t) -> Triple("rId${i + 1}", t.first, t.second) })
@@ -132,8 +139,17 @@ object Templates {
         put("ppt/presProps.xml", HEAD + "<p:presentationPr xmlns:a=\"$A\" xmlns:r=\"$R\" xmlns:p=\"$P\"/>")
         put("ppt/viewProps.xml", HEAD + "<p:viewPr xmlns:a=\"$A\" xmlns:r=\"$R\" xmlns:p=\"$P\"><p:gridSpacing cx=\"76200\" cy=\"76200\"/></p:viewPr>")
         put("ppt/tableStyles.xml", HEAD + "<a:tblStyleLst xmlns:a=\"$A\" def=\"{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}\"/>")
-        put("ppt/theme/theme1.xml", resource("theme1.xml"))
-        put("ppt/slideMasters/slideMaster1.xml", withLang(resource("slideMaster1.xml")))
+        val scheme = SCHEMES[design]
+        val names = listOf("dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink")
+        put("ppt/theme/theme1.xml", resource("theme1.xml").let { t ->
+            if (scheme == null) t else t.replace(Regex("<a:clrScheme name=\"[^\"]*\">.*?</a:clrScheme>", RegexOption.DOT_MATCHES_ALL),
+                "<a:clrScheme name=\"Hramota ${esc(design)}\">" + names.zip(scheme).joinToString("") { (n, v) -> "<a:$n><a:srgbClr val=\"$v\"/></a:$n>" } + "</a:clrScheme>")
+        })
+        put("ppt/slideMasters/slideMaster1.xml", withLang(resource("slideMaster1.xml")).let { m ->
+            // A dark design: the background from the dark colour, the text from the light one
+            if (design != "night") m else m.replace(Regex("<p:clrMap [^>]*/>"),
+                "<p:clrMap bg1=\"dk1\" tx1=\"lt1\" bg2=\"dk2\" tx2=\"lt2\" accent1=\"accent1\" accent2=\"accent2\" accent3=\"accent3\" accent4=\"accent4\" accent5=\"accent5\" accent6=\"accent6\" hlink=\"hlink\" folHlink=\"folHlink\"/>")
+        })
         put("ppt/slideMasters/_rels/slideMaster1.xml.rels", links(
             "$R/slideLayout" to "../slideLayouts/slideLayout1.xml", "$R/slideLayout" to "../slideLayouts/slideLayout2.xml", "$R/theme" to "../theme/theme1.xml",
         ))
