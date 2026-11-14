@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.ocr.ReflowTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:44.117Z" hostname="runnervmccnms" time="0.039">
+  <properties/>
+  <testcase name="linesOfAPageBecomeParagraphs" classname="ua.hramota.ocr.ReflowTest" time="0.019"/>
+  <testcase name="aWiderGapAndAHeadingEndAParagraph" classname="ua.hramota.ocr.ReflowTest" time="0.02"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

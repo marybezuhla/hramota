@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.docx.DocRenderTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:32.544Z" hostname="runnervmccnms" time="3.8">
+  <properties/>
+  <testcase name="sameTextAsDocx" classname="ua.hramota.doc.docx.DocRenderTest" time="0.214"/>
+  <testcase name="headersAndFooters" classname="ua.hramota.doc.docx.DocRenderTest" time="0.059"/>
+  <testcase name="wordFilesOpenOrFailCleanly" classname="ua.hramota.doc.docx.DocRenderTest" time="0.722"/>
+  <testcase name="rendersEveryTestDocument" classname="ua.hramota.doc.docx.DocRenderTest" time="2.804"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

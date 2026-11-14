@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.sheet.XlsxEditTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:41.459Z" hostname="runnervmccnms" time="0.443">
+  <properties/>
+  <testcase name="notesJoinTheCommentsThere" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.143"/>
+  <testcase name="brokenFormulasAreRefusedAndCommaFormsAccepted" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.025"/>
+  <testcase name="rowsAreNotMovedUnderTables" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.016"/>
+  <testcase name="insertedAndDeletedColumnsMoveEverythingThatRefersToThem" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.031"/>
+  <testcase name="looksAndWidthsAreWrittenAndOtherLooksStay" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.031"/>
+  <testcase name="rowsMovingFollowRows" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.016"/>
+  <testcase name="columnsMovingFollowColumns" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.016"/>
+  <testcase name="formulas" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.018"/>
+  <testcase name="notesAreAddedToCells" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.034"/>
+  <testcase name="valueChangesFlowIntoFormulasAndTheFileOpens" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.034"/>
+  <testcase name="insertedAndDeletedRowsMoveEverythingThatRefersToThem" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.049"/>
+  <testcase name="sharedFormulasOtherSheetsDatesAndCalcChain" classname="ua.hramota.doc.sheet.XlsxEditTest" time="0.028"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

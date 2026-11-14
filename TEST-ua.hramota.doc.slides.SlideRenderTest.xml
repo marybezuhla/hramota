@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.slides.SlideRenderTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:42.314Z" hostname="runnervmccnms" time="0.785">
+  <properties/>
+  <testcase name="rendersPptx" classname="ua.hramota.doc.slides.SlideRenderTest" time="0.691"/>
+  <testcase name="textAsShown" classname="ua.hramota.doc.slides.SlideRenderTest" time="0.037"/>
+  <testcase name="pptLikePptx" classname="ua.hramota.doc.slides.SlideRenderTest" time="0.057"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.RevisionsTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:32.256Z" hostname="runnervmccnms" time="0.007">
+  <properties/>
+  <testcase name="acceptAll" classname="ua.hramota.doc.RevisionsTest" time="0.004"/>
+  <testcase name="rejectAll" classname="ua.hramota.doc.RevisionsTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.TextExtractorTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:32.273Z" hostname="runnervmccnms" time="0.131">
+  <properties/>
+  <testcase name="headingStyleNames" classname="ua.hramota.doc.TextExtractorTest" time="0.023"/>
+  <testcase name="markdownHeadings" classname="ua.hramota.doc.TextExtractorTest" time="0.024"/>
+  <testcase name="missingPartFails" classname="ua.hramota.doc.TextExtractorTest" time="0.025"/>
+  <testcase name="docxParagraphsHeadingsAndTrackedDeletions" classname="ua.hramota.doc.TextExtractorTest" time="0.022"/>
+  <testcase name="formatDetection" classname="ua.hramota.doc.TextExtractorTest" time="0.021"/>
+  <testcase name="odtParagraphsSpacesAndHeadings" classname="ua.hramota.doc.TextExtractorTest" time="0.016"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

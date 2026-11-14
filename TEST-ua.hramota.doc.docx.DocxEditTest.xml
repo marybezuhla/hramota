@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.docx.DocxEditTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:36.354Z" hostname="runnervmccnms" time="0.754">
+  <properties/>
+  <testcase name="splitJoinHeadingsAndLists" classname="ua.hramota.doc.docx.DocxEditTest" time="0.121"/>
+  <testcase name="tablesKeepTheirCellsAndCellsDoNotJoin" classname="ua.hramota.doc.docx.DocxEditTest" time="0.077"/>
+  <testcase name="scannerKeepsQuotedBracketsAndEntities" classname="ua.hramota.doc.docx.DocxEditTest" time="0.024"/>
+  <testcase name="typedTextAndFormattingAreSaved" classname="ua.hramota.doc.docx.DocxEditTest" time="0.075"/>
+  <testcase name="aNewNumberedListCountsFromOne" classname="ua.hramota.doc.docx.DocxEditTest" time="0.052"/>
+  <testcase name="propertiesKeepSchemaOrder" classname="ua.hramota.doc.docx.DocxEditTest" time="0.02"/>
+  <testcase name="commentsAreKeptMovedAddedAndRemoved" classname="ua.hramota.doc.docx.DocxEditTest" time="0.083"/>
+  <testcase name="unchangedSaveKeepsTheDocumentToTheByte" classname="ua.hramota.doc.docx.DocxEditTest" time="0.3"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

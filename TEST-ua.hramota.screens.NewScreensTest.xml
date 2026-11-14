@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.screens.NewScreensTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:44.176Z" hostname="runnervmccnms" time="8.473">
+  <properties/>
+  <testcase name="social" classname="ua.hramota.screens.NewScreensTest" time="3.612"/>
+  <testcase name="note" classname="ua.hramota.screens.NewScreensTest" time="1.949"/>
+  <testcase name="myHandwriting" classname="ua.hramota.screens.NewScreensTest" time="0.567"/>
+  <testcase name="notebook" classname="ua.hramota.screens.NewScreensTest" time="1.219"/>
+  <testcase name="scanner" classname="ua.hramota.screens.NewScreensTest" time="1.125"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.docx.DocxTextTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:40.980Z" hostname="runnervmccnms" time="0.202">
+  <properties/>
+  <testcase name="searchFindsTextAndBoxesSitOnIt" classname="ua.hramota.doc.docx.DocxTextTest" time="0.063"/>
+  <testcase name="tableCellsAreSearchable" classname="ua.hramota.doc.docx.DocxTextTest" time="0.038"/>
+  <testcase name="nothingOutsideText" classname="ua.hramota.doc.docx.DocxTextTest" time="0.1"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.docx.DocxHostileTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:37.122Z" hostname="runnervmccnms" time="0.704">
+  <properties/>
+  <testcase name="badNumbersInFormatting" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.042"/>
+  <testcase name="emptyAndTableOnlyDocuments" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.027"/>
+  <testcase name="hugeListStart" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.045"/>
+  <testcase name="zeroAndNegativePageSize" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.027"/>
+  <testcase name="deeplyNestedLinks" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.179"/>
+  <testcase name="manyCellsInOneRow" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.141"/>
+  <testcase name="hugePageSize" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.033"/>
+  <testcase name="deeplyNestedTables" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.159"/>
+  <testcase name="doctypeIsRefused" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.022"/>
+  <testcase name="hugeAndNegativeGridSpan" classname="ua.hramota.doc.docx.DocxHostileTest" time="0.027"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

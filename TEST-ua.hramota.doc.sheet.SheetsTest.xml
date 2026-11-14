@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.sheet.SheetsTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:41.260Z" hostname="runnervmccnms" time="0.187">
+  <properties/>
+  <testcase name="damagedFilesFailCleanly" classname="ua.hramota.doc.sheet.SheetsTest" time="0.015"/>
+  <testcase name="numberFormats" classname="ua.hramota.doc.sheet.SheetsTest" time="0.122"/>
+  <testcase name="xls" classname="ua.hramota.doc.sheet.SheetsTest" time="0.019"/>
+  <testcase name="xlsx" classname="ua.hramota.doc.sheet.SheetsTest" time="0.017"/>
+  <testcase name="columnsAndReferences" classname="ua.hramota.doc.sheet.SheetsTest" time="0.014"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

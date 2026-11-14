@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.data.ShelfSearchTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:29.212Z" hostname="runnervmccnms" time="0.047">
+  <properties/>
+  <testcase name="placesAreFoundAcrossTheShelf" classname="ua.hramota.data.ShelfSearchTest" time="0.047"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

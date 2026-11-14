@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.OdfTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:31.256Z" hostname="runnervmccnms" time="0.564">
+  <properties/>
+  <testcase name="spreadsheet" classname="ua.hramota.doc.OdfTest" time="0.065"/>
+  <testcase name="presentation" classname="ua.hramota.doc.OdfTest" time="0.106"/>
+  <testcase name="textDocuments" classname="ua.hramota.doc.OdfTest" time="0.392"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

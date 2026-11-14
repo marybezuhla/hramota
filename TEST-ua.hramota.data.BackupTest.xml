@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.data.BackupTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:18.592Z" hostname="runnervmccnms" time="10.456">
+  <properties/>
+  <testcase name="refusesIdsThatAreNotFingerprints" classname="ua.hramota.data.BackupTest" time="2.904"/>
+  <testcase name="roundTripAndMerge" classname="ua.hramota.data.BackupTest" time="2.358"/>
+  <testcase name="neverTakesAnotherDocumentsFile" classname="ua.hramota.data.BackupTest" time="1.583"/>
+  <testcase name="refusesChangedOrCutFiles" classname="ua.hramota.data.BackupTest" time="3.611"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

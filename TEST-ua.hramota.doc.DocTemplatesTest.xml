@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.DocTemplatesTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:30.123Z" hostname="runnervmccnms" time="0.147">
+  <properties/>
+  <testcase name="wordTemplates" classname="ua.hramota.doc.DocTemplatesTest" time="0.042"/>
+  <testcase name="budgetTotalsAreWorkedOut" classname="ua.hramota.doc.DocTemplatesTest" time="0.053"/>
+  <testcase name="presentationDesigns" classname="ua.hramota.doc.DocTemplatesTest" time="0.051"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

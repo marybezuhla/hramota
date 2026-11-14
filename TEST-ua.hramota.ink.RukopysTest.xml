@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.ink.RukopysTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:43.355Z" hostname="runnervmccnms" time="0.056">
+  <properties/>
+  <testcase name="linesAreFoundTopToBottom" classname="ua.hramota.ink.RukopysTest" time="0.015"/>
+  <testcase name="slantIsTakenOut" classname="ua.hramota.ink.RukopysTest" time="0.019"/>
+  <testcase name="featuresAreThoseOfTraining" classname="ua.hramota.ink.RukopysTest" time="0.022"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.slides.PptxEditTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:41.912Z" hostname="runnervmccnms" time="0.349">
+  <properties/>
+  <testcase name="animatedParagraphsAreNotSplitAndQuotedAttributesStayValid" classname="ua.hramota.doc.slides.PptxEditTest" time="0.056"/>
+  <testcase name="aNewPresentationGetsSlides" classname="ua.hramota.doc.slides.PptxEditTest" time="0.036"/>
+  <testcase name="aSlideLinkedToIsNotTakenOut" classname="ua.hramota.doc.slides.PptxEditTest" time="0.027"/>
+  <testcase name="textIsEditedAndTheRestKept" classname="ua.hramota.doc.slides.PptxEditTest" time="0.051"/>
+  <testcase name="commentsAreAddedToSlides" classname="ua.hramota.doc.slides.PptxEditTest" time="0.063"/>
+  <testcase name="sectionsFollowTheOrder" classname="ua.hramota.doc.slides.PptxEditTest" time="0.045"/>
+  <testcase name="slidesAreMovedAddedAndTakenOut" classname="ua.hramota.doc.slides.PptxEditTest" time="0.031"/>
+  <testcase name="theOutlineViewDoesNotHoldSlidesBack" classname="ua.hramota.doc.slides.PptxEditTest" time="0.04"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

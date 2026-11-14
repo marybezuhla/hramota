@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.ui.BookPiecesTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:07:40.231Z" hostname="runnervmccnms" time="0.01">
+  <properties/>
+  <testcase name="partsWithChaptersAreCutAtTheChapters" classname="ua.hramota.ui.BookPiecesTest" time="0.007"/>
+  <testcase name="emptyBook" classname="ua.hramota.ui.BookPiecesTest" time="0.0"/>
+  <testcase name="aBookWithNoHeadingsIsCutIntoRuns" classname="ua.hramota.ui.BookPiecesTest" time="0.003"/>
+  <testcase name="shortChaptersStayWhole" classname="ua.hramota.ui.BookPiecesTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

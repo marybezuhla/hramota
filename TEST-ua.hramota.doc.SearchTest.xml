@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.SearchTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:32.263Z" hostname="runnervmccnms" time="0.001">
+  <properties/>
+  <testcase name="emptyAndMissing" classname="ua.hramota.doc.SearchTest" time="0.001"/>
+  <testcase name="matchesAcrossLineBreaksAndDashes" classname="ua.hramota.doc.SearchTest" time="0.0"/>
+  <testcase name="nonOverlapping" classname="ua.hramota.doc.SearchTest" time="0.0"/>
+  <testcase name="ignoresCaseAndApostrophes" classname="ua.hramota.doc.SearchTest" time="0.0"/>
+  <testcase name="wordAround" classname="ua.hramota.doc.SearchTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

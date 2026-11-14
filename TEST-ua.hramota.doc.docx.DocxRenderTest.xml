@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.docx.DocxRenderTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:37.836Z" hostname="runnervmccnms" time="3.138">
+  <properties/>
+  <testcase name="textFlowsAroundAFloatingPicture" classname="ua.hramota.doc.docx.DocxRenderTest" time="0.094"/>
+  <testcase name="tallTableRowsBreakAcrossPages" classname="ua.hramota.doc.docx.DocxRenderTest" time="0.079"/>
+  <testcase name="pageBreakStartsNewPage" classname="ua.hramota.doc.docx.DocxRenderTest" time="0.063"/>
+  <testcase name="bundledFontsAreLoaded" classname="ua.hramota.doc.docx.DocxRenderTest" time="0.033"/>
+  <testcase name="headersAndFooters" classname="ua.hramota.doc.docx.DocxRenderTest" time="0.05"/>
+  <testcase name="numberingLabels" classname="ua.hramota.doc.docx.DocxRenderTest" time="0.022"/>
+  <testcase name="rendersEveryTestDocument" classname="ua.hramota.doc.docx.DocxRenderTest" time="2.797"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

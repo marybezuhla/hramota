@@ -1,0 +1,7 @@
+01-fonts.doc: 1 pages (DOCX 1), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=708, footer=708), blocks 9
+02-paragraphs.doc: 2 pages (DOCX 2), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=708, footer=708), blocks 14
+03-lists.doc: 1 pages (DOCX 1), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=708, footer=708), blocks 11
+04-tables.doc: 1 pages (DOCX 1), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=708, footer=708), blocks 6
+05-flow.doc: 5 pages (DOCX 5), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=708, footer=708), blocks 27
+06-long-table.doc: 9 pages (DOCX 9), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=708, footer=708), blocks 2
+07-headers.doc: 3 pages (DOCX 3), page PageSetup(width=11906, height=16838, top=1134, bottom=1134, left=1417, right=1417, header=720, footer=720), blocks 19

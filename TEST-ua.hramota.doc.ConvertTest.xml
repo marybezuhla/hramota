@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.ConvertTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:29.738Z" hostname="runnervmccnms" time="0.377">
+  <properties/>
+  <testcase name="docBecomesDocxWithTheSameText" classname="ua.hramota.doc.ConvertTest" time="0.167"/>
+  <testcase name="xlsBecomesXlsxWithTheSameValues" classname="ua.hramota.doc.ConvertTest" time="0.124"/>
+  <testcase name="docxMergesFollowTheColumnNotTheCellNumber" classname="ua.hramota.doc.ConvertTest" time="0.028"/>
+  <testcase name="newDocumentsOpenAndLeaveCompatibilityModeOff" classname="ua.hramota.doc.ConvertTest" time="0.032"/>
+  <testcase name="xlsxKeeps1904DatesHiddenSheetsAndValidNames" classname="ua.hramota.doc.ConvertTest" time="0.025"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

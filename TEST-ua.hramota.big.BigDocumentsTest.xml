@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.big.BigDocumentsTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:05:58.190Z" hostname="runnervmccnms" time="20.351">
+  <properties/>
+  <testcase name="thousandPageTable" classname="ua.hramota.big.BigDocumentsTest" time="10.479"/>
+  <testcase name="bigCsv" classname="ua.hramota.big.BigDocumentsTest" time="0.484"/>
+  <testcase name="bigWorkbook" classname="ua.hramota.big.BigDocumentsTest" time="3.247"/>
+  <testcase name="longProse" classname="ua.hramota.big.BigDocumentsTest" time="4.002"/>
+  <testcase name="readerProfile" classname="ua.hramota.big.BigDocumentsTest" time="1.107"/>
+  <testcase name="compareThousandPages" classname="ua.hramota.big.BigDocumentsTest" time="1.031"/>
+  <system-out><![CDATA[DOCX table, 9000 rows, 839 KB zipped: 1012 pages; read 403 ms (+25 MB), first page 573 ms, all pages +2619 ms (+24 MB), search all pages 234 ms, draw last page 73 ms
+CSV 100000 rows, 5864 K chars: 161 ms (+34 MB)
+XLSX 100000 rows × 12, 8215 KB zipped: read 1245 ms (+32 MB), find last row by text 0 ms
+DOCX prose, 30000 paragraphs: 2450 pages; read 394 ms (+36 MB), layout 1763 ms (+33 MB), search 415 ms
+Reader profile, 308 samples. Own time: UTF_8$Decoder.decodeArrayLoop 12%, DocxReader.indexOf 12%, KXmlParser.readValue 12%, Inflater.inflateBytesBytes 8%, LambdaForm$DMH/0x0000735f9826d800.invokeSpecial 8%, KXmlParser.parseStartTag 7%, KXmlParser.next 4%, XmlNode.child 3%, StringPool.$$robo$$libcore_internal_StringPool$get 2%, KXmlParser.readName 2%, KXmlParser.adjustNsp 2%, ByteArrayOutputStream.ensureCapacity 2%
+Reader profile, inclusive: DocxReader.read 100%, DocxReader$Body.streamTable 73%, KXmlParser.next 54%, Xml.subtree 52%, KXmlParser.readValue 26%, KXmlParser.parseStartTag 18%, DocxReader$Body.row 14%, DocxReader.inspect 13%, KXmlParser.fillBuffer 13%, DocxReader.readLimited 13%, DocxReader.indexOf$default 12%, DocxReader.indexOf 12%, DocxReader.inspect$has 12%, KXmlParser.readName 10%, DocxReader$Body.blocks 9%, DocxReader$Body.para 9%, KXmlParser.readEndTag 4%, XmlNode.path 4%, XmlNode.child 3%, DocxReader$Body.run 2%
+Compare 36005 vs 35981 paragraphs: 212 changes in 79 ms (+0 MB)
+]]></system-out>
+  <system-err><![CDATA[[Robolectric] WARN: Android SDK 36 requires Java 21 (have Java 17). Tests won't be run on SDK 36 unless explicitly requested.
+]]></system-err>
+</testsuite>

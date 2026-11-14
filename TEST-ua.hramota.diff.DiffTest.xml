@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.diff.DiffTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:29.261Z" hostname="runnervmccnms" time="0.175">
+  <properties/>
+  <testcase name="hugeDifferenceFallsBackToBlock" classname="ua.hramota.diff.DiffTest" time="0.02"/>
+  <testcase name="unrelatedReplacementIsRemovedThenAdded" classname="ua.hramota.diff.DiffTest" time="0.001"/>
+  <testcase name="largeDocumentWithOneEditIsFast" classname="ua.hramota.diff.DiffTest" time="0.013"/>
+  <testcase name="editedParagraphShowsChangedWords" classname="ua.hramota.diff.DiffTest" time="0.0"/>
+  <testcase name="repeatedParagraphsBetweenAnchors" classname="ua.hramota.diff.DiffTest" time="0.0"/>
+  <testcase name="wordsRebuildBothVersions" classname="ua.hramota.diff.DiffTest" time="0.001"/>
+  <testcase name="sameTextsHaveNoChanges" classname="ua.hramota.diff.DiffTest" time="0.0"/>
+  <testcase name="addedAndRemovedParagraphs" classname="ua.hramota.diff.DiffTest" time="0.0"/>
+  <testcase name="largeDocumentsWithScatteredChanges" classname="ua.hramota.diff.DiffTest" time="0.137"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

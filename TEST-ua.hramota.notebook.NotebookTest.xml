@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.notebook.NotebookTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:43.420Z" hostname="runnervmccnms" time="0.684">
+  <properties/>
+  <testcase name="wordAndPicture" classname="ua.hramota.notebook.NotebookTest" time="0.525"/>
+  <testcase name="marksFollowTheText" classname="ua.hramota.notebook.NotebookTest" time="0.022"/>
+  <testcase name="notesAreKeptFoundAndBinned" classname="ua.hramota.notebook.NotebookTest" time="0.04"/>
+  <testcase name="enterSplitsAndListsGoOn" classname="ua.hramota.notebook.NotebookTest" time="0.032"/>
+  <testcase name="markdown" classname="ua.hramota.notebook.NotebookTest" time="0.022"/>
+  <testcase name="marksAreToggled" classname="ua.hramota.notebook.NotebookTest" time="0.017"/>
+  <testcase name="templates" classname="ua.hramota.notebook.NotebookTest" time="0.026"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

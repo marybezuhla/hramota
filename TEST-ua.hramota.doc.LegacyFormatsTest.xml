@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.LegacyFormatsTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:31.108Z" hostname="runnervmccnms" time="0.127">
+  <properties/>
+  <testcase name="widthsFollowContent" classname="ua.hramota.doc.LegacyFormatsTest" time="0.001"/>
+  <testcase name="hugeInputsAreBounded" classname="ua.hramota.doc.LegacyFormatsTest" time="0.11"/>
+  <testcase name="damagedFilesFailCleanly" classname="ua.hramota.doc.LegacyFormatsTest" time="0.009"/>
+  <testcase name="readsWord97Text" classname="ua.hramota.doc.LegacyFormatsTest" time="0.001"/>
+  <testcase name="readsUnicodeText" classname="ua.hramota.doc.LegacyFormatsTest" time="0.0"/>
+  <testcase name="windows1251Csv" classname="ua.hramota.doc.LegacyFormatsTest" time="0.003"/>
+  <testcase name="csvQuotesAndSeparators" classname="ua.hramota.doc.LegacyFormatsTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

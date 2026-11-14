@@ -1,0 +1,157 @@
+run 292 success
+----
+> Configure project :app
+Checking the license for package NDK (Side by side) 27.0.12077973 in /usr/local/lib/android/sdk/licenses
+License for package NDK (Side by side) 27.0.12077973 accepted.
+Preparing "Install NDK (Side by side) 27.0.12077973 v.27.0.12077973".
+"Install NDK (Side by side) 27.0.12077973 v.27.0.12077973" ready.
+Installing NDK (Side by side) 27.0.12077973 in /usr/local/lib/android/sdk/ndk/27.0.12077973
+"Install NDK (Side by side) 27.0.12077973 v.27.0.12077973" complete.
+"Install NDK (Side by side) 27.0.12077973 v.27.0.12077973" finished.
+w: ⚠️ Deprecated Gradle Version
+The used Gradle version (Gradle 8.14.3) is deprecated and will not be supported in future Kotlin Gradle Plugin releases.
+The minimum supported Gradle version will become Gradle 8.14.4 in Kotlin 2.5.0.
+
+This warning can be suppressed in 'gradle.properties':
+    kotlin.suppressGradlePluginWarnings=DeprecatedGradleVersionWarning
+Solution: Please update the Gradle version to at least Gradle 8.14.4.
+
+
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:checkReleaseAarMetadata
+> Task :app:processReleaseNavigationResources
+> Task :app:generateReleaseResValues
+> Task :app:compileReleaseNavigationResources
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:extractReleaseSupportedLocales
+> Task :app:generateReleaseResources
+> Task :app:generateReleaseLocaleConfig
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:packageReleaseResources
+> Task :app:extractDeepLinksRelease
+> Task :app:mergeReleaseResources
+> Task :app:parseReleaseLocalResources
+
+> Task :app:processReleaseMainManifest
+/home/runner/work/hramota/hramota/app/src/main/AndroidManifest.xml:6:5-87 Warning:
+	uses-permission#android.permission.INTERNET was tagged at AndroidManifest.xml:6 to remove other declarations but no other declaration present
+/home/runner/work/hramota/hramota/app/src/main/AndroidManifest.xml:7:5-99 Warning:
+	uses-permission#android.permission.ACCESS_NETWORK_STATE was tagged at AndroidManifest.xml:7 to remove other declarations but no other declaration present
+/home/runner/work/hramota/hramota/app/src/main/AndroidManifest.xml:8:5-96 Warning:
+	uses-permission#android.permission.ACCESS_WIFI_STATE was tagged at AndroidManifest.xml:8 to remove other declarations but no other declaration present
+
+> Task :app:processReleaseManifest
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileRelease
+> Task :app:javaPreCompileReleaseUnitTest
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:processReleaseUnitTestManifest
+
+> Task :app:configureCMakeRelWithDebInfo[arm64-v8a]
+Checking the license for package CMake 3.22.1 in /usr/local/lib/android/sdk/licenses
+License for package CMake 3.22.1 accepted.
+Preparing "Install CMake 3.22.1 v.3.22.1".
+"Install CMake 3.22.1 v.3.22.1" ready.
+Installing CMake 3.22.1 in /usr/local/lib/android/sdk/cmake/3.22.1
+"Install CMake 3.22.1 v.3.22.1" complete.
+"Install CMake 3.22.1 v.3.22.1" finished.
+
+> Task :app:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:desugarReleaseFileDependencies
+> Task :app:processReleaseManifestForPackage
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:mergeReleaseNativeLibs
+> Task :app:mergeReleaseStartupProfile
+> Task :app:stripReleaseDebugSymbols
+> Task :app:mergeReleaseArtProfile
+> Task :app:processReleaseResources
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:packageReleaseUnitTestForUnitTest
+> Task :app:generateReleaseUnitTestConfig
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseNativeDebugMetadata
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:optimizeReleaseResources
+> Task :app:mergeExtDexRelease
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/EditSaving.kt:101:34 Condition is always 'true'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/MainActivity.kt:122:101 The resolution result depends on the declaration order. This can lead to false-positive errors in the IDE. Specify the return type of 'val saveRescue: ActivityResultLauncher<String>' defined in 'ua.hramota.MainActivity' explicitly.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:484:161 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:486:198 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:488:148 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:489:149 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:490:148 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:492:166 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:495:120 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:504:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:511:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:516:126 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:520:236 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:523:237 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:529:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:537:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:541:209 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:549:37 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:550:113 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:554:96 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:564:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ViewerActivity.kt:572:41 Expression is unused.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/data/Backup.kt:174:59 Condition is always 'true'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/book/BookReaders.kt:84:27 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/docx/DocxLayout.kt:385:94 Unnecessary non-null assertion (!!) on a non-null receiver of type 'DocxLayout.Region'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/docx/DocxLayout.kt:763:32 'val matrix: Matrix' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/docx/DocxLayout.kt:786:36 'val matrix: Matrix' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/sheet/edit/XlsxEdit.kt:1159:71 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/doc/slides/edit/Pack.kt:52:87 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/speech/Voices.kt:314:80 'static field KEY_FEATURE_EMBEDDED_SYNTHESIS: String' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:390:69 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:453:33 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:462:26 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:486:37 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SheetView.kt:495:13 Return in function with expression body and without explicit return type. Use block body '{...}' or add an explicit return type. This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KTLC-288.
+w: file:///home/runner/work/hramota/hramota/app/src/main/java/ua/hramota/ui/SlideEditor.kt:472:144 Expression is unused.
+
+> Task :app:compileReleaseJavaWithJavac NO-SOURCE
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:processReleaseJavaRes
+> Task :app:bundleReleaseClassesToRuntimeJar
+
+> Task :app:compileReleaseUnitTestKotlin
+w: file:///home/runner/work/hramota/hramota/app/src/test/java/ua/hramota/doc/DocTemplatesTest.kt:50:38 Condition is always 'true'.
+
+> Task :app:dexBuilderRelease
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:testReleaseUnitTest
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:mergeReleaseJavaResource
+> Task :app:mergeDexRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_5-1794647007833.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/hramota/hramota/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 5m 15s
+61 actionable tasks: 61 executed
+package: ua.hramota
+uses-permission: name='android.permission.FOREGROUND_SERVICE'
+uses-permission: name='android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK'
+permission: ua.hramota.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+uses-permission: name='ua.hramota.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'

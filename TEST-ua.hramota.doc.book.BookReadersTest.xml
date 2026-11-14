@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="ua.hramota.doc.book.BookReadersTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-14T09:06:32.414Z" hostname="runnervmccnms" time="0.118">
+  <properties/>
+  <testcase name="oddLinksAndNamedLetters" classname="ua.hramota.doc.book.BookReadersTest" time="0.021"/>
+  <testcase name="ignoresDefinedEntities" classname="ua.hramota.doc.book.BookReadersTest" time="0.02"/>
+  <testcase name="readsFb2InOldEncodingAndZip" classname="ua.hramota.doc.book.BookReadersTest" time="0.018"/>
+  <testcase name="readsEpub" classname="ua.hramota.doc.book.BookReadersTest" time="0.021"/>
+  <testcase name="readsFb2" classname="ua.hramota.doc.book.BookReadersTest" time="0.021"/>
+  <testcase name="refusesEntitiesHoweverHidden" classname="ua.hramota.doc.book.BookReadersTest" time="0.017"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

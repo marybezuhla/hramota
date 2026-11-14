@@ -1,0 +1,8 @@
+01-fonts.docx: 1 pages
+02-paragraphs.docx: 2 pages
+03-lists.docx: 1 pages
+04-tables.docx: 1 pages
+05-flow.docx: 5 pages
+06-long-table.docx: 9 pages
+07-headers.docx: 3 pages
+08-wrap.docx: 1 pages
