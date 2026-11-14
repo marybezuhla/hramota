@@ -32,7 +32,7 @@
 
 ## Рукопис (`rukopys/`)
 
-Код і модель розпізнавання рукопису — Apache 2.0, власні дані — CC BY 4.0 (див. `rukopys/README.md`).
+Код і модель розпізнавання рукопису (`assets/ink/rukopys.onnx`) — Apache 2.0, власні дані — CC BY 4.0 (див. `rukopys/README.md`). Модель навчена на штучному письмі, зробленому з рукописних шрифтів під SIL Open Font License 1.1 (Google Fonts; список і суми — у гілці `rukopys-model`, `fonts.json`); самих шрифтів у Грамоті немає.
 
 ## Тестові файли DOC (`app/src/test/resources/legacy`)
 

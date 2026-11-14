@@ -156,18 +156,22 @@ object Rukopys {
         return sb.toString().trim().replace(Regex(" {2,}"), " ")
     }
 
+    /** One piece of a line read from its strokes (as points), exactly as the model was taught. */
+    internal suspend fun readPiece(context: Context, strokes: List<List<Pair<Float, Float>>>): String {
+        val s = ready(context)
+        val f = features(strokes)
+        if (f.isEmpty()) return ""
+        return OnnxTensor.createTensor(OrtEnvironment.getEnvironment(), FloatBuffer.wrap(f), longArrayOf(1, (f.size / 3).toLong(), 3)).use { t ->
+            lock.withLock { s.run(mapOf("points" to t)).use { out -> decode(out[0] as OnnxTensor) } }
+        }
+    }
+
     /** The text written, line by line. Off the main thread; empty when nothing is written. */
     suspend fun read(context: Context, strokes: List<Stroke>): String = withContext(Dispatchers.Default) {
-        val s = ready(context)
-        val env = OrtEnvironment.getEnvironment()
         lines(strokes).map { line ->
             // A line longer than the model was taught on: read in pieces, cut where the pen jumps furthest
-            pieces(line).map { piece ->
-                val f = features(piece.map { st -> st.points.map { it.x to it.y } })
-                if (f.isEmpty()) "" else OnnxTensor.createTensor(env, FloatBuffer.wrap(f), longArrayOf(1, (f.size / 3).toLong(), 3)).use { t ->
-                    lock.withLock { s.run(mapOf("points" to t)).use { out -> decode(out[0] as OnnxTensor) } }
-                }
-            }.filter { it.isNotEmpty() }.joinToString(" ")
+            pieces(line).map { piece -> readPiece(context, piece.map { st -> st.points.map { it.x to it.y } }) }
+                .filter { it.isNotEmpty() }.joinToString(" ")
         }.filter { it.isNotEmpty() }.joinToString("\n")
     }
 }

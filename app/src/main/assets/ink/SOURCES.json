@@ -1,0 +1,16 @@
+{
+ "rukopys.onnx": {
+  "made_by": ".github/workflows/rukopys.yml (run 11, GitHub Actions run 43556244634)",
+  "source_commit": "5bafec0d9797dfd567d129db063d1f7751f4e6e5",
+  "model_branch_commit": "a1b616027d00316e7146e8666c04f398483c3205",
+  "license": "Apache-2.0",
+  "held_out_fonts": [
+   "shantellsans",
+   "underdog"
+  ],
+  "letters_wrong": {
+   "r1": 0.105,
+   "r2": 0.061
+  }
+ }
+}

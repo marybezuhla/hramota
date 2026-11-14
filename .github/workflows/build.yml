@@ -63,6 +63,10 @@ jobs:
       - name: Verify OCR models
         run: (cd app/src/main/assets/ocr && sha256sum -c SHA256SUMS)
 
+      # Handwriting model Р2: exactly the file made by the rukopys workflow (SOURCES.json)
+      - name: Verify handwriting model
+        run: (cd app/src/main/assets/ink && sha256sum -c SHA256SUMS)
+
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
