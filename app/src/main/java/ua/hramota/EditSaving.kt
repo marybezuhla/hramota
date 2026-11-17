@@ -6,8 +6,6 @@ import ua.hramota.data.Library
 import ua.hramota.data.Sealed
 import ua.hramota.data.Shelf
 import ua.hramota.data.Vault
-import ua.hramota.doc.docx.DocxReader
-import ua.hramota.doc.docx.edit.DocxEdit
 import ua.hramota.doc.docx.edit.EditPara
 import java.io.File
 import java.io.FileOutputStream
@@ -56,11 +54,11 @@ object EditSaving {
         true
     } catch (e: Exception) { false } catch (e: OutOfMemoryError) { false }
 
-    /** A Word document's edits. */
-    fun docx(edit: DocxEdit, list: List<EditPara>) = object : Maker {
-        override val ext = "docx"
+    /** A text document's edits (Word or OpenDocument). */
+    fun text(edit: ua.hramota.doc.docx.edit.TextEdit, list: List<EditPara>) = object : Maker {
+        override val ext = edit.extension
         override fun write(source: InputStream, out: OutputStream) = edit.save(list, source, out)
-        override fun check(made: InputStream) { DocxReader.read(made) }
+        override fun check(made: InputStream) { edit.readBack(made) }
     }
 
     /** Saves into the kept copy or into the file itself; the document's memory moves to its new fingerprint. Off the main thread. */

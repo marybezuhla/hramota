@@ -80,15 +80,18 @@ class DocxEdit private constructor(
     private var numberingXml: String?,
     private var relsXml: String?,
     private var typesXml: String?,
-    val paragraphs: List<EditPara>,
+    override val paragraphs: List<EditPara>,
     private val commentsXml: String?,
     private val commentParts: Map<String, String>,
-) {
+) : TextEdit {
+    override val extension = "docx"
+    override fun readBack(input: InputStream): ua.hramota.doc.docx.DocxDocument = ua.hramota.doc.docx.DocxReader.read(input)
+
     /** Where a paragraph is in the file; [row] is the table row it is in (0 outside tables). */
     private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0)
 
     private var nextKey = paragraphs.size.toLong() + 1
-    fun newKey(): Long = nextKey++
+    override fun newKey(): Long = nextKey++
 
     // Parts changed besides the document itself, and parts added
     private val changedParts = HashMap<String, String>()
@@ -97,7 +100,7 @@ class DocxEdit private constructor(
     private var ourBullets: String? = null
     private var ourNumberAbstract: String? = null
 
-    val canStyle: Boolean get() = stylesXml != null
+    override val canStyle: Boolean get() = stylesXml != null
 
     // --- What is shown ---
 
@@ -114,7 +117,7 @@ class DocxEdit private constructor(
     }
 
     /** The look of one character: what the person set, else the run, its character style and the paragraph style. */
-    fun look(p: EditPara, m: RunStyle): Look {
+    override fun look(p: EditPara, m: RunStyle): Look {
         val e = explicit(m.rPr)
         val base = runOfStyle(styleOf(p.pPr), e.font)
         return Look(
@@ -126,7 +129,7 @@ class DocxEdit private constructor(
     }
 
     /** Kind, list marker and the paragraph's own look, for each paragraph in order. */
-    fun shown(list: List<EditPara>): List<Shown> {
+    override fun shown(list: List<EditPara>): List<Shown> {
         val nums = numbering?.let { Numbering.parse(it) } ?: Numbering.EMPTY
         var prevContainer = -1; var prevRow = -1
         val open = LinkedHashSet<String>()
@@ -186,7 +189,7 @@ class DocxEdit private constructor(
     // --- Changes ---
 
     /** True when [b] (right after [a]) can be joined to it: both editable, side by side in one place, no section ends between. */
-    fun canJoin(a: EditPara, b: EditPara): Boolean {
+    override fun canJoin(a: EditPara, b: EditPara): Boolean {
         if (!a.editable || !b.editable) return false
         if (a.slot != b.slot) {
             if (b.slot != a.slot + 1) return false
@@ -197,14 +200,14 @@ class DocxEdit private constructor(
         return SECT !in a.pPr && SECT !in b.pPr
     }
 
-    fun join(a: EditPara, b: EditPara): EditPara = a.changed(text = a.text + b.text, marks = a.marks + b.marks, head = a.head + b.head, tail = a.tail + b.tail,
+    override fun join(a: EditPara, b: EditPara): EditPara = a.changed(text = a.text + b.text, marks = a.marks + b.marks, head = a.head + b.head, tail = a.tail + b.tail,
         anchors = a.anchors + b.anchors.map { it.moved(it.at + a.text.length) })
 
     /**
      * The paragraph with new text, where [old][from, oldEnd) was replaced: comment anchors after the change
      * move with the text; those inside it go to its start (a beginning) or its end (an end, a mark).
      */
-    fun retyped(p: EditPara, text: String, marks: List<RunStyle>, from: Int, oldEnd: Int): EditPara {
+    override fun retyped(p: EditPara, text: String, marks: List<RunStyle>, from: Int, oldEnd: Int): EditPara {
         val delta = text.length - p.text.length
         val newEnd = oldEnd + delta
         val anchors = p.anchors.map { a ->
@@ -219,7 +222,7 @@ class DocxEdit private constructor(
     }
 
     /** Splits at [at]: the second part keeps where the section ends; a heading split at its end is followed by ordinary text. */
-    fun split(p: EditPara, at: Int): Pair<EditPara, EditPara> {
+    override fun split(p: EditPara, at: Int): Pair<EditPara, EditPara> {
         val withoutSection = removeChild(p.pPr, "sectPr", PPR_ORDER)
         var secondPpr = p.pPr
         if (at == p.text.length && shownKindOf(p) in setOf(Kind.H1, Kind.H2, Kind.H3)) secondPpr = removeChild(secondPpr, "pStyle", PPR_ORDER)
@@ -237,10 +240,10 @@ class DocxEdit private constructor(
 
     private fun shownKindOf(p: EditPara) = kindOf(styleOf(p.pPr))
 
-    fun kind(p: EditPara): Kind = shownKindOf(p)
+    override fun kind(p: EditPara): Kind = shownKindOf(p)
 
     /** The paragraph as ordinary text or a heading of level 1–3 (the document's own heading styles, added if missing). */
-    fun withKind(p: EditPara, kind: Kind): EditPara {
+    override fun withKind(p: EditPara, kind: Kind): EditPara {
         val pPr = when (kind) {
             Kind.NORMAL, Kind.OTHER -> removeChild(p.pPr, "pStyle", PPR_ORDER)
             else -> {
@@ -252,7 +255,7 @@ class DocxEdit private constructor(
     }
 
     /** A list item (continuing the list right before it, if of the same kind) or no longer one. */
-    fun withList(p: EditPara, kind: ListKind?, before: EditPara?): EditPara {
+    override fun withList(p: EditPara, kind: ListKind?, before: EditPara?): EditPara {
         if (kind == null) {
             val style = styles.paragraph(styleOf(p.pPr)).first
             // A list given by the style is turned off by number 0; one set here is simply removed
@@ -269,9 +272,6 @@ class DocxEdit private constructor(
         return p.changed(pPr = setChild(pPr, "numPr", "<$w:numPr><$w:ilvl $w:val=\"$lvl\"/><$w:numId $w:val=\"${XmlScan.escape(id)}\"/></$w:numPr>", PPR_ORDER))
     }
 
-    /** The character formatting of [m] with one thing changed. */
-    fun restyle(m: RunStyle, bold: Boolean? = null, italic: Boolean? = null, underline: Boolean? = null, strike: Boolean? = null) =
-        m.copy(bold = bold ?: m.bold, italic = italic ?: m.italic, underline = underline ?: m.underline, strike = strike ?: m.strike)
 
     // --- Styles and numbering added when needed ---
 
@@ -368,7 +368,7 @@ class DocxEdit private constructor(
     private val cw: String = cwOrNull ?: "w"
 
     /** False when the comments part is written in a way not handled here: comments are then shown but not changed. */
-    val canComment: Boolean get() = cwOrNull != null
+    override val canComment: Boolean get() = cwOrNull != null
 
     // Comment ids: the next free one (worked out once, off the main thread, when the file is opened)
     private var nextCommentId: Long = (Regex("$w:id=\"(\\d{1,9})\"").findAll(xml).mapNotNull { it.groupValues[1].toLongOrNull() }.maxOrNull() ?: -1L) + 1
@@ -408,13 +408,13 @@ class DocxEdit private constructor(
     private val added = ArrayList<Comment>()
 
     /** Every comment known (in the file, and added here); which are in the document is up to its paragraphs' marks. */
-    fun comments(): List<Comment> = fileComments + added
+    override fun comments(): List<Comment> = fileComments + added
 
     /**
      * A new comment on [from, to) of [p] (a point when equal): its beginning, end and mark go into the
      * paragraph, its text into the comments part on saving.
      */
-    fun comment(p: EditPara, from: Int, to: Int, author: String, text: String): EditPara {
+    override fun comment(p: EditPara, from: Int, to: Int, author: String, text: String): EditPara {
         if (!canComment) return p
         val id = maxOf(nextCommentId, (comments().mapNotNull { it.id.toLongOrNull() }.maxOrNull() ?: -1L) + 1).toString()
         nextCommentId = id.toLong() + 1
@@ -431,13 +431,13 @@ class DocxEdit private constructor(
     }
 
     /** The paragraphs without comment [id]; null if part of it is in a paragraph that cannot be changed here. */
-    fun uncomment(list: List<EditPara>, id: String): List<EditPara>? {
+    override fun uncomment(list: List<EditPara>, id: String): List<EditPara>? {
         if (!canComment || id in outside || list.any { !it.editable && it.anchors.any { a -> a.comment == id } }) return null
         return list.map { p -> if (p.anchors.none { it.comment == id }) p else p.changed(anchors = p.anchors.filter { it.comment != id }) }
     }
 
     /** Where comment [id] begins (paragraph index, place), and the text it is about (shortened). */
-    fun commentPlace(list: List<EditPara>, id: String): Pair<Pair<Int, Int>, String>? {
+    override fun commentPlace(list: List<EditPara>, id: String): Pair<Pair<Int, Int>, String>? {
         var start: Pair<Int, Int>? = null
         val quoted = StringBuilder()
         for ((i, p) in list.withIndex()) {
@@ -601,7 +601,7 @@ class DocxEdit private constructor(
      * Writes the edited document: the package is read again from [source] and copied entry by entry,
      * with the changed parts put in. Refused if the document part is no longer the one opened.
      */
-    fun save(list: List<EditPara>, source: InputStream, out: OutputStream) {
+    override fun save(list: List<EditPara>, source: InputStream, out: OutputStream) {
         val docText = documentXml(list)
         val doc = docText.toByteArray(Charsets.UTF_8)
         val changedParts = HashMap(this.changedParts)

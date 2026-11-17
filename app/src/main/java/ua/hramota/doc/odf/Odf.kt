@@ -58,6 +58,23 @@ class OdfPackage private constructor(val parts: Map<String, ByteArray>, val medi
             return out.toByteArray()
         }
 
+        /** The styles of a document from its content and styles parts (as trees). */
+        fun stylesOf(content: ONode, styles: ONode?): Styles {
+            val named = HashMap<String, ONode>(); val defaults = HashMap<String, ONode>(); val lists = HashMap<String, ONode>()
+            fun take(container: ONode?) {
+                container ?: return
+                for (s in container.elements) when (s.name) {
+                    "style" -> s.attr("name")?.let { named[it] = s }
+                    "default-style" -> s.attr("family")?.let { defaults[it] = s }
+                    "list-style" -> s.attr("name")?.let { lists[it] = s }
+                }
+            }
+            val st = styles?.child("document-styles")
+            take(st?.child("styles")); take(st?.child("automatic-styles"))
+            take(content.child("document-content")?.child("automatic-styles"))
+            return Styles(named, defaults, lists)
+        }
+
         fun tree(bytes: ByteArray): ONode {
             val p = Xml.parser(ByteArrayInputStream(bytes))
             val root = ONode("#root", emptyMap())
@@ -85,22 +102,7 @@ class OdfPackage private constructor(val parts: Map<String, ByteArray>, val medi
     val styles: ONode? by lazy { parts["styles.xml"]?.let { tree(it) } }
 
     /** Every style by name (automatic ones of the content over named ones), and defaults by family. */
-    val styleMap: Styles by lazy {
-        val named = HashMap<String, ONode>(); val defaults = HashMap<String, ONode>(); val lists = HashMap<String, ONode>()
-        fun take(container: ONode?) {
-            container ?: return
-            for (s in container.elements) when (s.name) {
-                "style" -> s.attr("name")?.let { named[it] = s }
-                "default-style" -> s.attr("family")?.let { defaults[it] = s }
-                "list-style" -> s.attr("name")?.let { lists[it] = s }
-            }
-        }
-        val st = styles?.child("document-styles")
-        take(st?.child("styles")); take(st?.child("automatic-styles"))
-        val doc = content.child("document-content")
-        take(doc?.child("automatic-styles"))
-        Styles(named, defaults, lists)
-    }
+    val styleMap: Styles by lazy { stylesOf(content, styles) }
 
     class Styles(val named: Map<String, ONode>, val defaults: Map<String, ONode>, val lists: Map<String, ONode>) {
         /** The properties a style gives (its parents' first, then its own), from all its *-properties elements. */

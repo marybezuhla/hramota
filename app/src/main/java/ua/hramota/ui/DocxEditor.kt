@@ -74,7 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.hramota.R
-import ua.hramota.doc.docx.edit.DocxEdit
+import ua.hramota.doc.docx.edit.TextEdit
 import ua.hramota.doc.docx.edit.EditPara
 import ua.hramota.doc.docx.edit.Kind
 import ua.hramota.doc.docx.edit.ListKind
@@ -89,7 +89,7 @@ private const val ZW = '​'
  * A DOCX being edited: the paragraphs, what was done (to undo and redo), and where the cursor is.
  * Typing within one paragraph is undone in pauses, not letter by letter.
  */
-class EditorState(val edit: DocxEdit) : Replaceable {
+class EditorState(val edit: TextEdit) : Replaceable {
     var paras by mutableStateOf(edit.paragraphs)
         private set
     var shown: List<Shown> by mutableStateOf(edit.shown(edit.paragraphs))
@@ -332,7 +332,7 @@ class EditorState(val edit: DocxEdit) : Replaceable {
 }
 
 /** Shows each run of text with its formatting; the text itself is never changed by this. */
-private class Formatting(private val p: EditPara, private val edit: DocxEdit, private val open: Set<String>, private val tint: androidx.compose.ui.graphics.Color) : VisualTransformation {
+private class Formatting(private val p: EditPara, private val edit: TextEdit, private val open: Set<String>, private val tint: androidx.compose.ui.graphics.Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val b = AnnotatedString.Builder(text.text)
         // The field's text is the zero-width mark and then the paragraph's text
@@ -585,8 +585,8 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
                 Tool("S", stringResource(R.string.edit_strike), active, look.strike, TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(EditorState.Mark.STRIKE) }
                 Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
                 KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind)
-                Tool("•", stringResource(R.string.edit_bullets), active, shown?.list == ListKind.BULLET, toggles = true) { state.toggleList(ListKind.BULLET) }
-                Tool("1.", stringResource(R.string.edit_numbers), active, shown?.list == ListKind.NUMBER, toggles = true) { state.toggleList(ListKind.NUMBER) }
+                Tool("•", stringResource(R.string.edit_bullets), active && state.edit.canList, shown?.list == ListKind.BULLET, toggles = true) { state.toggleList(ListKind.BULLET) }
+                Tool("1.", stringResource(R.string.edit_numbers), active && state.edit.canList, shown?.list == ListKind.NUMBER, toggles = true) { state.toggleList(ListKind.NUMBER) }
             }
         }
     }
@@ -707,7 +707,7 @@ private fun EditedPages(state: EditorState, make: suspend (List<EditPara>) -> By
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             try {
                 val bytes = make(paras) ?: return@withContext false
-                val doc = ua.hramota.doc.docx.DocxReader.read(java.io.ByteArrayInputStream(bytes))
+                val doc = state.edit.readBack(java.io.ByteArrayInputStream(bytes))
                 ua.hramota.doc.docx.DocxPages(doc, ua.hramota.doc.docx.Fonts(context.assets))
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { false }
         }

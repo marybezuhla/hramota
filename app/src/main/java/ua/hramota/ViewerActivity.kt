@@ -454,9 +454,9 @@ open class ViewerActivity : ComponentActivity() {
                                 // The edits written into a copy in memory (the file itself untouched)
                                 withContext(Dispatchers.IO) {
                                     // (into a temporary file, read back once: a big document is not held twice)
-                                    val temp = java.io.File(java.io.File(cacheDir, "open").apply { mkdirs() }, "pages-${System.nanoTime()}.docx")
+                                    val temp = java.io.File(java.io.File(cacheDir, "open").apply { mkdirs() }, "pages-${System.nanoTime()}.${editor.edit.extension}")
                                     try {
-                                        val ok = contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { EditSaving.docx(editor.edit, list).write(input.buffered(), it) }; true } ?: false
+                                        val ok = contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().buffered().use { EditSaving.text(editor.edit, list).write(input.buffered(), it) }; true } ?: false
                                         if (!ok || temp.length() > 200L * 1024 * 1024) null else temp.readBytes()
                                     } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null } finally { temp.delete() }
                                 }
@@ -482,6 +482,8 @@ open class ViewerActivity : ComponentActivity() {
                             listOfNotNull<Pair<String, () -> Unit>>(
                                 // Word documents can be edited: text, bold and other marks, headings, lists
                                 if (format == Format.DOCX && state is ViewerState.Paged && !protectedDoc) getString(R.string.edit_open) to { startEditing(uri); Unit } else null,
+                                // OpenDocument text: edited in the file itself, as Word documents are
+                                if (format == Format.ODT && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri, odt = true); Unit } else null,
                                 // Excel workbooks: cells and formulas
                                 (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX && !protectedDoc }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
                                 // Old Word and Excel files: kept as new ones, which can then be edited
@@ -857,7 +859,7 @@ open class ViewerActivity : ComponentActivity() {
     }
 
     /** Opens the DOCX for editing (off the main thread); a file that cannot be edited is said so. */
-    private fun startEditing(uri: android.net.Uri, withComments: Boolean = false) {
+    private fun startEditing(uri: android.net.Uri, withComments: Boolean = false, odt: Boolean = false) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         held.withComments = withComments
         val app = applicationContext
@@ -865,7 +867,7 @@ open class ViewerActivity : ComponentActivity() {
         held.opening = true
         held.scope.launch {
             val edit = try { withContext(Dispatchers.IO) {
-                try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.docx.edit.DocxEdit.open(it.buffered()) }?.let { ua.hramota.ui.EditorState(it) } }
+                try { app.contentResolver.openInputStream(uri)?.use { val i = it.buffered(); if (odt) ua.hramota.doc.odf.OdtEdit.open(i) else ua.hramota.doc.docx.edit.DocxEdit.open(i) }?.let { ua.hramota.ui.EditorState(it) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
             } } finally { held.opening = false }
             if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()
@@ -1203,7 +1205,7 @@ open class ViewerActivity : ComponentActivity() {
         var slides by mutableStateOf<ua.hramota.ui.SlideEditorState?>(null)
 
         /** What saving needs from whichever editor is open (taken now: later typing is not part of it). */
-        fun maker(): EditSaving.Maker? = editor?.let { EditSaving.docx(it.edit, it.paras) } ?: sheet?.maker() ?: slides?.maker()
+        fun maker(): EditSaving.Maker? = editor?.let { EditSaving.text(it.edit, it.paras) } ?: sheet?.maker() ?: slides?.maker()
         var saving by mutableStateOf(false)
         /** An editor being opened (a large file takes a moment): shown, and not opened twice. */
         var opening by mutableStateOf(false)
