@@ -12,6 +12,7 @@ import ua.hramota.doc.sheet.edit.SheetEdit
 import ua.hramota.doc.sheet.edit.SheetSnapshot
 import ua.hramota.doc.sheet.edit.Value
 import ua.hramota.doc.sheet.edit.XlsxEdit
+import ua.hramota.doc.sheet.edit.typed
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
