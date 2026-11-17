@@ -498,7 +498,11 @@ class OdtEdit private constructor(
                         "$t:bookmark", "$t:bookmark-start" -> if (inSpan) editable = false else head.append(xml, c.start, c.end)
                         "$t:bookmark-end" -> if (inSpan) editable = false else tail.append(xml, c.start, c.end)
                         // Links, notes, fields, pictures, tracked changes, comments: the paragraph stays as it is
-                        else -> editable = false
+                        // (the text of a link or a field still shown; a note's or comment's not)
+                        else -> {
+                            editable = false
+                            if (!c.empty && c.local !in setOf("note", "annotation", "annotation-end", "frame", "changed-region")) walk(c.openEnd, c.closeStart, style, true)
+                        }
                     }
                 }
                 add(XmlScan.unescape(xml.substring(pos, to)), style)
