@@ -67,6 +67,10 @@ jobs:
       - name: Verify handwriting model
         run: (cd app/src/main/assets/ink && sha256sum -c SHA256SUMS)
 
+      # Spelling words from dict_uk's Hunspell files: exactly the file the spell-dict workflow made (SOURCE.json)
+      - name: Verify spelling dictionary
+        run: (cd app/src/main/assets/spell && sha256sum -c SHA256SUMS)
+
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin

@@ -786,4 +786,7 @@
     <string name="spell_skip">Пропустити</string>
     <string name="spell_skip_all">Пропустити всюди</string>
     <string name="spell_add">Додати до моїх слів</string>
+    <string name="spell_own_title">Мої слова для правопису</string>
+    <string name="spell_own_hint">Слова, додані під час перевірки правопису; лишаються лише на телефоні</string>
+    <string name="spell_own_none">Ще не додано жодного слова</string>
 </resources>

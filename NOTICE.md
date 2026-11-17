@@ -34,6 +34,10 @@
 
 Код і модель розпізнавання рукопису (`assets/ink/rukopys.onnx`) — Apache 2.0, власні дані — CC BY 4.0 (див. `rukopys/README.md`). Модель навчена на штучному письмі, зробленому з рукописних шрифтів під SIL Open Font License 1.1 (Google Fonts; список і суми — у гілці `rukopys-model`, `fonts.json`); самих шрифтів у Грамоті немає.
 
+## Правопис (`app/src/main/assets/spell`)
+
+Перевірка правопису бере слова зі словника наголосів (вище) і зі словника Hunspell проєкту [dict_uk](https://github.com/brown-uk/dict_uk) (Андрій Рисін, Василь Старко, команда БрУК), випуск v6.8.6. Файли Hunspell поширюються за умов Mozilla Public License 1.1 (так каже їхній `distr/hunspell/README.md`; його копія — `README-hunspell.md`, текст ліцензії — `LICENSE-MPL-1.1.txt`). `uk_extra.bin` — ті самі словоформи, розгорнуті з `uk_UA.dic`/`uk_UA.aff` і без тих, що вже є в словнику наголосів, у форматі Грамоти (`tools/spell/build_spell.py`, збірка — `.github/workflows/spell-dict.yml`; джерело й SHA-256 архіву — `SOURCE.json`, суму файлу перевіряє кожна збірка). Цей файл лишається під MPL 1.1; решта Грамоти — GPL-3.0 або новіша. Сирцевий вигляд файлу — архів за посиланням у `SOURCE.json` і скрипт збирання.
+
 ## Тестові файли DOC (`app/src/test/resources/legacy`)
 
 Зразки документів Word 97–2003 (у тому числі пошкоджені, з фазингу) з тестових даних [Apache POI](https://github.com/apache/poi) (`test-data/document`), ліцензія Apache 2.0. Використовуються лише в тестах, у застосунок не входять.

@@ -772,4 +772,7 @@
     <string name="spell_skip">Skip</string>
     <string name="spell_skip_all">Skip everywhere</string>
     <string name="spell_add">Add to my words</string>
+    <string name="spell_own_title">My words for spelling</string>
+    <string name="spell_own_hint">Words added during the spelling check; kept only on this phone</string>
+    <string name="spell_own_none">No words added yet</string>
 </resources>

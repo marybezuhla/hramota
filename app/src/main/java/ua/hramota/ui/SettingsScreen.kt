@@ -163,6 +163,34 @@ fun SettingsScreen(
                 Text(stringResource(R.string.ink_open_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
+            // One's own words for the spelling check: seen and taken out here
+            var ownWords by remember { mutableStateOf<List<String>?>(null) }
+            Column(Modifier.fillMaxWidth().clickable { ownWords = ua.hramota.text.Spelling.own(context).sorted() }.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(stringResource(R.string.spell_own_title), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.spell_own_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            ownWords?.let { words ->
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { ownWords = null },
+                    title = { Text(stringResource(R.string.spell_own_title)) },
+                    text = {
+                        if (words.isEmpty()) Text(stringResource(R.string.spell_own_none))
+                        else androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                            items(words.size) { i ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(words[i], modifier = Modifier.weight(1f))
+                                    TextButton(onClick = {
+                                        try { ua.hramota.text.Spelling.removeOwn(context, words[i]) } catch (_: Exception) {}
+                                        ownWords = ua.hramota.text.Spelling.own(context).sorted()
+                                    }) { Text(stringResource(R.string.note_delete)) }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { ownWords = null }) { Text(stringResource(R.string.ok)) } },
+                )
+            }
+
             Section(stringResource(R.string.dict_section))
             Text(stringResource(R.string.dict_section_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             for (d in dictionaries) Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
