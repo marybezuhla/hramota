@@ -24,8 +24,8 @@ def size_of(strokes):
     return max(float(hi - lo), 1e-3)
 
 
-def resample(stroke, step):
-    """Points every [step] along the stroke's path (its first point kept)."""
+def resample(stroke, step, budget=None):
+    """Points every [step] along the stroke's path (its first point kept); at most [budget]."""
     if len(stroke) < 2:
         return stroke[:1].copy()
     d = np.sqrt((np.diff(stroke, axis=0) ** 2).sum(axis=1))
@@ -34,6 +34,8 @@ def resample(stroke, step):
         return stroke[:1].copy()
     at = np.concatenate([[0.0], np.cumsum(d)])
     n = int(total // step) + 1
+    if budget is not None:
+        n = max(1, min(n, budget))
     want = np.arange(n) * step
     x = np.interp(want, at, stroke[:, 0])
     y = np.interp(want, at, stroke[:, 1])
@@ -42,7 +44,9 @@ def resample(stroke, step):
 
 def features(strokes):
     """[N, 3] float32: dx, dy, pen put down. [strokes]: list of [k, 2] arrays (x, y), in writing order."""
-    strokes = [np.asarray(s, dtype=np.float64).reshape(-1, 2) for s in strokes if len(s)]
+    strokes = [np.asarray(s, dtype=np.float64).reshape(-1, 2) for s in strokes]
+    strokes = [s[np.isfinite(s).all(axis=1)] for s in strokes]
+    strokes = [s for s in strokes if len(s)]
     if not strokes:
         return np.zeros((0, 3), np.float32)
     h = size_of(strokes)
@@ -52,7 +56,7 @@ def features(strokes):
     prev = None
     for s in strokes:
         pts = np.stack([(s[:, 0] - x0) / h, (s[:, 1] - ym) / h], axis=1)
-        pts = resample(pts, STEP)
+        pts = resample(pts, STEP, MAX_POINTS - len(out))
         for i, p in enumerate(pts):
             if prev is None:
                 dx, dy = 0.0, 0.0
