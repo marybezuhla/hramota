@@ -124,4 +124,27 @@ class OdtEditTest {
         assertTrue(r.isFailure)
     }
 
+
+    @Test fun aLibreOfficeDocument() {
+        val bytes = javaClass.classLoader!!.getResource("odf/03-lists.odt")!!.readBytes()
+        val edit = OdtEdit.open(ByteArrayInputStream(bytes))
+        val list = edit.paragraphs.toMutableList()
+        val i = list.indexOfFirst { it.text == "Третій пункт" }
+        assertTrue(i > 0)
+        val p = list[i]
+        val text = "Третій пункт, змінений"
+        list[i] = edit.retyped(p, text, p.marks + List(text.length - p.text.length) { p.marks.last() }.map { edit.restyle(it, bold = true) }, p.text.length, p.text.length)
+        val (a, b) = edit.split(list[i], 6)
+        list[i] = a; list.add(i + 1, b)
+        list[0] = edit.withKind(list[0], Kind.H2)
+        val out = ByteArrayOutputStream()
+        edit.save(list, ByteArrayInputStream(bytes), out)
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "odt-lists.odt").writeBytes(out.toByteArray()) }
+        val again = OdtEdit.open(ByteArrayInputStream(out.toByteArray()))
+        assertTrue(again.paragraphs.any { it.text == "Третій" })
+        val q = again.paragraphs.first { it.text == " пункт, змінений" }
+        assertTrue(again.look(q, q.marks.last()).bold)
+        assertEquals(Kind.H2, again.kind(again.paragraphs[0]))
+        assertEquals(edit.paragraphs.size + 1, again.paragraphs.size)
+    }
 }

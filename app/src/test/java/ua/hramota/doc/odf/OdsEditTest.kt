@@ -113,4 +113,23 @@ class OdsEditTest {
         }.toByteArray()
         assertTrue(runCatching { edit.save(ByteArrayInputStream(other), ByteArrayOutputStream()) }.isFailure)
     }
+
+    @Test fun aLibreOfficeWorkbook() {
+        val bytes = javaClass.classLoader!!.getResource("odf/01-budget.ods")!!.readBytes()
+        val edit = OdsEdit.open(ByteArrayInputStream(bytes))
+        assertEquals("=SUM(B4:D4)", edit.content(CellKey(0, 3, 4)))
+        assertEquals("6200", edit.content(CellKey(0, 3, 1)))
+        edit.set(CellKey(0, 3, 1), edit.parse("7200", false)!!)
+        edit.set(CellKey(0, 11, 0), edit.parse("Нотатка", false)!!)
+        assertEquals(Value.Num(11700.5), edit.recalc()[CellKey(0, 3, 4)])
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes), out)
+        // Kept for CI, where LibreOffice opens it and its sums are checked
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "ods-budget.ods").writeBytes(out.toByteArray()); java.io.File(it, "ods-budget.expect").writeText("4,5,11700.5\n4,2,7200\n") }
+        val again = OdsEdit.open(ByteArrayInputStream(out.toByteArray()))
+        assertEquals("7200", again.content(CellKey(0, 3, 1)))
+        assertEquals("Нотатка", again.content(CellKey(0, 11, 0)))
+        assertEquals("Сімейний бюджет 2026", again.content(CellKey(0, 0, 0)))
+        assertTrue(part(out.toByteArray(), "content.xml")!!.contains("table:formula=\"of:=SUM([.B4:.D4])\" office:value-type=\"float\" office:value=\"11700.5\""))
+    }
 }

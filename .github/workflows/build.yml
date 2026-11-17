@@ -141,7 +141,7 @@ jobs:
           python3 - <<'PY'
           import glob, zipfile, xml.dom.minidom, sys
           bad = 0
-          for f in glob.glob("app/build/edited/*.docx") + glob.glob("app/build/edited/*.xlsx") + glob.glob("app/build/edited/*.pptx"):
+          for f in glob.glob("app/build/edited/*.docx") + glob.glob("app/build/edited/*.xlsx") + glob.glob("app/build/edited/*.pptx") + glob.glob("app/build/edited/*.odt") + glob.glob("app/build/edited/*.ods"):
               z = zipfile.ZipFile(f)
               for n in z.namelist():
                   if n.endswith(".xml") or n.endswith(".rels"):
@@ -151,8 +151,27 @@ jobs:
           PY
           dpkg -s libreoffice-calc-nogui libreoffice-impress-nogui > /dev/null 2>&1 || { sudo apt-get -o DPkg::Lock::Timeout=600 update -qq; sudo apt-get -o DPkg::Lock::Timeout=600 install -y -qq --no-install-recommends libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui poppler-utils > /dev/null; }
           mkdir -p edited-pdf log/edited
-          soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx > /dev/null
-          for f in app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx; do
+          soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods > /dev/null
+          # OpenDocument spreadsheets: what LibreOffice shows in cells the test names (row,column,value; counted from 1)
+          mkdir -p edited-csv
+          for f in app/build/edited/*.ods; do
+            [ -f "${f%.*}.expect" ] || continue
+            soffice --headless --convert-to "csv:Text - txt - csv (StarCalc):44,34,76,1,,1033" --outdir edited-csv "$f" > /dev/null
+            python3 - "$f" "edited-csv/$(basename "${f%.*}").csv" "${f%.*}.expect" <<'PY'
+          import csv, sys
+          rows = list(csv.reader(open(sys.argv[2], encoding="utf-8")))
+          bad = 0
+          for line in open(sys.argv[3]):
+              if not line.strip(): continue
+              r, c, want = line.strip().split(",", 2)
+              got = rows[int(r) - 1][int(c) - 1] if len(rows) >= int(r) and len(rows[int(r) - 1]) >= int(c) else None
+              try: ok = got is not None and abs(float(got.replace(" ", "").replace(",", ".")) - float(want)) < 1e-6
+              except ValueError: ok = got == want
+              if not ok: print(sys.argv[1], "row", r, "column", c, "LibreOffice shows", got, "expected", want); bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+          done
+          for f in app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods; do
             b="$(basename "$f")"; pdf="edited-pdf/${b%.*}.pdf"
             test -s "$pdf" || { echo "LibreOffice could not open $f"; exit 1; }
             pdftoppm -r 60 -png -f 1 -l 1 "$pdf" "log/edited/${b%.*}" || true
