@@ -39,6 +39,10 @@ jobs:
           sha256sum dl/hunspell.zip | tee keep/SOURCE-sha256.txt
           echo "{\"project\": \"https://github.com/brown-uk/dict_uk\", \"tag\": \"$TAG\", \"file\": \"$URL\", \"sha256\": \"$(sha256sum dl/hunspell.zip | cut -d' ' -f1)\"}" > keep/SOURCE.json
           (cd dl && unzip -o -q hunspell.zip && find . -maxdepth 3 -type f | head -30)
+          # What the Hunspell files are licensed under, as their own README at that tag says
+          curl -fsSL -o keep/README-hunspell.md "https://raw.githubusercontent.com/brown-uk/dict_uk/$TAG/distr/hunspell/README.md" || echo "no hunspell README at $TAG"
+          curl -fsSL -o keep/README-dict_uk.md "https://raw.githubusercontent.com/brown-uk/dict_uk/$TAG/README.md" || true
+          grep -n -i -E "licen|ліценз|GPL|MPL|LGPL|Creative|NC|комерц" keep/README-*.md || true
       - name: Expand
         run: |
           sudo apt-get install -y -q hunspell hunspell-tools > /dev/null
