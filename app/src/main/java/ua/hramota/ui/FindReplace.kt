@@ -72,11 +72,11 @@ fun findAll(texts: List<Pair<Long, String>>, query: String, matchCase: Boolean):
 private const val MAX_FOUND = 10_000
 
 class FindState {
-    private var isOpen by mutableStateOf(false)
+    private var openNow by mutableStateOf(false)
     /** Whether the bar is shown; closed, it opens again for finding. */
     var open: Boolean
-        get() = isOpen
-        set(v) { isOpen = v; if (!v) spelling = false }
+        get() = openNow
+        set(v) { openNow = v; if (!v) spelling = false }
     var query by mutableStateOf("")
     var replacement by mutableStateOf("")
     var matchCase by mutableStateOf(false)
