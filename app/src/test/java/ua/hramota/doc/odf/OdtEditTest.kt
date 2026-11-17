@@ -22,15 +22,16 @@ import java.util.zip.ZipOutputStream
 class OdtEditTest {
     private val ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" " +
         "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" " +
-        "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:xlink=\"http://www.w3.org/1999/xlink\""
+        "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\""
     private val linked = "<text:p text:style-name=\"Standard\">Див. <text:a xlink:href=\"https://example.org\">сайт</text:a></text:p>"
+    private val field = "<text:p>Сьогодні <text:date text:date-value=\"2026-11-18\">18.11.2026</text:date>, нотатка<text:note text:id=\"n1\" text:note-class=\"footnote\"><text:note-citation>1</text:note-citation><text:note-body><text:p>Виноска</text:p></text:note-body></text:note>.</text:p>"
     private val content = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content $ns office:version=\"1.3\">" +
         "<office:automatic-styles><style:style style:name=\"T1\" style:family=\"text\"><style:text-properties fo:font-weight=\"bold\"/></style:style></office:automatic-styles>" +
         "<office:body><office:text>" +
         "<text:p text:style-name=\"Standard\">Привіт,  <text:s/>світе <text:span text:style-name=\"T1\">жирно</text:span></text:p>" +
         "<text:list text:style-name=\"L1\"><text:list-item><text:p>Перший пункт</text:p></text:list-item><text:list-item><text:p>Другий</text:p></text:list-item></text:list>" +
         "<table:table><table:table-column/><table:table-row><table:table-cell><text:p>У клітинці</text:p></table:table-cell></table:table-row></table:table>" +
-        linked +
+        linked + field +
         "</office:text></office:body></office:document-content>"
     private val styles = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-styles $ns><office:styles>" +
         "<style:style style:name=\"Standard\" style:family=\"paragraph\"/><style:style style:name=\"Heading_20_2\" style:family=\"paragraph\"><style:text-properties fo:font-weight=\"bold\"/></style:style>" +
@@ -56,13 +57,13 @@ class OdtEditTest {
 
     @Test fun paragraphsAreRead() {
         val edit = OdtEdit.open(ByteArrayInputStream(odt()))
-        assertEquals(listOf("Привіт,  світе жирно", "Перший пункт", "Другий", "У клітинці", "Див. сайт"), edit.paragraphs.map { it.text })
-        assertEquals(listOf(true, true, true, true, false), edit.paragraphs.map { it.editable })
+        assertEquals(listOf("Привіт,  світе жирно", "Перший пункт", "Другий", "У клітинці", "Див. сайт", "Сьогодні 18.11.2026, нотатка1."), edit.paragraphs.map { it.text })
+        assertEquals(listOf(true, true, true, true, true), edit.paragraphs.map { it.editable })
         val p = edit.paragraphs[0]
         assertTrue(edit.look(p, p.marks.last()).bold)
         assertFalse(edit.look(p, p.marks.first()).bold)
         val shown = edit.shown(edit.paragraphs)
-        assertEquals(listOf(null, "1.", "2.", null, null), shown.map { it.marker })
+        assertEquals(listOf(null, "1.", "2.", null, null, null), shown.map { it.marker })
         assertTrue(shown[3].inTable)
     }
 
@@ -92,13 +93,13 @@ class OdtEditTest {
         assertTrue(c, c.contains("</text:list-item><text:list-item><text:h text:style-name=\"Heading_20_2\" text:outline-level=\"2\">пункт</text:h>"))
         // Read again: the same text, with the change
         val again = OdtEdit.open(ByteArrayInputStream(saved))
-        assertEquals(listOf("Привіт,  світ жирно", "Перший ", "пункт", "Другий", "У клітинці", "Див. сайт"), again.paragraphs.map { it.text })
+        assertEquals(listOf("Привіт,  світ жирно", "Перший ", "пункт", "Другий", "У клітинці", "Див. сайт", "Сьогодні 18.11.2026, нотатка1."), again.paragraphs.map { it.text })
         val q = again.paragraphs[0]
         assertTrue(again.look(q, q.marks[0]).italic)
         assertFalse(again.look(q, q.marks[8]).italic)
         assertTrue(again.look(q, q.marks.last()).bold)
         assertEquals(Kind.H2, again.kind(again.paragraphs[2]))
-        assertEquals(listOf(null, "1.", "2.", "3.", null, null), again.shown(again.paragraphs).map { it.marker })
+        assertEquals(listOf(null, "1.", "2.", "3.", null, null, null), again.shown(again.paragraphs).map { it.marker })
         // And as the viewer shows it
         val doc = edit.readBack(ByteArrayInputStream(saved))
         val first = doc.blocks.filterIsInstance<Block.Para>().first().inlines.filterIsInstance<Inline.Text>().joinToString("") { it.text }
@@ -146,5 +147,52 @@ class OdtEditTest {
         assertTrue(again.look(q, q.marks.last()).bold)
         assertEquals(Kind.H2, again.kind(again.paragraphs[0]))
         assertEquals(edit.paragraphs.size + 1, again.paragraphs.size)
+    }
+
+    private fun saved(edit: OdtEdit, list: List<ua.hramota.doc.docx.edit.EditPara>, bytes: ByteArray = odt()): ByteArray =
+        ByteArrayOutputStream().also { edit.save(list, ByteArrayInputStream(bytes), it) }.toByteArray()
+
+    @Test fun linksFieldsAndNotesStayWhole() {
+        val edit = OdtEdit.open(ByteArrayInputStream(odt()))
+        val list = edit.paragraphs.toMutableList()
+        val l = list[4]
+        list[4] = edit.retyped(l, "Дивіться " + l.text.removePrefix("Див. "), List(9) { l.marks[0] } + l.marks.drop(5), 0, 5)
+        val f = list[5]
+        // Typed right after the field: plain text, the field written once
+        val at = f.text.indexOf(",")
+        list[5] = edit.retyped(f, f.text.substring(0, at) + " (середа)" + f.text.substring(at), f.marks.subList(0, at) + List(9) { f.marks[at - 1] } + f.marks.subList(at, f.marks.size), at, at)
+        val c = part(saved(edit, list), "content.xml")!!
+        assertTrue(c, c.contains("<text:p text:style-name=\"Standard\">Дивіться <text:a xlink:href=\"https://example.org\">сайт</text:a></text:p>"))
+        assertTrue(c, c.contains("Сьогодні <text:date text:date-value=\"2026-11-18\">18.11.2026</text:date> (середа), нотатка<text:note text:id=\"n1\""))
+        assertEquals(1, Regex("<text:date ").findAll(c).count())
+    }
+
+    @Test fun listsAreTurnedOnAndOff() {
+        val bytes = odt()
+        val edit = OdtEdit.open(ByteArrayInputStream(bytes))
+        val list = edit.paragraphs.toMutableList()
+        list[0] = edit.withList(list[0], ua.hramota.doc.docx.edit.ListKind.BULLET, null)
+        list[2] = edit.withList(list[2], null, list[1])
+        assertEquals(listOf("•", "1.", null), edit.shown(list).take(3).map { it.marker })
+        val out = saved(edit, list, bytes)
+        val again = OdtEdit.open(ByteArrayInputStream(out))
+        assertEquals(listOf("•", "1.", null, null, null, null), again.shown(again.paragraphs).map { it.marker })
+        assertTrue(part(out, "content.xml")!!.contains("<text:list-style style:name=\"HrB\">"))
+    }
+
+    @Test fun commentsAreAddedAndTakenAway() {
+        val bytes = odt()
+        val edit = OdtEdit.open(ByteArrayInputStream(bytes))
+        assertTrue(edit.canComment)
+        val list = edit.paragraphs.toMutableList()
+        list[0] = edit.comment(list[0], 0, 6, "Марія", "Перевірити")
+        val out = saved(edit, list, bytes)
+        val again = OdtEdit.open(ByteArrayInputStream(out))
+        val c = again.comments().single()
+        assertEquals("Марія", c.author); assertEquals("Перевірити", c.text)
+        assertEquals("Привіт", again.commentPlace(again.paragraphs, c.id)!!.second)
+        val gone = again.uncomment(again.paragraphs, c.id)!!
+        val out2 = ByteArrayOutputStream().also { again.save(gone, ByteArrayInputStream(out), it) }.toByteArray()
+        assertTrue(OdtEdit.open(ByteArrayInputStream(out2)).comments().isEmpty())
     }
 }
