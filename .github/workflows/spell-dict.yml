@@ -43,6 +43,9 @@ jobs:
           curl -fsSL -o keep/README-hunspell.md "https://raw.githubusercontent.com/brown-uk/dict_uk/$TAG/distr/hunspell/README.md" || echo "no hunspell README at $TAG"
           curl -fsSL -o keep/README-dict_uk.md "https://raw.githubusercontent.com/brown-uk/dict_uk/$TAG/README.md" || true
           grep -n -i -E "licen|ліценз|GPL|MPL|LGPL|Creative|NC|комерц" keep/README-*.md || true
+          # The Hunspell files are under MPL 1.1 (their README): its text goes with them
+          curl -fsSL -o keep/LICENSE-MPL-1.1.txt "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MPL-1.1.txt"
+          head -3 keep/LICENSE-MPL-1.1.txt
       - name: Expand
         run: |
           sudo apt-get install -y -q hunspell hunspell-tools > /dev/null
