@@ -1,0 +1,84 @@
+name: Spelling dictionary
+
+# Builds the extra words for the spelling check (tools/spell/build_spell.py) from the latest release of
+# the Ukrainian Hunspell dictionary of dict_uk (brown-uk). Started by a push to spell-dict-build; the
+# result goes to the spell-dict branch, nowhere else. Nothing here touches the app or its releases.
+on:
+  push:
+    branches: [spell-dict-build]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spell-dict
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dl keep
+          gh api repos/brown-uk/dict_uk/releases/latest > dl/release.json
+          TAG=$(jq -r .tag_name dl/release.json)
+          URL=$(jq -r '.assets[] | select(.name | test("hunspell"; "i")) | select(.name | endswith(".zip")) | .browser_download_url' dl/release.json | head -1)
+          echo "tag $TAG"; echo "url $URL"
+          jq -r '.assets[].name' dl/release.json
+          test -n "$URL"
+          curl -fsSL -o dl/hunspell.zip "$URL"
+          sha256sum dl/hunspell.zip | tee keep/SOURCE-sha256.txt
+          echo "{\"project\": \"https://github.com/brown-uk/dict_uk\", \"tag\": \"$TAG\", \"file\": \"$URL\", \"sha256\": \"$(sha256sum dl/hunspell.zip | cut -d' ' -f1)\"}" > keep/SOURCE.json
+          (cd dl && unzip -o -q hunspell.zip && find . -maxdepth 3 -type f | head -30)
+      - name: Expand
+        run: |
+          sudo apt-get install -y -q hunspell hunspell-tools > /dev/null
+          DIC=$(find dl -name '*.dic' | head -1); AFF=${DIC%.dic}.aff
+          echo "$DIC $AFF"; head -3 "$DIC"; grep -E '^(SET|FLAG|COMPLEX|NEEDAFFIX|FORBIDDENWORD|KEEPCASE|ONLYINCOMPOUND|COMPOUND)' "$AFF" || true
+          mkdir -p dict && cp "$DIC" dict/uk_UA.dic && cp "$AFF" dict/uk_UA.aff
+          # Licenses and readme beside the dictionary go with it
+          find dl -iname '*readme*' -o -iname '*license*' -o -iname '*copying*' | while read f; do cp "$f" keep/; done
+          unmunch dict/uk_UA.dic dict/uk_UA.aff 2>/dev/null | iconv -f "$(grep -m1 '^SET' dict/uk_UA.aff | cut -d' ' -f2 | tr -d '\r')" -t UTF-8 > all.txt
+          sort -u all.txt -o all.txt
+          wc -l all.txt
+          # Every form unmunch made is checked by Hunspell itself: those it calls wrong are left out
+          hunspell -d dict/uk_UA -i utf-8 -G < all.txt | sort -u > words.txt
+          wc -l words.txt
+      - name: Pack
+        run: |
+          python3 tools/spell/build_spell.py words.txt app/src/main/assets/voice/stress.bin keep/uk_extra.bin
+          sha256sum keep/uk_extra.bin > keep/SHA256SUMS
+          ls -la keep
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: spell-dict
+          path: keep
+
+  # Puts the result on its branch. Runs no project or third-party code.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: spell-dict
+          path: out
+      - name: Push
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git init -q && git checkout -q -b spell-dict && git add . && git -c user.name=ci -c user.email=ci@localhost commit -qm "spelling dictionary, run ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}" spell-dict
