@@ -58,6 +58,8 @@ class NoteState(meta: NoteMeta, blocks: List<NBlock>) {
         private set
     /** Grows with each change: saving follows it. */
     var version by mutableIntStateOf(0)
+    /** Changes not made by the person (handwriting read): they do not make the note newer. */
+    var quiet = 0
         private set
     private val undoStack = ArrayList<List<NBlock>>()
     private val redoStack = ArrayList<List<NBlock>>()
@@ -99,7 +101,7 @@ class NoteState(meta: NoteMeta, blocks: List<NBlock>) {
     }
 
     /** A change that is not undone (the text read from handwriting). */
-    fun quietly(list: List<NBlock>) { blocks = list; version++ }
+    fun quietly(list: List<NBlock>) { blocks = list; version++; quiet++ }
 
     fun undo() {
         if (undoStack.isEmpty()) return
@@ -273,7 +275,7 @@ class NoteState(meta: NoteMeta, blocks: List<NBlock>) {
     fun recognized(id: Long, strokesHash: Int, text: String) {
         val i = indexOf(id); if (i < 0) return
         val b = blocks[i] as? NBlock.Ink ?: return
-        if (b.strokes.hashCode() != strokesHash) return
+        if (Notebook.inkHash(b.strokes) != strokesHash) return
         quietly(blocks.toMutableList().also { it[i] = b.copy(recognized = text, readFor = strokesHash) })
     }
 

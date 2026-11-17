@@ -111,7 +111,7 @@ object InkText {
             for ((k, way) in ways.withIndex()) {
                 val s = InkTuning.upright(strokes, way.second)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                val got = InkTuning.plain(if (way.first == "r2") runCatching { Rukopys.read(context, s) }.getOrDefault("") else readFirst(context, s, cyrillic))
+                val got = InkTuning.plain(if (way.first == "r2") try { Rukopys.read(context, s) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { "" } else readFirst(context, s, cyrillic))
                 wrong[k] += InkTuning.distance(got, want)
             }
             progress(++done, samples.size)

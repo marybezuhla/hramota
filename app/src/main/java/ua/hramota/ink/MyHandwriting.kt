@@ -54,6 +54,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import ua.hramota.R
@@ -62,6 +64,68 @@ import ua.hramota.ui.AppTheme
 import ua.hramota.ui.TopBar
 import ua.hramota.ui.applySecureScreen
 import java.io.File
+
+/**
+ * Work on one's samples that outlives the screen (turning the phone, say): changes to the file one at a
+ * time and in the order asked, and fitting recognition, which stops when the storage locks.
+ */
+object InkWork {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val files = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val fits = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+
+    /** The sentences written so far (null until read). */
+    val written = kotlinx.coroutines.flow.MutableStateFlow<List<String>?>(null)
+
+    sealed interface Fit {
+        data object Idle : Fit
+        data class Running(val done: Int, val all: Int, val stopping: Boolean = false) : Fit
+        data class Done(val tuning: InkTuning.Tuning) : Fit
+        data object Failed : Fit
+    }
+    val fit = kotlinx.coroutines.flow.MutableStateFlow<Fit>(Fit.Idle)
+    private var fitJob: kotlinx.coroutines.Job? = null
+
+    /** Does [change] to the file after every change asked before it; then the count is read again. False on failure. */
+    fun change(context: Context, change: (Context) -> Unit, onDone: (Boolean) -> Unit = {}) {
+        val app = context.applicationContext
+        files.launch {
+            val ok = runCatching { change(app) }.isSuccess
+            written.value = runCatching { MyInk.samples(app).map { it.optString("text") } }.getOrDefault(written.value ?: emptyList())
+            withContext(Dispatchers.Main) { onDone(ok) }
+        }
+    }
+
+    fun load(context: Context) = change(context, {})
+
+    /** Starts fitting unless a fit is still under way (one stopped is waited for). */
+    @Synchronized fun startFit(context: Context) {
+        if (fitJob?.isCompleted == false) return
+        val app = context.applicationContext
+        fit.value = Fit.Running(0, 0)
+        fitJob = fits.launch {
+            // The samples are not read on while the storage is locked
+            val job = coroutineContext[kotlinx.coroutines.Job]!!
+            val watch = if (Vault.isOn(app)) fits.launch { Vault.unlocked.first { !it }; job.cancel() } else null
+            val result = try {
+                Fit.Done(InkText.fit(app) { d, a -> fit.value = Fit.Running(d, a) })
+            } catch (e: kotlinx.coroutines.CancellationException) { Fit.Idle } catch (e: Throwable) { Fit.Failed }
+            watch?.cancel()
+            fit.value = result
+        }
+    }
+
+    /** Stops the fit; a new one can start once it has stopped. */
+    @Synchronized fun stopFit() {
+        val j = fitJob ?: return
+        if (j.isCompleted) return
+        (fit.value as? Fit.Running)?.let { fit.value = it.copy(stopping = true) }
+        j.cancel()
+    }
+
+    /** The result has been seen. */
+    fun seen() { if (fit.value is Fit.Done || fit.value is Fit.Failed) fit.value = Fit.Idle }
+}
 
 /**
  * Samples of the person's own handwriting, kept only on this phone (sealed with locked storage on).
@@ -134,8 +198,8 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prompts = remember { MyInk.prompts(context) }
-    var written by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(Unit) { written = withContext(Dispatchers.IO) { runCatching { MyInk.samples(context).map { it.optString("text") } }.getOrDefault(emptyList()) } }
+    val written by InkWork.written.collectAsState()
+    LaunchedEffect(Unit) { InkWork.load(context) }
     var skipped by rememberSaveable { mutableIntStateOf(0) }
     val index = written?.let { w -> MyInk.next(prompts, w).let { if (it < 0) -1 else (it + skipped) % prompts.size } } ?: -1
     val ink = remember { InkState() }
@@ -143,13 +207,12 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var about by rememberSaveable { mutableStateOf(false) }
-    // Fitting recognition to the samples: how far along, then what came of it
-    var fitting by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var fitJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var fitted by remember { mutableStateOf<InkTuning.Tuning?>(null) }
-    fitted?.let { t ->
+    // Fitting recognition to the samples: how far along, then what came of it (kept while the phone turns)
+    val fit by InkWork.fit.collectAsState()
+    if (fit is InkWork.Fit.Failed) LaunchedEffect(fit) { Toast.makeText(context, context.getString(R.string.ink_fit_failed), Toast.LENGTH_SHORT).show(); InkWork.seen() }
+    (fit as? InkWork.Fit.Done)?.tuning?.let { t ->
         AlertDialog(
-            onDismissRequest = { fitted = null },
+            onDismissRequest = { InkWork.seen() },
             title = { Text(stringResource(R.string.ink_fit_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -163,26 +226,28 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
                     if (!Rukopys.available(context)) Text(stringResource(R.string.ink_fit_no_r2), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            confirmButton = { TextButton(onClick = { fitted = null }) { Text(stringResource(R.string.ok)) } },
+            confirmButton = { TextButton(onClick = { InkWork.seen() }) { Text(stringResource(R.string.ok)) } },
         )
     }
-    fitting?.let { (done, all) ->
+    (fit as? InkWork.Fit.Running)?.let { r ->
         AlertDialog(onDismissRequest = {}, title = { Text(stringResource(R.string.ink_fit_title)) },
-            text = { Text(stringResource(R.string.ink_fit_progress, done, all)) }, confirmButton = {},
-            dismissButton = { TextButton(onClick = { fitJob?.cancel(); fitting = null }) { Text(stringResource(R.string.cancel)) } })
+            text = { Text(stringResource(R.string.ink_fit_progress, r.done, r.all)) }, confirmButton = {},
+            dismissButton = { TextButton(onClick = { InkWork.stopFit() }, enabled = !r.stopping) { Text(stringResource(R.string.cancel)) } })
     }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/jsonl")) { uri ->
         if (uri != null) scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openOutputStream(uri, "wt")!!.use { out -> MyInk.samples(context).forEach { out.write((it.toString() + "\n").toByteArray()) } } }.isSuccess
+            val r = withContext(Dispatchers.IO) {
+                ua.hramota.EditSaving.writeNew(context, uri) { out -> MyInk.samples(context).forEach { out.write((it.toString() + "\n").toByteArray()) } }
             }
-            Toast.makeText(context, context.getString(if (ok) R.string.ink_saved else R.string.ink_save_failed), Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(when (r) {
+                ua.hramota.EditSaving.New.DONE -> R.string.ink_saved; ua.hramota.EditSaving.New.EXISTS -> R.string.create_exists; else -> R.string.ink_save_failed
+            }), Toast.LENGTH_SHORT).show()
         }
     }
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
         text = { Text(stringResource(R.string.ink_delete_confirm)) },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; MyInk.deleteAll(context); written = emptyList(); ink.clear() }) { Text(stringResource(R.string.ink_delete_go), color = MaterialTheme.colorScheme.error) } },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; InkWork.stopFit(); InkWork.change(context, { MyInk.deleteAll(it) }); ink.clear() }) { Text(stringResource(R.string.ink_delete_go), color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) } },
     )
     if (about) AlertDialog(
@@ -198,18 +263,12 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
                 IconButton(onClick = { menu = true }) { Icon(androidx.compose.material.icons.Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more)) }
                 DropdownMenu(menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_undo_last)) }, enabled = !written.isNullOrEmpty(), onClick = {
-                        menu = false; MyInk.dropLast(context); written = written?.dropLast(1)
-                    })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.ink_fit)) }, enabled = (written?.size ?: 0) >= 3 && fitting == null, onClick = {
                         menu = false
-                        fitting = 0 to 0
-                        fitJob = scope.launch {
-                            val t = try {
-                                withContext(Dispatchers.Default) { InkText.fit(context) { d, a -> scope.launch { if (fitting != null) fitting = d to a } } }
-                            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { null }
-                            fitting = null
-                            if (t == null) Toast.makeText(context, context.getString(R.string.ink_fit_failed), Toast.LENGTH_SHORT).show() else fitted = t
-                        }
+                        InkWork.change(context, { MyInk.dropLast(it) }) { ok -> if (!ok) Toast.makeText(context, context.getString(R.string.ink_save_failed), Toast.LENGTH_SHORT).show() }
+                    })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.ink_fit)) }, enabled = (written?.size ?: 0) >= 3 && fit !is InkWork.Fit.Running, onClick = {
+                        menu = false
+                        InkWork.startFit(context)
                     })
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_export)) }, enabled = !written.isNullOrEmpty(), onClick = { menu = false; export.launch("my-handwriting.jsonl") })
                     DropdownMenuItem(text = { Text(stringResource(R.string.ink_delete_all), color = MaterialTheme.colorScheme.error) }, enabled = !written.isNullOrEmpty(), onClick = { menu = false; confirmDelete = true })
@@ -242,11 +301,7 @@ fun MyHandwritingScreen(onBack: () -> Unit) {
                 val p = prompt ?: return@Button
                 val sample = InkJson.sample(p, ink.strokes.toList(), size.first, size.second)
                 ink.clear(); skipped = 0
-                scope.launch {
-                    val ok = withContext(Dispatchers.IO) { runCatching { MyInk.add(context, sample) }.isSuccess }
-                    if (ok) written = (written ?: emptyList()) + p
-                    else Toast.makeText(context, context.getString(R.string.ink_save_failed), Toast.LENGTH_SHORT).show()
-                }
+                InkWork.change(context, { MyInk.add(it, sample) }) { ok -> if (!ok) Toast.makeText(context, context.getString(R.string.ink_save_failed), Toast.LENGTH_SHORT).show() }
             }, enabled = !ink.isEmpty && prompt != null, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.ink_next)) }
         }
     }

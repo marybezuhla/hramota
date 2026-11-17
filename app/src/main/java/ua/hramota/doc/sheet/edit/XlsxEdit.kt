@@ -63,6 +63,8 @@ class XlsxEdit private constructor(
     private val extra: Map<String, String> = emptyMap(),
     /** Every part's name in the package (a new part gets a name not used). */
     private val entryNames: Set<String> = emptySet(),
+    /** Shared strings with their own formatting inside (bold words, phonetic guides): not moved as plain text. */
+    private val richStrings: Set<Int> = emptySet(),
 ) {
     /**
      * The workbook's parts as they stand after rows were inserted or deleted (the file's own until
@@ -196,6 +198,9 @@ class XlsxEdit private constructor(
         inputs[cell]?.let { return if (it is Input.Formula) null else it }
         val raw = sheets.getOrNull(cell.sheet)?.cell(cell.row, cell.col) ?: return Input.Clear
         if (raw.f != null) return null
+        // Dates written as text (t="d") and text formatted inside would not be the same once moved
+        if (raw.t == "d" || raw.t == "s" && raw.v?.trim()?.toIntOrNull()?.let { it in richStrings } == true) return null
+        if (raw.t == "inlineStr" && raw.elem.let { e -> Regex("<(?:[A-Za-z_][\\w.-]*:)?(?:r|rPh)\\b").containsMatchIn(sheets[cell.sheet].xml.substring(e.start, e.end)) }) return null
         return when (val v = rawValue(raw)) {
             is Value.Num -> Input.Number(v.v)
             is Value.Text -> Input.Text(v.v)
@@ -445,6 +450,10 @@ class XlsxEdit private constructor(
         if (notes.keys.any { it.sheet == sheet }) return RowRefusal.SHEET
         // A filter's columns are counted from its first one: not renumbered here
         if (cols && Regex("<(?:[A-Za-z_][\\w.-]*:)?filterColumn\\b").containsMatchIn(x)) return RowRefusal.SHEET
+        // Tables elsewhere whose column formulas refer to this sheet: those formulas are not rewritten here
+        val named = listOf(target.name.lowercase() + "!", "'" + target.name.lowercase().replace("'", "''") + "'!")
+        val tableFormula = Regex("<(?:[A-Za-z_][\\w.-]*:)?(?:calculatedColumnFormula|totalsRowFormula)\\b[^>]*>([^<]*)<")
+        if (extra.filterKeys { it.lowercase().startsWith("xl/tables/") }.values.any { t -> tableFormula.findAll(t).any { m -> XmlScan.unescape(m.groupValues[1]).lowercase().let { f -> named.any { it in f } } } }) return RowRefusal.SHEET
         if (n > 0) {
             val last = if (cols) maxOf(target.cells.keys.maxOfOrNull { (it and 0x3FFF).toInt() } ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.col } ?: -1)
                 else maxOf(target.rows.lastEntry()?.key ?: -1, inputs.keys.filter { it.sheet == sheet }.maxOfOrNull { it.row } ?: -1)
@@ -662,12 +671,15 @@ class XlsxEdit private constructor(
                 "pane" -> e.attrs["topLeftCell"]?.let { t -> tag = setAttr(tag, "topLeftCell", movedAreas(t, move) ?: if (move.cols) columnName(move.at) + (Regex("[0-9]+").find(t)?.value ?: "1") else (Regex("[A-Za-z]+").find(t)?.value ?: "A") + (move.at + 1)) }
                 "brk" -> if (parent == (if (move.cols) "colBreaks" else "rowBreaks")) {
                     val id = e.attrs["id"]?.toIntOrNull()
-                    if (id != null && id > 0) tag = setAttr(tag, "id", ((move.row(id - 1) ?: return null) + 1).toString())
+                    // A break is after row (column) [id], so it stays with the one below it: index [id] counted from 0
+                    if (id != null && id > 0) tag = setAttr(tag, "id", (move.row(id) ?: return null).toString())
                 }
                 // Columns' widths and looks follow their columns
                 "col" -> if (parent == "cols" && move.cols) {
                     val mn = e.attrs["min"]?.toIntOrNull(); val mx = e.attrs["max"]?.toIntOrNull()
                     if (mn != null && mx != null && mn >= 1 && mx >= mn) {
+                        // Pushed past the last column: gone (else it would overlap the one kept there)
+                        if (move.n > 0 && mn - 1 >= move.at && mn - 1 + move.n >= Formula.MAX_COLUMNS) return null
                         val (a, b) = move.range(mn - 1, mx - 1) ?: return null
                         tag = setAttr(setAttr(tag, "min", (a + 1).toString()), "max", (b + 1).toString())
                     }
@@ -764,6 +776,7 @@ class XlsxEdit private constructor(
         }
         // Notes: into the sheet's comments part and old-style drawing (made when the sheet has none)
         val added = LinkedHashSet<String>()
+        idmapsTaken.clear()
         if (notesNow.isNotEmpty()) {
             val names = HashSet(entryNames)
             fun free(pattern: (Int) -> String): Pair<String, Int> { var n = 1; while (pattern(n).lowercase() in names.map { it.lowercase() }) n++; return pattern(n).also { names += it } to n }
@@ -793,10 +806,13 @@ class XlsxEdit private constructor(
                 val vmlExisting = target(SheetComments.VML_TYPE)
                 if (vmlExisting != null) {
                     val had = parts[vmlExisting] ?: extra[vmlExisting] ?: throw IOException("Drawing not readable")
-                    parts[vmlExisting] = SheetComments.vml(had, mine, 1, firstFreeShape())
+                    parts[vmlExisting] = SheetComments.vml(had, mine, 1, firstShape(had, 1))
                 } else {
+                    // A drawing's block holds 1023 boxes
+                    if (mine.size > 1000) throw IOException("Too many notes on one sheet")
                     val (path, _) = free { "xl/drawings/vmlDrawing$it.vml" }
-                    parts[path] = SheetComments.vml(null, mine, freeIdmap(), firstFreeShape())
+                    val idmap = freeIdmap()
+                    parts[path] = SheetComments.vml(null, mine, idmap, firstShape(null, idmap))
                     added += path
                     val (text, id) = SheetComments.addRel(rels, SheetComments.VML_TYPE, "../drawings/" + path.substringAfterLast('/'))
                     rels = text
@@ -899,7 +915,7 @@ class XlsxEdit private constructor(
         if (restyled != null && input == null && value == null && !unshared) {
             if (raw == null) return "<${p}c r=\"$ref\"$s/>"
             val tag = x.substring(raw.elem.start, raw.elem.openEnd)
-            val newTag = (if (Regex("\\ss=\"[^\"]*\"").containsMatchIn(tag)) tag.replace(Regex("\\ss=\"[^\"]*\""), s) else tag.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1$s"))
+            val newTag = (if (Regex("\\ss=(?:\"[^\"]*\"|'[^']*')").containsMatchIn(tag)) tag.replace(Regex("\\ss=(?:\"[^\"]*\"|'[^']*')"), s) else tag.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1$s"))
                 .let { if (raw.elem.attrs["r"] != null) it else it.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1 r=\"$ref\"") }
             return newTag + x.substring(raw.elem.openEnd, raw.elem.end)
         }
@@ -965,23 +981,44 @@ class XlsxEdit private constructor(
 
     /** Old-style drawings of the whole workbook (their numbers must not be used twice). */
     private fun drawings() = extra.filterKeys { it.lowercase().endsWith(".vml") }.values
-    private fun freeIdmap(): Int = (drawings().flatMap { d -> Regex("data=\"([0-9, ]+)\"").findAll(d).flatMap { m -> m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() } } }.maxOrNull() ?: 0) + 1
-    private var shapesUsed = 0
-    private fun firstFreeShape(): Int {
-        val most = drawings().flatMap { d -> Regex("_x0000_s(\\d+)").findAll(d).mapNotNull { it.groupValues[1].toIntOrNull() } }.maxOrNull() ?: 0
-        // (and those given to notes earlier in this save)
-        shapesUsed = maxOf(shapesUsed, most, freeIdmap() * 1024) + 1
-        val first = shapesUsed
-        shapesUsed += 2000
-        return first
+    private fun idmaps(d: String) = Regex("data=\"([0-9, ]+)\"").findAll(d).flatMap { m -> m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() } }.toList()
+    private fun shapes(d: String) = Regex("_x0000_s(\\d+)").findAll(d).mapNotNull { it.groupValues[1].toIntOrNull() }.toList()
+    /** Drawing numbers given to new drawings in this save. */
+    private val idmapsTaken = HashSet<Int>()
+    /** A drawing number no drawing of the workbook has (nor one made earlier in this save). */
+    private fun freeIdmap(): Int = ((drawings().flatMap(::idmaps) + idmapsTaken).maxOrNull() ?: 0).plus(1).also { idmapsTaken += it }
+    /** The first number for new boxes: in a new drawing, the first of its own block of 1024; in one the sheet has, after its own. */
+    private fun firstShape(existing: String?, idmap: Int): Int {
+        if (existing == null) return idmap * 1024 + 1
+        val own = shapes(existing).maxOrNull()
+        return if (own != null) own + 1 else (idmaps(existing).firstOrNull() ?: idmap) * 1024 + 1
     }
 
     /** Whether notes can be added to [sheet]: not where Excel keeps its newer, threaded comments (they would part from them). */
     fun canNote(sheet: Int): Boolean {
         val sh = layout.sheets.getOrNull(sheet) ?: return false
-        val rels = extra[sh.path.substringBeforeLast('/') + "/_rels/" + sh.path.substringAfterLast('/') + ".rels"] ?: return typesXml != null
-        return typesXml != null && !rels.contains("threadedComment") && !rels.contains("/legacyDrawingHF") &&
-            !(Regex("<(?:[A-Za-z_][\\w.-]*:)?legacyDrawing\\b").containsMatchIn(sh.xml) && !rels.contains("/comments\""))
+        if (typesXml == null) return false
+        val dir = sh.path.substringBeforeLast('/')
+        val relsPath = dir + "/_rels/" + sh.path.substringAfterLast('/') + ".rels"
+        val rels = extra[relsPath]
+        if (rels == null) {
+            // A relationships part that was not read (a name differing in case, say) is never written over
+            return entryNames.none { it.equals(relsPath, ignoreCase = true) } && !Regex("<(?:[A-Za-z_][\\w.-]*:)?legacyDrawing\\b").containsMatchIn(sh.xml)
+        }
+        if (rels.contains("threadedComment") || rels.contains("/legacyDrawingHF")) return false
+        if (Regex("<(?:[A-Za-z_][\\w.-]*:)?legacyDrawing\\b").containsMatchIn(sh.xml) && !rels.contains("/comments\"")) return false
+        // The comments part and drawing the sheet links to must have been read, as Hramota can write them
+        val root = XmlScan.children(rels, 0, rels.length).firstOrNull() ?: return false
+        for (r in XmlScan.children(rels, root)) {
+            val type = r.attrs["Type"] ?: continue
+            if (type != SheetComments.COMMENTS_TYPE && type != SheetComments.VML_TYPE) continue
+            if (r.attrs["TargetMode"] == "External") return false
+            val t = r.attrs["Target"] ?: return false
+            val path = if (t.startsWith("/")) t.removePrefix("/") else java.io.File(dir, t).normalize().path.replace('\\', '/')
+            val text = extra[path] ?: return false
+            if (type == SheetComments.VML_TYPE && Regex("^\\s*<\\?xml[^>]*encoding=\"(?!utf-8)[^\"]+\"", RegexOption.IGNORE_CASE).containsMatchIn(text)) return false
+        }
+        return true
     }
 
     private fun copy(source: InputStream, out: OutputStream, parts: Map<String, String>, dropped: Set<String>, added: Set<String> = emptySet()) {
@@ -1001,8 +1038,9 @@ class XlsxEdit private constructor(
                 if (replaced != null) {
                     // A part changed here must still be the one opened
                     val was = readAll(zip, MAX_PART)
-                    val opened = digests[name]
-                    if (opened != null && !MessageDigest.getInstance("SHA-256").digest(was).contentEquals(opened)) throw IOException("$name changed meanwhile")
+                    // (and was read at all: a part never read is not written over)
+                    val opened = digests[name] ?: throw IOException("$name was not read")
+                    if (!MessageDigest.getInstance("SHA-256").digest(was).contentEquals(opened)) throw IOException("$name changed meanwhile")
                     z.write(replaced.toByteArray(Charsets.UTF_8))
                 } else {
                     val buf = ByteArray(64 * 1024)
@@ -1060,7 +1098,7 @@ class XlsxEdit private constructor(
                     val lower = name.lowercase()
                     if (ROW_BLOCKERS.any { lower.startsWith(it) }) blockers = true
                     if (lower.endsWith(".xml") && (lower.startsWith("xl/worksheets/") || lower.startsWith("xl/tables/") || lower == "xl/workbook.xml" || lower == "xl/sharedstrings.xml") ||
-                        lower.startsWith("xl/worksheets/_rels/") && lower.endsWith(".rels") ||
+                        lower.startsWith("xl/worksheets/") && "/_rels/" in lower && lower.endsWith(".rels") ||
                         lower == "xl/_rels/workbook.xml.rels" || lower == "[content_types].xml" ||
                         lower.startsWith("xl/") && lower.endsWith(".vml") || lower.startsWith("xl/") && "comment" in lower && lower.endsWith(".xml") || lower.startsWith("xl/") && lower.endsWith("styles.xml") && lower.count { it == '/' } == 1) {
                         val b = readAll(zip, MAX_PART)
@@ -1085,7 +1123,9 @@ class XlsxEdit private constructor(
                 }
             }
             val calcChain = relTargets.values.firstOrNull { it.second.endsWith("/calcChain") }?.first
-            val strings = text(raw.keys.firstOrNull { it.equals("xl/sharedStrings.xml", ignoreCase = true) } ?: "")?.let(::sharedStrings) ?: emptyList()
+            val sstText = text(raw.keys.firstOrNull { it.equals("xl/sharedStrings.xml", ignoreCase = true) } ?: "")
+            val strings = sstText?.let(::sharedStrings) ?: emptyList()
+            val richStrings = sstText?.let(::richStrings) ?: emptySet()
             val wbRoot = XmlScan.children(wb, 0, wb.length).first { it.local == "workbook" }
             val sheetsElem = XmlScan.children(wb, wbRoot).firstOrNull { it.local == "sheets" } ?: throw IOException("No sheets")
             val parts = ArrayList<SheetPart>()
@@ -1117,9 +1157,9 @@ class XlsxEdit private constructor(
             if (parts.isEmpty()) throw IOException("No sheets")
             val stylesPath = relTargets.values.firstOrNull { it.second.endsWith("/styles") }?.first
             // Sheets' relationships, comments and old-style drawings, kept as text for notes added here
-            val extra = raw.keys.filter { k -> val lower = k.lowercase(); lower.endsWith(".rels") && lower.startsWith("xl/worksheets/_rels/") || lower.endsWith(".vml") || "comment" in lower && !lower.startsWith("xl/worksheets/") }
+            val extra = raw.keys.filter { k -> val lower = k.lowercase(); lower.endsWith(".rels") && lower.startsWith("xl/worksheets/") && "/_rels/" in lower || lower.startsWith("xl/tables/") && lower.endsWith(".xml") || lower.endsWith(".vml") || "comment" in lower && !lower.startsWith("xl/worksheets/") }
                 .associateWith { k -> if (k.lowercase().endsWith(".vml")) String(raw.getValue(k), Charsets.UTF_8) else text(k)!! }
-            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, stylesPath, stylesPath?.let(::text), blockers, extra, names)
+            return XlsxEdit(Layout(parts, wb, emptyMap(), emptySet(), false), strings, rels, types, digests, calcChain, stylesPath, stylesPath?.let(::text), blockers, extra, names, richStrings)
         }
 
         private fun sheet(name: String, path: String, visible: Boolean, xml: String, budget: Int): SheetPart {
@@ -1196,6 +1236,13 @@ class XlsxEdit private constructor(
             val a = cell(parts[0]) ?: return null
             val b = if (parts.size > 1) cell(parts[1]) ?: return null else a
             return intArrayOf(minOf(a.first, b.first), minOf(a.second, b.second), maxOf(a.first, b.first), maxOf(a.second, b.second))
+        }
+
+        /** The shared strings with formatted pieces or phonetic guides in them. */
+        private fun richStrings(x: String): Set<Int> {
+            val root = XmlScan.children(x, 0, x.length).firstOrNull { it.local == "sst" } ?: return emptySet()
+            return XmlScan.children(x, root).filter { it.local == "si" }.withIndex()
+                .filter { (_, si) -> XmlScan.children(x, si).any { it.local == "r" || it.local == "rPh" } }.mapTo(HashSet()) { it.index }
         }
 
         private fun sharedStrings(x: String): List<String> {

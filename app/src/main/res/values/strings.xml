@@ -764,4 +764,12 @@
     <string name="sheet_chart_n">Chart %1$d</string>
     <string name="slide_comments">Comments</string>
     <string name="slide_comments_n">Comments (%1$d)</string>
+    <string name="spell_check">Spelling</string>
+    <string name="spell_checking">Checking spelling…</string>
+    <string name="spell_none">No spelling mistakes found</string>
+    <string name="spell_close">Close spelling check</string>
+    <string name="spell_no_suggestions">No suggestions</string>
+    <string name="spell_skip">Skip</string>
+    <string name="spell_skip_all">Skip everywhere</string>
+    <string name="spell_add">Add to my words</string>
 </resources>

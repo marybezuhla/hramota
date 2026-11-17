@@ -34,4 +34,30 @@ class RevisionsTest {
         assertFalse(x.contains("<w:tr>"))
         assertEquals(4, Revisions.count(doc))
     }
+
+    @Test fun aDeletedParagraphMarkJoinsTheNextParagraph() {
+        val d = "<w:document $w><w:body>" +
+            "<w:p><w:pPr><w:rPr><w:del w:id=\"1\" w:author=\"О\"/></w:rPr></w:pPr><w:r><w:t>Перший </w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:t>другий</w:t></w:r></w:p></w:body></w:document>"
+        val a = Revisions.resolve(d, accept = true)
+        // One paragraph, with the next one's properties
+        assertEquals(1, Regex("<w:p>").findAll(a).count())
+        assertTrue(a, a.contains("<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:t>Перший </w:t></w:r><w:r><w:t>другий</w:t></w:r></w:p>"))
+        // Rejected: both paragraphs stay, without the mark
+        val r = Revisions.resolve(d, accept = false)
+        assertEquals(2, Regex("<w:p>").findAll(r).count())
+        assertFalse(r.contains("w:del"))
+    }
+
+    @Test fun rejectingPutsBackTheOldSectionAndTable() {
+        val d = "<w:document $w><w:body><w:tbl><w:tblPr><w:tblW w:w=\"5000\"/><w:tblPrChange w:id=\"1\"><w:tblPr><w:tblW w:w=\"2000\"/></w:tblPr></w:tblPrChange></w:tblPr>" +
+            "<w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>" +
+            "<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rId1\"/><w:pgSz w:w=\"16838\" w:h=\"11906\" w:orient=\"landscape\"/>" +
+            "<w:sectPrChange w:id=\"2\"><w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr></w:sectPrChange></w:sectPr></w:body></w:document>"
+        val r = Revisions.resolve(d, accept = false)
+        assertTrue(r, r.contains("<w:tblPr><w:tblW w:w=\"2000\"/></w:tblPr>"))
+        assertTrue(r, r.contains("<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rId1\"/><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>"))
+        val a = Revisions.resolve(d, accept = true)
+        assertTrue(a, a.contains("w:orient=\"landscape\"") && !a.contains("Change"))
+    }
 }

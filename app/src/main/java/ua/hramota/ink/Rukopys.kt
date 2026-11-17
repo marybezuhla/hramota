@@ -43,14 +43,15 @@ object Rukopys {
         return s[lo] + (s[hi] - s[lo]) * (at - lo)
     }
 
-    /** Points every [step] along a stroke's path (its first point kept; a short stroke is one point). */
-    internal fun resample(xs: FloatArray, ys: FloatArray, step: Float): List<Pair<Float, Float>> {
+    /** Points every [step] along a stroke's path (its first point kept; a short stroke is one point); at most [budget]. */
+    internal fun resample(xs: FloatArray, ys: FloatArray, step: Float, budget: Int = Int.MAX_VALUE): List<Pair<Float, Float>> {
         if (xs.size < 2) return listOf(xs[0] to ys[0])
         val at = FloatArray(xs.size)
         for (i in 1 until xs.size) at[i] = at[i - 1] + sqrt((xs[i] - xs[i - 1]) * (xs[i] - xs[i - 1]) + (ys[i] - ys[i - 1]) * (ys[i] - ys[i - 1]))
         val total = at.last()
         if (total < step) return listOf(xs[0] to ys[0])
-        val n = (total / step).toInt() + 1
+        // (a flat line makes the writing's height tiny and the path very long: only what is kept is made)
+        val n = minOf((total / step).toDouble() + 1, budget.toDouble()).toInt().coerceAtLeast(1)
         val out = ArrayList<Pair<Float, Float>>(n)
         var j = 0
         for (k in 0 until n) {
@@ -65,7 +66,7 @@ object Rukopys {
 
     /** The model's input for one line: [n, 3] (dx, dy, pen put down), row after row. */
     fun features(strokes: List<List<Pair<Float, Float>>>): FloatArray {
-        val ss = strokes.filter { it.isNotEmpty() }
+        val ss = strokes.map { s -> s.filter { it.first.isFinite() && it.second.isFinite() } }.filter { it.isNotEmpty() }
         if (ss.isEmpty()) return FloatArray(0)
         val allY = ss.flatMap { s -> s.map { it.second } }.toFloatArray()
         val h = max(percentile(allY, 95f) - percentile(allY, 5f), 1e-3f)
@@ -76,7 +77,7 @@ object Rukopys {
         for (s in ss) {
             val xs = FloatArray(s.size) { (s[it].first - x0) / h }
             val ys = FloatArray(s.size) { (s[it].second - ym) / h }
-            for ((i, p) in resample(xs, ys, STEP).withIndex()) {
+            for ((i, p) in resample(xs, ys, STEP, MAX_POINTS - out.size / 3).withIndex()) {
                 val dx = if (first) 0f else p.first - px
                 val dy = if (first) 0f else p.second - py
                 out += dx.coerceIn(-CLIP, CLIP); out += dy.coerceIn(-CLIP, CLIP); out += if (i == 0) 1f else 0f
@@ -119,7 +120,14 @@ object Rukopys {
     /** A line in pieces short enough to read (under [MAX_POINTS] once resampled), cut between strokes at the widest gaps. */
     internal fun pieces(line: List<Stroke>): List<List<Stroke>> {
         val f = features(line.map { st -> st.points.map { it.x to it.y } })
-        if (f.size / 3 < MAX_POINTS * 9 / 10 || line.size < 2) return listOf(line)
+        if (f.size / 3 < MAX_POINTS * 9 / 10) return listOf(line)
+        if (line.size < 2) {
+            // One very long stroke (writing without lifting the pen): cut in two halves of its points
+            val pts = line[0].points
+            if (pts.size < 4) return listOf(line)
+            val mid = pts.size / 2
+            return pieces(listOf(line[0].copy(points = pts.subList(0, mid + 1)))) + pieces(listOf(line[0].copy(points = pts.subList(mid, pts.size))))
+        }
         // The gap after each stroke: how far right the next one starts beyond everything before
         var right = Float.NEGATIVE_INFINITY
         val gaps = ArrayList<Pair<Int, Float>>()

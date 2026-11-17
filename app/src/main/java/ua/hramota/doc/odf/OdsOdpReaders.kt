@@ -19,11 +19,15 @@ import java.io.InputStream
  * fills, bold and italic, alignment, column widths, row heights and merged cells.
  */
 object OdsReader {
+    /** Most cells gone through in a workbook (repeats included). */
+    private const val MAX_WORK = 20_000_000L
     fun read(input: InputStream): Workbook {
         val pkg = OdfPackage.read(input)
         val styles = pkg.styleMap
         val doc = pkg.content.child("document-content")?.child("body")?.child("spreadsheet") ?: throw IOException("No spreadsheet")
         val budget = intArrayOf(SheetLimits.MAX_CELLS)
+        // Cells gone through in all (repeated rows of repeated cells add up fast)
+        val work = longArrayOf(0)
         val looks = ArrayList<CellStyle>().apply { add(CellStyle.DEFAULT) }
         val lookIndex = HashMap<String, Int>()
         fun look(name: String?, numeric: Boolean): Int {
@@ -95,10 +99,14 @@ object OdsReader {
                             at += crep
                         }
                         for (k in 0 until times) {
-                            // The sheet's cells all used: the rest is not read
-                            if (budget[0] <= 0) break
+                            // The sheet's cells all used (or its empty coloured ones, or the work allowed): the rest is not read
+                            if (budget[0] <= 0 || work[0] > MAX_WORK) break
                             if (h != null && (rep <= 1000)) b.height(row + k, h)
                             for (cl in line) {
+                                if (work[0] > MAX_WORK) break
+                                // Empty coloured cells past what is shown are not gone through at all
+                                if (cl.text == null && b.cut) continue
+                                work[0] += cl.crep
                                 for (j in 0 until cl.crep) if (cl.text != null) b.text(row + k, cl.at + j, cl.look, cl.text) else b.blank(row + k, cl.at + j, cl.look)
                                 if ((cl.across > 1 || cl.down > 1) && b.merges.size < 10_000) b.merges += Merge(row + k, cl.at, row + k + cl.down - 1, cl.at + cl.across - 1)
                             }

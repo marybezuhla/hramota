@@ -329,6 +329,10 @@ internal class Pack(
      * (PowerPoint's older kind, made with its link when the slide has none), by [author] in the list of
      * comment authors (made with its link when the presentation has none). No date is written.
      */
+    /** Whether [slidePath] has PowerPoint's newer comments (kept in other parts): old-style ones are not added beside them. */
+    fun hasModernComments(slidePath: String): Boolean = rels(relsOf(slidePath).let { r -> texts.keys.firstOrNull { it.equals(r, ignoreCase = true) } ?: r })
+        .any { it.type.endsWith("/comments") && it.type != "$R/comments" || "moderncomment" in it.type.lowercase() || it.type.endsWith("/authors") }
+
     fun linkComments(items: List<Pair<String, List<String>>>, author: String, changed: MutableMap<String, String>, created: MutableSet<String>) {
         val ctName = texts.keys.firstOrNull { it.equals("[Content_Types].xml", ignoreCase = true) } ?: throw IOException("No content types")
         val ctAdd = StringBuilder()
@@ -348,6 +352,7 @@ internal class Pack(
         val authorId = mine?.attrs?.get("id")?.toLongOrNull() ?: ((list.mapNotNull { it.attrs["id"]?.toLongOrNull() }.maxOrNull() ?: -1) + 1)
         var lastIdx = mine?.attrs?.get("lastIdx")?.toLongOrNull() ?: 0L
         for ((slide, words) in items) {
+            if (hasModernComments(slide)) throw IOException("Newer comments on the slide")
             val dir = slide.substringBeforeLast('/')
             val relsName = changed.keys.firstOrNull { it.equals(relsOf(slide), ignoreCase = true) } ?: texts.keys.firstOrNull { it.equals(relsOf(slide), ignoreCase = true) } ?: relsOf(slide)
             val path = rels(relsName, changed[relsName] ?: texts[relsName]).firstOrNull { it.type == "$R/comments" && it.target != null }?.target

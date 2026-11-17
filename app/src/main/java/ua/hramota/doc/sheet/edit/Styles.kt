@@ -9,6 +9,13 @@ import java.io.IOException
  * the lists (fonts, fills, number formats, cell formats), so every look already used stays as it was.
  */
 internal object Styles {
+    /** Whether a font's [tag] (b or i) is on: there, and not said to be off (val="0", "false", "off"). */
+    private fun on(font: String, tag: String): Boolean {
+        val m = Regex("<(?:[A-Za-z_][\\w.-]*:)?$tag(?=[\\s/>])([^>]*)>").find(font) ?: return false
+        val v = Regex("\\sval=(?:\"([^\"]*)\"|'([^']*)')").find(m.groupValues[1])?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } } ?: return true
+        return v.lowercase() !in setOf("0", "false", "off")
+    }
+
     /** Number formats Excel knows by number without writing them out. */
     private val BUILT_IN = mapOf(
         "General" to 0, "0" to 1, "0.00" to 2, "#,##0" to 3, "#,##0.00" to 4, "0%" to 9, "0.00%" to 10, "0.00E+00" to 11,
@@ -41,9 +48,9 @@ internal object Styles {
             if (look.bold != null || look.italic != null) {
                 val f = fonts.getOrNull(a["fontId"]?.toIntOrNull() ?: 0)
                 val inner = if (f == null || f.empty) "" else styles.substring(f.openEnd, f.closeStart)
-                var body = inner.replace(Regex("<(?:[A-Za-z_][\\w.-]*:)?[bi](?:\\s+val=\"[^\"]*\")?\\s*/>"), "")
-                val add = (if ((look.italic ?: Regex("<(?:\\w+:)?i\\b").containsMatchIn(inner)) == true) "<${p}i/>" else "")
-                val bold = if ((look.bold ?: Regex("<(?:\\w+:)?b\\b").containsMatchIn(inner)) == true) "<${p}b/>" else ""
+                var body = inner.replace(Regex("<(?:[A-Za-z_][\\w.-]*:)?[bi](?:\\s+val=(?:\"[^\"]*\"|'[^']*'))?\\s*/>"), "")
+                val add = (if ((look.italic ?: on(inner, "i")) == true) "<${p}i/>" else "")
+                val bold = if ((look.bold ?: on(inner, "b")) == true) "<${p}b/>" else ""
                 // In schema order b, i come first
                 body = bold + add + body
                 val font = "<${p}font>$body</${p}font>"
@@ -70,7 +77,7 @@ internal object Styles {
             look.align?.let { side ->
                 val al = Regex("<(?:[A-Za-z_][\\w.-]*:)?alignment\\b[^>]*?/>|<(?:[A-Za-z_][\\w.-]*:)?alignment\\b[^>]*>.*?</(?:[A-Za-z_][\\w.-]*:)?alignment>", RegexOption.DOT_MATCHES_ALL).find(children)
                 val tag = if (al == null) "<${p}alignment horizontal=\"$side\"/>"
-                    else if (Regex("\\shorizontal=\"[^\"]*\"").containsMatchIn(al.value)) al.value.replace(Regex("\\shorizontal=\"[^\"]*\""), " horizontal=\"$side\"")
+                    else if (Regex("\\shorizontal=(?:\"[^\"]*\"|'[^']*')").containsMatchIn(al.value)) al.value.replace(Regex("\\shorizontal=(?:\"[^\"]*\"|'[^']*')"), " horizontal=\"$side\"")
                     else al.value.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1 horizontal=\"$side\"")
                 children = if (al == null) tag + children else children.replaceRange(al.range, tag)
                 a["applyAlignment"] = "1"
@@ -91,7 +98,7 @@ internal object Styles {
                 val count = XmlScan.children(styles, e).count { it.local == item } + items.size
                 val open = styles.substring(e.start, e.openEnd).let { t ->
                     val tt = if (e.selfClosing) t.removeSuffix("/>").trimEnd() + ">" else t
-                    if (Regex("\\scount=\"[^\"]*\"").containsMatchIn(tt)) tt.replace(Regex("\\scount=\"[^\"]*\""), " count=\"$count\"") else tt.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1 count=\"$count\"")
+                    if (Regex("\\scount=(?:\"[^\"]*\"|'[^']*')").containsMatchIn(tt)) tt.replace(Regex("\\scount=(?:\"[^\"]*\"|'[^']*')"), " count=\"$count\"") else tt.replaceFirst(Regex("^<([^\\s>/]+)"), "<$1 count=\"$count\"")
                 }
                 val body = if (e.selfClosing) "" else styles.substring(e.openEnd, e.closeStart)
                 edits += Triple(e.start, e.end, open + body + items.joinToString("") + "</${e.name}>")

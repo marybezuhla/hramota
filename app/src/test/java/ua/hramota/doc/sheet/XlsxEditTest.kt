@@ -146,6 +146,9 @@ class XlsxEditTest {
         assertEquals("[1]Дані!A5", Formula.moveRows("[1]Дані!A5", false, "Дані", m))
         assertEquals("SUM(7:8)+SUM(A:A)", Formula.moveRows("SUM(5:6)+SUM(A:A)", true, "Дані", m))
         assertNull(Formula.moveRows("SUM(Аркуш1:Аркуш3!A1)", true, "Дані", m))
+        // Short sheet names at once look like columns: refused all the same, for rows and for columns
+        assertNull(Formula.moveRows("SUM(Jan:Mar!B5)", true, "Дані", m))
+        assertNull(Formula.moveRows("SUM(Jan:Mar!B5)", true, "Дані", Formula.RowMove(1, 1, cols = true)))
         val d = Formula.RowMove(4, -2)
         assertEquals("#REF!+A5+SUM(A4:A4)+SUM(#REF!)", Formula.moveRows("A5+A7+SUM(A4:A6)+SUM(A5:A6)", true, "Дані", d))
     }

@@ -79,6 +79,8 @@ object Vault {
         if (key == null) return true
         key = null
         Shelf.CoverMemory.clear()
+        // What was read from sealed small files is not kept in memory either
+        ua.hramota.ink.InkTuning.reset(); ua.hramota.text.Spelling.reset()
         openState.value = false
         Library.get(context).reload()
         Recents.get(context).reload()
@@ -95,6 +97,7 @@ object Vault {
     fun reset(context: Context) {
         key = null
         Shelf.CoverMemory.clear()
+        ua.hramota.ink.InkTuning.reset(); ua.hramota.text.Spelling.reset()
         for (dir in listOf(context.filesDir, Library.coversDir(context), Library.copiesDir(context), File(context.filesDir, "rescue"), Library.notebookDir(context), Library.notebookMediaDir(context), ShelfSearch.dir(context)))
             dir.listFiles().orEmpty().filter { it.name.endsWith(SUFFIX) }.forEach { it.delete() }
         context.getSharedPreferences("recents", Context.MODE_PRIVATE).edit().clear().commit()

@@ -170,6 +170,9 @@ class PptxEdit private constructor(
     /** Comments added here to [slide] (numbers as [addSlide] gives them). */
     @Synchronized fun addedComments(slide: Int): List<String> = comments[slide].orEmpty()
 
+    /** Whether comments can be added to [slide]: not beside PowerPoint's newer comments. */
+    fun canComment(slide: Int): Boolean = slide >= slideCount || !pack.hasModernComments(pack.shown[slide].path)
+
     /** Sets the comments added here to [slide] (an empty list: none). Written when saving. */
     @Synchronized fun setComments(slide: Int, list: List<String>) {
         if (list.isEmpty()) comments.remove(slide) else comments[slide] = list.map { it.take(MAX_COMMENT) }.take(200)

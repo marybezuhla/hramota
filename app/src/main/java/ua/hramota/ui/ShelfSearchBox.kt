@@ -58,7 +58,7 @@ fun ShelfSearchBox(shelf: List<LibraryEntry>, modifier: Modifier, onOpen: (Libra
         val todo = withContext(Dispatchers.IO) { ShelfSearch.clean(context, shelf.map { it.id }.toSet()); ShelfSearch.missing(context, shelf) }
         for ((i, e) in todo.withIndex()) {
             preparing = i to todo.size
-            withContext(Dispatchers.IO) { ShelfSearch.index(context, e) }
+            try { withContext(Dispatchers.IO) { ShelfSearch.index(context, e) } } catch (x: kotlinx.coroutines.CancellationException) { throw x } catch (x: Throwable) {}
             ready++
         }
         preparing = null
@@ -66,7 +66,7 @@ fun ShelfSearchBox(shelf: List<LibraryEntry>, modifier: Modifier, onOpen: (Libra
     val hits by produceState(emptyList<ShelfSearch.Hit>(), query, ready, shelf) {
         if (query.trim().length < 2) { value = emptyList(); return@produceState }
         delay(250)
-        value = withContext(Dispatchers.IO) { ShelfSearch.search(context, shelf, query.trim()) }
+        value = try { withContext(Dispatchers.IO) { ShelfSearch.search(context, shelf, query.trim()) } } catch (x: kotlinx.coroutines.CancellationException) { throw x } catch (x: Throwable) { emptyList() }
     }
     Column(modifier) {
         OutlinedTextField(query, { query = it.replace("\n", "").take(200) }, singleLine = true,

@@ -22,6 +22,8 @@ object InkTuning {
         // Locked: the fitted choice is not used (nor kept in memory) until unlocked
         if (Vault.locked(context)) { cached = null; return Tuning() }
         cached?.let { return it }
+        // Locked meanwhile (a sealed file not readable): nothing is kept, read again when unlocked
+        if (Vault.key() == null && java.io.File(context.filesDir, FILE + Vault.SUFFIX).exists()) return Tuning()
         return (try { Vault.readSmall(context, FILE)?.let { b ->
             val o = JSONObject(String(b))
             val sc = o.optJSONObject("scores")

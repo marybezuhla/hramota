@@ -45,10 +45,33 @@ object Revisions {
     }
 
     /** One part with its changes accepted or rejected. */
-    fun resolve(x: String, accept: Boolean): String {
+    @Synchronized fun resolve(x: String, accept: Boolean): String {
         val sb = StringBuilder(x.length)
+        work = 0L; budget = 40L * x.length + 1_000_000
         walk(x, 0, x.length, sb, accept, 0)
         return sb.toString()
+    }
+
+    // How much has been scanned: a deeply nested part is refused rather than scanned for minutes
+    private var work = 0L
+    private var budget = 0L
+
+    /** Elements whose old properties are kept in a change inside them (rejecting puts them back). */
+    private val WITH_OLD = setOf("rPr", "pPr", "sectPr", "tblPr", "trPr", "tcPr", "tblGrid")
+
+    /** Whether paragraph [p]'s mark goes: deleted when accepting, added when rejecting (it joins the next paragraph). */
+    private fun markGoes(x: String, p: Elem, accept: Boolean): Boolean {
+        val ppr = XmlScan.children(x, p).firstOrNull { it.local == "pPr" } ?: return false
+        val rpr = XmlScan.children(x, ppr).firstOrNull { it.local == "rPr" } ?: return false
+        return XmlScan.children(x, rpr).any { it.local == (if (accept) "del" else "ins") || it.local == (if (accept) "moveFrom" else "moveTo") }
+    }
+
+    /** A paragraph's content after its properties, resolved. */
+    private fun content(x: String, p: Elem, accept: Boolean, depth: Int): String {
+        val b = StringBuilder()
+        val ppr = XmlScan.children(x, p).firstOrNull { it.local == "pPr" }
+        walk(x, ppr?.end ?: p.openEnd, p.closeStart, b, accept, depth + 1)
+        return b.toString()
     }
 
     private val PROP_CHANGES = setOf("rPrChange", "pPrChange", "sectPrChange", "tblPrChange", "trPrChange", "tcPrChange", "tblGridChange", "numberingChange")
@@ -58,8 +81,37 @@ object Revisions {
 
     private fun walk(x: String, from: Int, to: Int, sb: StringBuilder, accept: Boolean, depth: Int) {
         if (depth > 200) throw IOException("Too deep")
+        work += to - from
+        if (work > budget) throw IOException("Too complex")
         var pos = from
+        // A paragraph whose mark goes: its words wait to be put at the start of the next paragraph
+        var waiting: Pair<Elem, String>? = null
+        fun flush() {
+            val (p, words) = waiting ?: return
+            waiting = null
+            // No paragraph follows here: it stays a paragraph of its own
+            sb.append(x, p.start, p.openEnd)
+            XmlScan.children(x, p).firstOrNull { it.local == "pPr" }?.let { walk(x, it.start, it.end, sb, accept, depth + 1) }
+            sb.append(words).append("</").append(p.name).append('>')
+        }
         for (e in XmlScan.children(x, from, to)) {
+            if (e.local == "p" && !e.empty && !e.selfClosing) {
+                if (markGoes(x, e, accept)) {
+                    sb.append(x, pos, e.start); pos = e.end
+                    val words = content(x, e, accept, depth)
+                    waiting = waiting?.let { it.first to it.second + words } ?: (e to words)
+                    continue
+                }
+                waiting?.let { (_, words) ->
+                    waiting = null
+                    sb.append(x, pos, e.start); pos = e.end
+                    val ppr = XmlScan.children(x, e).firstOrNull { it.local == "pPr" }
+                    sb.append(x, e.start, e.openEnd)
+                    if (ppr != null) walk(x, ppr.start, ppr.end, sb, accept, depth + 1)
+                    sb.append(words).append(content(x, e, accept, depth)).append(x, e.closeStart, e.end)
+                    continue
+                }
+            } else if (waiting != null && e.local != "bookmarkStart" && e.local != "bookmarkEnd") flush()
             sb.append(x, pos, e.start)
             pos = e.end
             val kept = if (accept) setOf("ins", "moveTo") else setOf("del", "moveFrom")
@@ -76,15 +128,21 @@ object Revisions {
                 e.local in kept -> walk(x, e.openEnd, e.closeStart, sb, accept, depth + 1)
                 e.local in dropped -> keepPaired(x, e, sb, depth)
                 e.local in PROP_CHANGES -> {}
-                // Formatting changed: rejecting puts the old formatting back
-                !accept && (e.local == "rPr" || e.local == "pPr") && hasChange(x, e) -> {
-                    val change = XmlScan.children(x, e).first { it.local == (if (e.local == "rPr") "rPrChange" else "pPrChange") }
+                // Formatting changed (of text, a paragraph, a section, a table, its rows and cells): rejecting puts the old back
+                !accept && e.local in WITH_OLD && hasChange(x, e) -> {
+                    val change = XmlScan.children(x, e).first { it.local == e.local + "Change" }
                     val old = XmlScan.children(x, change).firstOrNull { it.local == e.local }
-                    if (e.local == "pPr") {
-                        // The paragraph's own run marks (rPr inside pPr) and section stay; the rest is the old one
+                    // What the old copy never holds stays: a paragraph's run marks and section, a section's headers and footers
+                    val stays = when (e.local) { "pPr" -> setOf("rPr", "sectPr"); "sectPr" -> setOf("headerReference", "footerReference"); else -> emptySet() }
+                    if (e.local == "sectPr") {
+                        sb.append(x, e.start, e.openEnd)
+                        for (k in XmlScan.children(x, e)) if (k.local in stays) walk(x, k.start, k.end, sb, accept, depth + 1)
+                        if (old != null && !old.empty) walk(x, old.openEnd, old.closeStart, sb, accept, depth + 1)
+                        sb.append("</").append(e.name).append('>')
+                    } else if (stays.isNotEmpty()) {
                         sb.append(x, e.start, e.openEnd)
                         if (old != null && !old.empty) walk(x, old.openEnd, old.closeStart, sb, accept, depth + 1)
-                        for (k in XmlScan.children(x, e)) if (k.local == "rPr" || k.local == "sectPr") walk(x, k.start, k.end, sb, accept, depth + 1)
+                        for (k in XmlScan.children(x, e)) if (k.local in stays) walk(x, k.start, k.end, sb, accept, depth + 1)
                         sb.append("</").append(e.name).append('>')
                     } else {
                         if (old == null || old.empty) sb.append("<").append(e.name).append("/>")
@@ -97,6 +155,7 @@ object Revisions {
                 else -> { sb.append(x, e.start, e.openEnd); walk(x, e.openEnd, e.closeStart, sb, accept, depth + 1); sb.append(x, e.closeStart, e.end) }
             }
         }
+        flush()
         sb.append(x, pos, to)
     }
 
@@ -112,7 +171,7 @@ object Revisions {
     private fun rowMarked(x: String, tr: Elem, mark: String): Boolean =
         XmlScan.children(x, tr).firstOrNull { it.local == "trPr" }?.let { p -> XmlScan.children(x, p).any { it.local == mark } } == true
 
-    private fun hasChange(x: String, e: Elem) = XmlScan.children(x, e).any { it.local == "rPrChange" || it.local == "pPrChange" }
+    private fun hasChange(x: String, e: Elem) = XmlScan.children(x, e).any { it.local == e.local + "Change" }
 
     /** An element with another local name (its prefix, attributes and text kept). */
     private fun rename(x: String, e: Elem, local: String): String {

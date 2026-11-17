@@ -196,7 +196,7 @@ object DocxReader {
                 if (first) { blocks += Block.Para(styles.defaultPara, styles.defaultRun, listOf(Inline.Text("————————", styles.defaultRun)), null, null); first = false }
                 // The note's own number in front of its first paragraph, small as in Word
                 val p0 = out.indexOfFirst { it is Block.Para }
-                if (p0 >= 0) { val para = out[p0] as Block.Para; out[p0] = para.copy(inlines = listOf(Inline.Text(label + " ", styles.defaultRun.copy(vertAlign = "superscript"))) + para.inlines.filterNot { it is Inline.Text && it.text.isBlank() && para.inlines.indexOf(it) == 0 }) }
+                if (p0 >= 0) { val para = out[p0] as Block.Para; out[p0] = para.copy(inlines = listOf(Inline.Text(label + " ", styles.defaultRun.copy(vertAlign = "superscript"))) + para.inlines.filterIndexed { i, it -> !(i == 0 && it is Inline.Text && it.text.isBlank()) }) }
                 blocks += out
             }
         }

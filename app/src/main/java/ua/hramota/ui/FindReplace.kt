@@ -72,7 +72,11 @@ fun findAll(texts: List<Pair<Long, String>>, query: String, matchCase: Boolean):
 private const val MAX_FOUND = 10_000
 
 class FindState {
-    var open by mutableStateOf(false)
+    private var isOpen by mutableStateOf(false)
+    /** Whether the bar is shown; closed, it opens again for finding. */
+    var open: Boolean
+        get() = isOpen
+        set(v) { isOpen = v; if (!v) spelling = false }
     var query by mutableStateOf("")
     var replacement by mutableStateOf("")
     var matchCase by mutableStateOf(false)
@@ -81,10 +85,14 @@ class FindState {
     var shown by mutableStateOf(false)
     /** After a replacement: carry on from here (the slot and the position just after the new text). */
     var after: Pair<Long, Int>? = null
+    /** The spelling check shown instead of finding. */
+    var spelling by mutableStateOf(false)
+    val spell = SpellState()
 }
 
 @Composable
 fun FindBar(state: FindState, target: Replaceable, version: Any?, enabled: Boolean, onDone: (Int) -> Unit) {
+    if (state.spelling) { SpellBar(state.spell, target, version, enabled) { state.spelling = false; state.open = false }; return }
     // Found off the main thread (a big sheet has many cells); nothing while there is nothing to find
     val result by produceState(emptyList<Found>() to emptyMap<Long, Int>(), version, state.query, state.matchCase) {
         value = if (state.query.isEmpty()) emptyList<Found>() to emptyMap() else withContext(Dispatchers.Default) {
@@ -146,7 +154,11 @@ fun FindBar(state: FindState, target: Replaceable, version: Any?, enabled: Boole
                 }, enabled = enabled && current >= 0) { Text(stringResource(R.string.replace_one)) }
                 TextButton(onClick = { onDone(target.replaceAll(found, state.replacement)) }, enabled = enabled && found.isNotEmpty()) { Text(stringResource(R.string.replace_all)) }
             }
-            FilterChip(state.matchCase, onClick = { state.matchCase = !state.matchCase; state.current = 0; state.shown = false }, label = { Text(stringResource(R.string.find_match_case)) })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(state.matchCase, onClick = { state.matchCase = !state.matchCase; state.current = 0; state.shown = false }, label = { Text(stringResource(R.string.find_match_case)) })
+                // Ukrainian spelling, word by word (in the same place: the editor's text is searched the same way)
+                FilterChip(false, onClick = { state.spell.shown = false; state.spelling = true }, label = { Text(stringResource(R.string.spell_check)) })
+            }
         }
     }
 }

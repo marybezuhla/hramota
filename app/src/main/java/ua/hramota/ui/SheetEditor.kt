@@ -629,9 +629,11 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
         }
     }
     noting?.let { (sheet, row, col) ->
-        CommentDialog(state.ownNote(sheet, row, col).orEmpty(), onDismiss = { noting = null }) { text ->
+        // A note from the file starts as it is (changing it replaces it, as Excel does)
+        CommentDialog((state.ownNote(sheet, row, col) ?: state.note(sheet, row, col)).orEmpty(), onDismiss = { noting = null }) { text ->
             noting = null
-            state.setNote(sheet, row, col, text)
+            // Unchanged words: the file's note stays as it was
+            if (state.ownNote(sheet, row, col) != null || text != state.note(sheet, row, col)?.trim()) state.setNote(sheet, row, col, text)
         }
     }
     replacedCount?.let { n ->

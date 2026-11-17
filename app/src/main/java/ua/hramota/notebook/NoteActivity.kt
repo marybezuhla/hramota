@@ -84,6 +84,8 @@ class NoteActivity : ComponentActivity() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         val saving = Mutex()
         var saved = -1
+        /** The person's own changes in the version last written ([NoteState.version] less [NoteState.quiet]). */
+        var savedOwn = 0
         /** The newest version written: an older one waiting for the lock is not written after it. */
         @Volatile var written = -1
         /** A locked note asks for the phone's lock again after Hramota was left. */
@@ -168,7 +170,10 @@ class NoteActivity : ComponentActivity() {
 private fun saveNow(held: NoteActivity.Holder, context: Context) {
     val s = held.state ?: return
     if (s.version == held.saved) return
-    val note = s.note().let { it.copy(meta = it.meta.copy(updated = System.currentTimeMillis())) }
+    // Only the person's own changes make the note newer (not its handwriting being read)
+    val own = s.version - s.quiet
+    val note = s.note().let { if (own != held.savedOwn) it.copy(meta = it.meta.copy(updated = System.currentTimeMillis())) else it }
+    held.savedOwn = own
     val v = s.version
     val app = context.applicationContext
     held.scope.launch(Dispatchers.IO + NonCancellable) {
@@ -191,9 +196,10 @@ internal fun NoteScreen(state: NoteState, held: NoteActivity.Holder, onBack: () 
     LaunchedEffect(state.version) {
         delay(1500)
         for (b in state.blocks.filterIsInstance<NBlock.Ink>()) {
-            val hash = b.strokes.hashCode()
+            // Of the strokes as kept in the file, so the note read once is not read again when opened
+            val hash = withContext(Dispatchers.Default) { Notebook.inkHash(b.strokes) }
             if (b.readFor == hash) continue
-            val text = if (b.strokes.isEmpty()) "" else try { withContext(Dispatchers.Default) { InkText.read(context, b.strokes) } } catch (e: Throwable) { continue }
+            val text = if (b.strokes.isEmpty()) "" else try { withContext(Dispatchers.Default) { InkText.read(context, b.strokes) } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { continue }
             state.recognized(b.id, hash, text)
         }
     }
@@ -219,8 +225,10 @@ internal fun NoteScreen(state: NoteState, held: NoteActivity.Holder, onBack: () 
         if (uri == null) return@rememberLauncherForActivityResult
         val kind = saveKind
         held.scope.launch {
-            val ok = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri, "wt")!!.use { export(kind, it) } }.isSuccess }
-            Toast.makeText(context, context.getString(if (ok) R.string.scan_saved else R.string.scan_save_failed), Toast.LENGTH_SHORT).show()
+            val r = withContext(Dispatchers.IO) { ua.hramota.EditSaving.writeNew(context, uri) { export(kind, it) } }
+            Toast.makeText(context, context.getString(when (r) {
+                ua.hramota.EditSaving.New.DONE -> R.string.scan_saved; ua.hramota.EditSaving.New.EXISTS -> R.string.create_exists; else -> R.string.scan_save_failed
+            }), Toast.LENGTH_SHORT).show()
         }
     }
     fun share(kind: String) {

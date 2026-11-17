@@ -169,6 +169,24 @@ object EditSaving {
         } catch (e: Exception) { false }
     }
 
+    enum class New { DONE, EXISTS, FAILED }
+
+    /**
+     * Writes into a file the person has just chosen to make: never into one that already has something in it
+     * (some pickers let an existing file be chosen), and a write that fails leaves nothing behind.
+     */
+    fun writeNew(context: Context, uri: Uri, write: (java.io.OutputStream) -> Unit): New {
+        if (!isEmpty(context, uri)) return New.EXISTS
+        return try {
+            context.contentResolver.openOutputStream(uri, "wt")!!.use { write(it) }
+            New.DONE
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) { removeIfEmpty(context, uri); throw e }
+            remove(context, uri)
+            New.FAILED
+        }
+    }
+
     /** Removes a file the picker made (only ever called for one that was empty when chosen). */
     fun remove(context: Context, uri: Uri) {
         try { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) } catch (_: Exception) {}

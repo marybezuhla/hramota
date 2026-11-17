@@ -339,9 +339,9 @@ class Library private constructor(private val context: Context) {
         // The notebook and one's handwriting samples follow the storage too
         ua.hramota.notebook.Notebook.convert(context, key, seal)
         ShelfSearch.convert(context, key, seal)
-        // One's handwriting samples and saved signature
+        // One's handwriting samples, saved signature and own words for spelling
         synchronized(ua.hramota.ink.MyInk) {
-            for (f in context.filesDir.listFiles().orEmpty()) if (f.name.removeSuffix(Vault.SUFFIX) in setOf(ua.hramota.ink.MyInk.FILE, ua.hramota.ink.InkTuning.FILE, ua.hramota.ui.SavedSignature.FILE)) Shelf.convertFile(key, f, seal)
+            for (f in context.filesDir.listFiles().orEmpty()) if (f.name.removeSuffix(Vault.SUFFIX) in setOf(ua.hramota.ink.MyInk.FILE, ua.hramota.ink.InkTuning.FILE, ua.hramota.ui.SavedSignature.FILE, ua.hramota.text.Spelling.OWN)) Shelf.convertFile(key, f, seal)
         }
         ua.hramota.notebook.Notebook.reload(context)
         // Earlier versions kept by unfinished saves follow the storage too

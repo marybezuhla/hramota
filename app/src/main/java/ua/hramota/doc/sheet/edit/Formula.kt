@@ -283,6 +283,7 @@ object Formula {
 
     private const val MAX_ROWS = 1_048_576
     private const val MAX_COLS = 16_384
+    const val MAX_COLUMNS = MAX_COLS
     private val CELL_RANGE = Regex("(\\$?)([A-Za-z]{1,3})(\\$?)([0-9]{1,7})(?::(\\$?)([A-Za-z]{1,3})(\\$?)([0-9]{1,7}))?")
     private val ROW_RANGE = Regex("(\\$?)([0-9]{1,7}):(\\$?)([0-9]{1,7})")
     private val COL_RANGE = Regex("(\\$?)([A-Za-z]{1,3}):(\\$?)([A-Za-z]{1,3})")
@@ -344,6 +345,8 @@ object Formula {
             val applies = if (named != null) !ext && named.equals(target, ignoreCase = true) else own && !ext
             if (prevOk) {
                 val cr = COL_RANGE.matchAt(text, i)?.takeIf { colIndex(it.groupValues[2].uppercase()) < MAX_COLS && colIndex(it.groupValues[4].uppercase()) < MAX_COLS }
+                // Short sheet names several at once (Jan:Mar!B5), not columns: refused as other sheet ranges are
+                if (cr != null && i + cr.value.length < text.length && text[i + cr.value.length] == '!') return null
                 if (cr != null && boundaryAfter(i + cr.value.length)) {
                     // Whole columns (A:C): moved when columns move
                     if (!applies || !move.cols) b.append(cr.value) else {

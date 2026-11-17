@@ -296,20 +296,17 @@ internal fun ScanScreen(held: ScanActivity.Holder, onBack: () -> Unit) {
         }
     }
     val lang = remember { java.util.Locale.getDefault().toLanguageTag() }
-    fun saved(ok: Boolean) = Toast.makeText(context, context.getString(if (ok) R.string.scan_saved else R.string.scan_save_failed), Toast.LENGTH_SHORT).show()
+    fun saved(r: ua.hramota.EditSaving.New) = Toast.makeText(context, context.getString(when (r) {
+        ua.hramota.EditSaving.New.DONE -> R.string.scan_saved; ua.hramota.EditSaving.New.EXISTS -> R.string.create_exists; else -> R.string.scan_save_failed
+    }), Toast.LENGTH_SHORT).show()
     fun write(uri: Uri?, what: (java.io.OutputStream) -> Unit) {
         if (uri == null) return
         busy = true
         held.scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                try { context.contentResolver.openOutputStream(uri, "wt")!!.use { what(it) }; true } catch (e: Throwable) {
-                    // Nothing half-written is left behind
-                    runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) }
-                    false
-                }
-            }
+            // Into a new file only; nothing half-written is left behind
+            val r = withContext(Dispatchers.IO) { ua.hramota.EditSaving.writeNew(context, uri, what) }
             busy = false
-            saved(ok)
+            saved(r)
         }
     }
     val saveDocx = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { uri ->

@@ -470,7 +470,7 @@ fun SlideEditorScreen(
                         onAddAfter = { scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } },
                         onPlace = if (source != null && !saving) ({ placing = slide }) else null,
                         onNotes = if (!saving && !state.hasNotes(slide)) ({ scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }; Unit }) else null,
-                        onComment = if (!saving) ({ commenting = slide }) else null,
+                        onComment = if (!saving && state.edit.canComment(slide)) ({ commenting = slide }) else null,
                         comments = state.comments[slide].orEmpty(),
                         onRemoveComment = { i -> state.removeComment(slide, i) },
                     )

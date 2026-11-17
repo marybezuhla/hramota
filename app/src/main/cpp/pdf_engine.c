@@ -557,6 +557,29 @@ static int same_text(JNIEnv* env, jstring a, FPDF_FORMHANDLE form, FPDF_ANNOTATI
     return same;
 }
 
+// The text's hash as Java's String.hashCode works it out (names are first matched by it)
+static jint jhash(JNIEnv* env, jstring s) {
+    if (!s) return 0;
+    const jchar* c = (*env)->GetStringChars(env, s, NULL);
+    if (!c) return 0;
+    jsize len = (*env)->GetStringLength(env, s);
+    uint32_t h = 0;
+    for (jsize i = 0; i < len; i++) h = 31u * h + c[i];
+    (*env)->ReleaseStringChars(env, s, c);
+    return (jint)h;
+}
+
+static int same_jstrings(JNIEnv* env, jstring a, jstring b) {
+    jsize la = (*env)->GetStringLength(env, a), lb = (*env)->GetStringLength(env, b);
+    if (la != lb) return 0;
+    const jchar* ca = (*env)->GetStringChars(env, a, NULL);
+    const jchar* cb = (*env)->GetStringChars(env, b, NULL);
+    int same = ca && cb && memcmp(ca, cb, (size_t)la * 2) == 0;
+    if (ca) (*env)->ReleaseStringChars(env, a, ca);
+    if (cb) (*env)->ReleaseStringChars(env, b, cb);
+    return same;
+}
+
 static FPDF_WIDESTRING wide(JNIEnv* env, jstring s) {
     jsize len = (*env)->GetStringLength(env, s);
     unsigned short* w = malloc(((size_t)len + 1) * 2);
@@ -586,6 +609,15 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveForm(JNIEnv* env
         FPDF_FORMFILLINFO info;
         FPDF_FORMHANDLE form = form_env(doc, &info);
         if (!form) { FPDF_CloseDocument(doc); return JNI_FALSE; }
+        // Each name's hash once; a field set once (of several widgets with one name) is not set again
+        jint* hashes = malloc((size_t)n * sizeof(jint));
+        unsigned char* handled = calloc((size_t)n, 1);
+        if (!hashes || !handled) { free(hashes); free(handled); FPDFDOC_ExitFormFillEnvironment(form); FPDF_CloseDocument(doc); return JNI_FALSE; }
+        for (jsize j = 0; j < n; j++) {
+            jstring name = (jstring)(*env)->GetObjectArrayElement(env, names, j);
+            hashes[j] = jhash(env, name);
+            if (name) (*env)->DeleteLocalRef(env, name);
+        }
         int pages = FPDF_GetPageCount(doc);
         for (int p = 0; p < pages; p++) {
             FPDF_PAGE page = FPDF_LoadPage(doc, p);
@@ -596,11 +628,18 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveForm(JNIEnv* env
                 FPDF_ANNOTATION a = FPDFPage_GetAnnot(page, i);
                 if (!a) continue;
                 if (FPDFAnnot_GetSubtype(a) != FPDF_ANNOT_WIDGET || (FPDFAnnot_GetFormFieldFlags(form, a) & FPDF_FORMFLAG_READONLY)) { FPDFPage_CloseAnnot(a); continue; }
+                // The widget's field name read once, then matched by hash
+                jstring own = annot_text(env, form, a, FPDFAnnot_GetFormFieldName);
+                jint ownHash = jhash(env, own);
+                int type = FPDFAnnot_GetFormFieldType(form, a);
                 for (jsize j = 0; j < n; j++) {
+                    if (hashes[j] != ownHash) continue;
                     jstring name = (jstring)(*env)->GetObjectArrayElement(env, names, j);
-                    if (!name || !same_text(env, name, form, a, FPDFAnnot_GetFormFieldName)) { if (name) (*env)->DeleteLocalRef(env, name); continue; }
+                    if (!name || !own || !same_jstrings(env, name, own)) { if (name) (*env)->DeleteLocalRef(env, name); continue; }
+                    // A check box group (or a text field shown twice) is set once; radio buttons are each looked at
+                    if (handled[j] && type != FPDF_FORMFIELD_RADIOBUTTON) { (*env)->DeleteLocalRef(env, name); break; }
+                    handled[j] = 1;
                     jstring value = (jstring)(*env)->GetObjectArrayElement(env, values, j);
-                    int type = FPDFAnnot_GetFormFieldType(form, a);
                     FS_RECTF r;
                     int haveRect = FPDFAnnot_GetRect(a, &r);
                     double cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
@@ -663,11 +702,13 @@ JNIEXPORT jboolean JNICALL Java_ua_hramota_pdf_PdfiumNative_saveForm(JNIEnv* env
                     (*env)->DeleteLocalRef(env, name);
                     break;
                 }
+                if (own) (*env)->DeleteLocalRef(env, own);
                 FPDFPage_CloseAnnot(a);
             }
             FORM_OnBeforeClosePage(page, form);
             FPDF_ClosePage(page);
         }
+        free(hashes); free(handled);
         FPDFDOC_ExitFormFillEnvironment(form);
     }
     // The signature, as a picture on the page

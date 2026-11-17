@@ -74,7 +74,9 @@ internal object SheetComments {
             val s = start.indexOf("<v:shape", pos).takeIf { it >= 0 && !start.startsWith("<v:shapetype", it) }
                 ?: start.indexOf("<v:shape ", pos).takeIf { it >= 0 } ?: break
             if (start.startsWith("<v:shapetype", s)) { x.append(start, pos, s + 1); pos = s + 1; continue }
-            val e = start.indexOf("</v:shape>", s).takeIf { it >= 0 }?.plus("</v:shape>".length) ?: break
+            // A shape written as one tag (<v:shape …/>) ends there; otherwise at its closing tag
+            val tagEnd = start.indexOf('>', s).takeIf { it >= 0 } ?: break
+            val e = if (start[tagEnd - 1] == '/') tagEnd + 1 else start.indexOf("</v:shape>", s).takeIf { it >= 0 }?.plus("</v:shape>".length) ?: break
             val shape = start.substring(s, e)
             val row = Regex("<x:Row>\\s*(\\d+)").find(shape)?.groupValues?.get(1)?.toIntOrNull()
             val col = Regex("<x:Column>\\s*(\\d+)").find(shape)?.groupValues?.get(1)?.toIntOrNull()

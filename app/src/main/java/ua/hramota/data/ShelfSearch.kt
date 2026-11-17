@@ -67,8 +67,14 @@ object ShelfSearch {
             }
             Vault.writeIn(context, dir(context), e.id + ".txt", text.toByteArray())
             return true
+        } catch (x: kotlinx.coroutines.CancellationException) {
+            throw x
         } catch (x: Exception) {
             return false
+        } catch (x: Throwable) {
+            // Too much for the phone (out of memory, too deep): kept as having no text, so it is not tried again and again
+            try { Vault.writeIn(context, dir(context), e.id + ".txt", ByteArray(0)) } catch (_: Exception) {}
+            return true
         } finally {
             Shelf.closeOpened(context, uri)
         }
@@ -76,7 +82,11 @@ object ShelfSearch {
 
     /** Turning the lock on or off: every index file is sealed or opened as the documents are. */
     fun convert(context: Context, key: javax.crypto.SecretKey, seal: Boolean) = synchronized(this) {
-        for (f in dir(context).listFiles().orEmpty()) if (f.isFile && !f.name.endsWith(".converting")) Shelf.convertFile(key, f, seal)
+        // Not while a document's text is being written (it would be left in the old form)
+        kotlinx.coroutines.runBlocking { indexing.lock() }
+        try {
+            for (f in dir(context).listFiles().orEmpty()) if (f.isFile && !f.name.endsWith(".converting")) Shelf.convertFile(key, f, seal)
+        } finally { indexing.unlock() }
     }
 
     /** Index files of documents no longer kept: deleted. */
@@ -98,7 +108,7 @@ object ShelfSearch {
             // The title first: a document found by its name
             val title = e.coverTitle ?: e.docTitle ?: e.title
             Search.find(title, query).firstOrNull()?.let { r -> out += Hit(e, -1, false, title, r) }
-            val bytes = try { Vault.readIn(dir(context), e.id + ".txt") } catch (x: Exception) {
+            val bytes = try { Vault.readIn(dir(context), e.id + ".txt") } catch (x: OutOfMemoryError) { null } catch (x: Exception) {
                 // A damaged index file: deleted, the text is taken out again next time
                 if (!Vault.locked(context)) { File(dir(context), e.id + ".txt").delete(); File(dir(context), e.id + ".txt" + Vault.SUFFIX).delete() }
                 null

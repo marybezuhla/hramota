@@ -778,4 +778,12 @@
     <string name="sheet_chart_n">Діаграма %1$d</string>
     <string name="slide_comments">Коментарі</string>
     <string name="slide_comments_n">Коментарі (%1$d)</string>
+    <string name="spell_check">Правопис</string>
+    <string name="spell_checking">Перевіряю правопис…</string>
+    <string name="spell_none">Помилок у правописі не знайдено</string>
+    <string name="spell_close">Закрити перевірку правопису</string>
+    <string name="spell_no_suggestions">Немає варіантів</string>
+    <string name="spell_skip">Пропустити</string>
+    <string name="spell_skip_all">Пропустити всюди</string>
+    <string name="spell_add">Додати до моїх слів</string>
 </resources>

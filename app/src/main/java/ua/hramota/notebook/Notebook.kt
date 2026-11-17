@@ -68,6 +68,9 @@ data class Note(val meta: NoteMeta, val blocks: List<NBlock>)
  * is sealed like the shelf. Exported as Word, PDF, Markdown or a picture.
  */
 object Notebook {
+    /** What handwriting was read for: the strokes as the file keeps them (rounded), so it is the same after opening again. */
+    fun inkHash(strokes: List<ua.hramota.ink.Stroke>): Int = ua.hramota.ink.InkJson.strokes(strokes).toString().hashCode()
+
     private const val INDEX = "index.json"
     const val BIN_DAYS = 30L
     private val books = MutableStateFlow<List<Book>>(emptyList())
