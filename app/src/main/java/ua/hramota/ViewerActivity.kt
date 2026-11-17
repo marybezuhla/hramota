@@ -486,6 +486,8 @@ open class ViewerActivity : ComponentActivity() {
                                 if (format == Format.ODT && state is ViewerState.Paged) getString(R.string.edit_open) to { startEditing(uri, odt = true); Unit } else null,
                                 // Excel workbooks: cells and formulas
                                 (state as? ViewerState.Sheets)?.takeIf { format == Format.XLSX && !protectedDoc }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook); Unit } },
+                                // OpenDocument spreadsheets: what cells hold, in the file itself
+                                (state as? ViewerState.Sheets)?.takeIf { format == Format.ODS }?.let { s -> getString(R.string.edit_open) to { startSheetEditing(uri, s.workbook, ods = true); Unit } },
                                 // Old Word and Excel files: kept as new ones, which can then be edited
                                 if (format == Format.DOC && state is ViewerState.Paged) getString(R.string.save_as_docx) to { convertAsk = "docx"; Unit } else null,
                                 if (format == Format.XLS && state is ViewerState.Sheets) getString(R.string.save_as_xlsx) to { convertAsk = "xlsx"; Unit } else null,
@@ -892,14 +894,14 @@ open class ViewerActivity : ComponentActivity() {
     }
 
     /** Opens the XLSX for editing (off the main thread), shown as the workbook already read. */
-    private fun startSheetEditing(uri: android.net.Uri, workbook: ua.hramota.doc.sheet.Workbook) {
+    private fun startSheetEditing(uri: android.net.Uri, workbook: ua.hramota.doc.sheet.Workbook, ods: Boolean = false) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         val app = applicationContext
         if (held.opening) return
         held.opening = true
         held.scope.launch {
             val edit = try { withContext(Dispatchers.IO) {
-                try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.sheet.edit.XlsxEdit.open(it.buffered()) }?.let { ua.hramota.ui.SheetEditorState(it, workbook) } }
+                try { app.contentResolver.openInputStream(uri)?.use { val i = it.buffered(); if (ods) ua.hramota.doc.odf.OdsEdit.open(i) else ua.hramota.doc.sheet.edit.XlsxEdit.open(i) }?.let { ua.hramota.ui.SheetEditorState(it, workbook) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
             } } finally { held.opening = false }
             if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()

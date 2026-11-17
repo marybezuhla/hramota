@@ -51,7 +51,7 @@ import java.io.OutputStream
  * A workbook being edited: what is shown (the file's workbook with the changed cells and the
  * formulas depending on them worked out again), and what was done, to undo and redo.
  */
-class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
+class SheetEditorState(val edit: ua.hramota.doc.sheet.edit.SheetEdit, private var original: Workbook) {
     var workbook by mutableStateOf(original)
         private set
     var dirty by mutableStateOf(false)
@@ -70,7 +70,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     var notice by mutableStateOf<Int?>(null)
 
     // Shown sheets (the file's visible ones) in the editor's numbering of all sheets
-    private val shownSheets: List<Int> = original.sheets.map { s -> edit.sheets.indexOfFirst { it.visible && it.name == s.name } }
+    private val shownSheets: List<Int> = original.sheets.map { s -> edit.sheetNames.indexOfFirst { it.visible && it.name == s.name } }
 
     private sealed class Step
     private class CellStep(val key: CellKey, val before: Input?, val after: Input?) : Step()
@@ -83,7 +83,7 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
     /** Several cells changed at once ("replace all"): one step. */
     private class CellsStep(val steps: List<CellStep>) : Step()
     /** Rows inserted or deleted: the whole workbook before and after (a few kept, they can be large). */
-    private class RowStep(val before: XlsxEdit.Snapshot, val after: XlsxEdit.Snapshot, val shownBefore: Workbook, val shownAfter: Workbook) : Step()
+    private class RowStep(val before: ua.hramota.doc.sheet.edit.SheetSnapshot, val after: ua.hramota.doc.sheet.edit.SheetSnapshot, val shownBefore: Workbook, val shownAfter: Workbook) : Step()
     private val undoStack = ArrayList<Step>()
     private val redoStack = ArrayList<Step>()
 
@@ -524,9 +524,9 @@ class SheetEditorState(val edit: XlsxEdit, private var original: Workbook) {
 
     /** What saving needs: the edits written into the workbook read again. */
     fun maker() = object : EditSaving.Maker {
-        override val ext = "xlsx"
+        override val ext = edit.extension
         override fun write(source: InputStream, out: OutputStream) = edit.save(source, out)
-        override fun check(made: InputStream) { ua.hramota.doc.sheet.XlsxReader.read(made) }
+        override fun check(made: InputStream) { edit.readBack(made) }
     }
 }
 
@@ -609,11 +609,15 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                 editing = SheetEditing(
                     content = state::content, commit = state::commit, enabled = !saving && !state.busy,
                     draft = state::draft, leave = state::flush, discard = state::discard, version = state.version,
-                    rows = { sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } },
-                    columns = { sheet, col, delete, right -> scope.launch { state.columns(sheet, col, delete, right) } },
+                    rows = if (!state.edit.full) null else ({ sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } }),
+                    columns = if (!state.edit.full) null else ({ sheet, col, delete, right -> scope.launch { state.columns(sheet, col, delete, right) } }),
                     cellActions = { sheet, row, col ->
                         val ctx = context
-                        listOfNotNull(
+                        // Only what cells hold can be changed (an OpenDocument spreadsheet): the filter, on the screen only
+                        if (!state.edit.full) listOfNotNull(
+                            ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },
+                            if (state.filter != null) ctx.getString(R.string.sheet_filter_off) to { state.setFilter(sheet, row, col, null) } else null,
+                        ) else listOfNotNull(
                             ctx.getString(R.string.sheet_format) to { formatting = Triple(sheet, row, col) },
                             ctx.getString(R.string.sheet_width) to { sizing = Triple(sheet, row, col) },
                             ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) },

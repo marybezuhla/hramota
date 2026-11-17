@@ -65,7 +65,12 @@ class XlsxEdit private constructor(
     private val entryNames: Set<String> = emptySet(),
     /** Shared strings with their own formatting inside (bold words, phonetic guides): not moved as plain text. */
     private val richStrings: Set<Int> = emptySet(),
-) {
+) : SheetEdit {
+    override val extension = "xlsx"
+    override val sheetNames: List<SheetEdit.SheetName> get() = layout.sheets.map { SheetEdit.SheetName(it.name, it.visible) }
+    override fun readBack(input: InputStream): ua.hramota.doc.sheet.Workbook = ua.hramota.doc.sheet.XlsxReader.read(input)
+    override fun restore(s: SheetSnapshot) = restore(s as Snapshot)
+
     /**
      * The workbook's parts as they stand after rows were inserted or deleted (the file's own until
      * then): sheets, workbook.xml, parts written anew, and formulas to work out again.
@@ -81,7 +86,7 @@ class XlsxEdit private constructor(
     }
 
     /** What undo needs to go back to: the parts and the typed cells. */
-    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>, internal val looks: Map<CellKey, CellLook> = emptyMap(), internal val widths: Map<Pair<Int, Int>, Float> = emptyMap(), internal val notes: Map<CellKey, String> = emptyMap())
+    class Snapshot internal constructor(internal val layout: Layout, internal val inputs: Map<CellKey, Input>, internal val looks: Map<CellKey, CellLook> = emptyMap(), internal val widths: Map<Pair<Int, Int>, Float> = emptyMap(), internal val notes: Map<CellKey, String> = emptyMap()) : SheetSnapshot
 
     @Volatile private var layout: Layout = first
     val sheets: List<SheetPart> get() = layout.sheets
@@ -116,11 +121,11 @@ class XlsxEdit private constructor(
     private val parsedInputs = HashMap<CellKey, Formula.Parsed>()
 
     /** What the person changed, cell by cell (a copy). */
-    val changes: Map<CellKey, Input> @Synchronized get() = HashMap(inputs)
+    override val changes: Map<CellKey, Input> @Synchronized get() = HashMap(inputs)
 
     /** Puts [input] into a cell (null: back to what the file has). */
     @Synchronized
-    fun set(cell: CellKey, input: Input?) {
+    override fun set(cell: CellKey, input: Input?) {
         if (input == null) inputs.remove(cell) else inputs[cell] = input
         parsedInputs.remove(cell)
         if (input is Input.Formula) parsedInputs[cell] = Formula.parse(input.text)
@@ -133,32 +138,32 @@ class XlsxEdit private constructor(
     private val notes = HashMap<CellKey, String>()
 
     /** Notes added here (Excel's comments), cell by cell (a copy). */
-    val noteChanges: Map<CellKey, String> @Synchronized get() = HashMap(notes)
+    override val noteChanges: Map<CellKey, String> @Synchronized get() = HashMap(notes)
 
     /** Puts a note on a cell (null: none added here). */
     @Synchronized
-    fun setNote(cell: CellKey, text: String?) { if (text == null) notes.remove(cell) else notes[cell] = text.take(MAX_NOTE) }
+    override fun setNote(cell: CellKey, text: String?) { if (text == null) notes.remove(cell) else notes[cell] = text.take(MAX_NOTE) }
 
     /** Looks changed here, cell by cell (a copy). */
-    val lookChanges: Map<CellKey, CellLook> @Synchronized get() = HashMap(looks)
-    val widthChanges: Map<Pair<Int, Int>, Float> @Synchronized get() = HashMap(widths)
+    override val lookChanges: Map<CellKey, CellLook> @Synchronized get() = HashMap(looks)
+    override val widthChanges: Map<Pair<Int, Int>, Float> @Synchronized get() = HashMap(widths)
 
     /** Sets how a cell looks (null: as the file has it). False when the workbook has no styles to add to. */
     @Synchronized
-    fun setLook(cell: CellKey, look: CellLook?): Boolean {
+    override fun setLook(cell: CellKey, look: CellLook?): Boolean {
         if (stylesXml == null) return false
         if (look == null || look.isEmpty) looks.remove(cell) else looks[cell] = look
         return true
     }
 
-    fun look(cell: CellKey): CellLook? = synchronized(this) { looks[cell] }
+    override fun look(cell: CellKey): CellLook? = synchronized(this) { looks[cell] }
 
     /** Sets a column's width in characters (null: as the file has it). */
     @Synchronized
-    fun setWidth(sheet: Int, col: Int, chars: Float?) { if (chars == null) widths.remove(sheet to col) else widths[sheet to col] = chars.coerceIn(0.5f, 255f) }
+    override fun setWidth(sheet: Int, col: Int, chars: Float?) { if (chars == null) widths.remove(sheet to col) else widths[sheet to col] = chars.coerceIn(0.5f, 255f) }
 
     /** True when the cell holds what is not changed here: part of an array formula or a data table. */
-    fun locked(cell: CellKey): Boolean {
+    override fun locked(cell: CellKey): Boolean {
         val sh = sheets.getOrNull(cell.sheet) ?: return true
         if (sh.lockedAreas.any { b -> cell.row in b[0]..b[2] && cell.col in b[1]..b[3] }) return true
         val raw = sh.cell(cell.row, cell.col) ?: return false
@@ -167,7 +172,7 @@ class XlsxEdit private constructor(
 
     /** What the cell holds, as the person would type it: "=SUM(A1:A3)", "12,5", "текст". */
     @Synchronized
-    fun content(cell: CellKey, decimalComma: Boolean = true): String {
+    override fun content(cell: CellKey, decimalComma: Boolean): String {
         fun num(d: Double) = Formula.show(d).let { if (decimalComma) it.replace('.', ',') else it }
         inputs[cell]?.let { i ->
             return when (i) {
@@ -194,7 +199,7 @@ class XlsxEdit private constructor(
      * holds a formula or an error, which are not moved.
      */
     @Synchronized
-    fun stored(cell: CellKey): Input? {
+    override fun stored(cell: CellKey): Input? {
         inputs[cell]?.let { return if (it is Input.Formula) null else it }
         val raw = sheets.getOrNull(cell.sheet)?.cell(cell.row, cell.col) ?: return Input.Clear
         if (raw.f != null) return null
@@ -211,7 +216,7 @@ class XlsxEdit private constructor(
     }
 
     /** The cell's style number (cellXfs), as the file has it. */
-    fun style(cell: CellKey): Int? = sheets.getOrNull(cell.sheet)?.styleOf(cell.row, cell.col)?.toIntOrNull()
+    override fun style(cell: CellKey): Int? = sheets.getOrNull(cell.sheet)?.styleOf(cell.row, cell.col)?.toIntOrNull()
 
     private fun rawValue(raw: RawCell): Value = when (raw.t) {
         "s" -> raw.v?.trim()?.toIntOrNull()?.let { strings.getOrNull(it) }?.let { Value.Text(it) } ?: Value.Empty
@@ -291,7 +296,7 @@ class XlsxEdit private constructor(
      * Works out the changed cells and every formula that depends on them, directly or through other
      * formulas. Values of the rest stay as the file has them. Call off the main thread.
      */
-    fun recalc(): Map<CellKey, Value> {
+    override fun recalc(): Map<CellKey, Value> {
         // What was typed, taken at once: the screen can go on changing cells while this works
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
         return recalcOf(snapshot)
@@ -377,7 +382,7 @@ class XlsxEdit private constructor(
      * What the person typed, as Excel would take it: "=…" a formula, "'…" always text, numbers
      * (with a decimal comma), TRUE/FALSE, and a date "02.11.2026" as a number when the cell shows dates.
      */
-    fun parse(typed: String, dateCell: Boolean, date1904: Boolean = false): Input? {
+    override fun parse(typed: String, dateCell: Boolean, date1904: Boolean): Input? {
         val t = typed.replace("\r", "")
         if (t.isEmpty()) return Input.Clear
         if (t.startsWith("'")) return Input.Text(t.substring(1))
@@ -407,9 +412,9 @@ class XlsxEdit private constructor(
     private class Refused(val why: RowRefusal) : Exception()
 
     /** About how much text the workbook's sheets hold (undo of row changes keeps copies of it). */
-    val size: Long get() = layout.sheets.sumOf { it.xml.length.toLong() }
+    override val size: Long get() = layout.sheets.sumOf { it.xml.length.toLong() }
 
-    @Synchronized fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs), HashMap(looks), HashMap(widths), HashMap(notes))
+    @Synchronized override fun snapshot(): Snapshot = Snapshot(layout, HashMap(inputs), HashMap(looks), HashMap(widths), HashMap(notes))
 
     @Synchronized fun restore(s: Snapshot) {
         layout = s.layout
@@ -428,11 +433,11 @@ class XlsxEdit private constructor(
      * otherwise why not (nothing is changed then). Call off the main thread.
      */
     @Synchronized
-    fun moveRows(sheet: Int, at: Int, n: Int): RowRefusal? = move(sheet, at, n, false)
+    override fun moveRows(sheet: Int, at: Int, n: Int): RowRefusal? = move(sheet, at, n, false)
 
     /** As [moveRows], for columns: [n] columns inserted before column [at], or [-n] deleted from it. */
     @Synchronized
-    fun moveColumns(sheet: Int, at: Int, n: Int): RowRefusal? = move(sheet, at, n, true)
+    override fun moveColumns(sheet: Int, at: Int, n: Int): RowRefusal? = move(sheet, at, n, true)
 
     private fun move(sheet: Int, at: Int, n: Int, cols: Boolean): RowRefusal? {
         if (n == 0) return null
@@ -736,7 +741,7 @@ class XlsxEdit private constructor(
     // --- Saving ---
 
     /** Writes the edited workbook: the package is read again from [source] and copied entry by entry. Off the main thread. */
-    fun save(source: InputStream, out: OutputStream) {
+    override fun save(source: InputStream, out: OutputStream) {
         // Taken at once, and worked on without holding the workbook: the screen does not wait for the save
         val snapshot: Triple<Map<CellKey, Input>, Map<CellKey, Formula.Parsed>, Layout> = synchronized(this) { Triple(HashMap(inputs), HashMap(parsedInputs), layout) }
         val lookNow: Map<CellKey, CellLook> = synchronized(this) { HashMap(looks) }
@@ -995,7 +1000,7 @@ class XlsxEdit private constructor(
     }
 
     /** Whether notes can be added to [sheet]: not where Excel keeps its newer, threaded comments (they would part from them). */
-    fun canNote(sheet: Int): Boolean {
+    override fun canNote(sheet: Int): Boolean {
         val sh = layout.sheets.getOrNull(sheet) ?: return false
         if (typesXml == null) return false
         val dir = sh.path.substringBeforeLast('/')
