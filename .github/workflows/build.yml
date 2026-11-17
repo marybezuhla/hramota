@@ -152,7 +152,7 @@ jobs:
           dpkg -s libreoffice-calc-nogui libreoffice-impress-nogui > /dev/null 2>&1 || { sudo apt-get -o DPkg::Lock::Timeout=600 update -qq; sudo apt-get -o DPkg::Lock::Timeout=600 install -y -qq --no-install-recommends libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui poppler-utils > /dev/null; }
           mkdir -p edited-pdf log/edited
           soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods > /dev/null
-          # OpenDocument spreadsheets: what LibreOffice shows in cells the test names (row,column,value; counted from 1)
+          # OpenDocument spreadsheets: what LibreOffice shows in cells the test names (row,column,value; counted from 1; shown as in the US, 11,700.50)
           mkdir -p edited-csv
           for f in app/build/edited/*.ods; do
             [ -f "${f%.*}.expect" ] || continue
@@ -165,7 +165,7 @@ jobs:
               if not line.strip(): continue
               r, c, want = line.strip().split(",", 2)
               got = rows[int(r) - 1][int(c) - 1] if len(rows) >= int(r) and len(rows[int(r) - 1]) >= int(c) else None
-              try: ok = got is not None and abs(float(got.replace(" ", "").replace(",", ".")) - float(want)) < 1e-6
+              try: ok = got is not None and abs(float(got.replace(" ", "").replace(",", "")) - float(want)) < 1e-6
               except ValueError: ok = got == want
               if not ok: print(sys.argv[1], "row", r, "column", c, "LibreOffice shows", got, "expected", want); bad += 1
           sys.exit(1 if bad else 0)
