@@ -339,7 +339,8 @@ class EditorState(val edit: TextEdit) : Replaceable {
 /** Shows each run of text with its formatting; the text itself is never changed by this. */
 private class Formatting(private val p: EditPara, private val edit: TextEdit, private val open: Set<String>, private val tint: androidx.compose.ui.graphics.Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val b = AnnotatedString.Builder(text.text)
+        // A line break inside a paragraph (U+2028, which fonts do not draw) shown as one
+        val b = AnnotatedString.Builder(text.text.replace('\u2028', '\n'))
         // The field's text is the zero-width mark and then the paragraph's text
         val n = minOf(p.marks.size, text.length - 1)
         var i = 0

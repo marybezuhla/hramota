@@ -362,7 +362,8 @@ class SlideEditorState(val edit: ua.hramota.doc.slides.edit.SlideEdit) : Replace
 
 private class SlideFormatting(private val p: SlidePara, private val edit: ua.hramota.doc.slides.edit.SlideEdit) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val b = AnnotatedString.Builder(text.text)
+        // A line break inside a paragraph (U+2028, which fonts do not draw) shown as one
+        val b = AnnotatedString.Builder(text.text.replace('\u2028', '\n'))
         val n = minOf(p.marks.size, text.length - 1)
         var i = 0
         while (i < n) {

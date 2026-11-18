@@ -354,7 +354,9 @@ private fun SheetGrid(
             val h = sheet.height(r) * unit
             if (h <= 0f) return
             drawLine(Color(0xFFBDBDBD), Offset(0f, y + h), Offset(headerW, y + h))
-            val t = measurer.measure("${r + 1}", labelStyle)
+            // The number made smaller where the row is lower than the label (large fonts), not drawn over the next
+            var t = measurer.measure("${r + 1}", labelStyle)
+            if (t.size.height > h * 1.1f && h >= 9 * density.density) t = measurer.measure("${r + 1}", labelStyle.copy(fontSize = labelStyle.fontSize * (h / t.size.height), lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified))
             // The number is shown on every row of a readable height (the label's own line spacing may be taller than the row)
             if (h >= 9 * density.density) clipRect(0f, y, headerW, y + h) { drawText(t, topLeft = Offset((headerW - t.size.width) / 2, y + (h - t.size.height) / 2)) }
         }
