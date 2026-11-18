@@ -167,8 +167,11 @@ object OdpReader {
 
     private fun shape(e: ONode, styles: OdfPackage.Styles, pkg: OdfPackage, media: MutableMap<String, ByteArray>, out: MutableList<SlideShape>, depth: Int) {
         if (depth > 20 || out.size > Deck.MAX_SHAPES) return
-        val x = length(e.attr("x")) ?: 0f; val y = length(e.attr("y")) ?: 0f
-        val w = length(e.attr("width")) ?: 0f; val h = length(e.attr("height")) ?: 0f
+        // (a turned shape: its box before turning, and the turn)
+        val place = shapePlace { e.attr(it) }
+        val x = place?.get(0) ?: length(e.attr("x")) ?: 0f; val y = place?.get(1) ?: length(e.attr("y")) ?: 0f
+        val w = place?.get(2) ?: length(e.attr("width")) ?: 0f; val h = place?.get(3) ?: length(e.attr("height")) ?: 0f
+        val rot = place?.get(4) ?: 0f
         val g = styles.props(e.attr("style-name"), "graphic")
         val fill = if (g["fill"] == "solid" || g["fill"] == null && g["fill-color"] != null && e.name != "frame") color(g["fill-color"]) else null
         val line = if (g["stroke"] != null && g["stroke"] != "none") color(g["stroke-color"]) ?: 0xFF000000.toInt() else null
@@ -177,9 +180,9 @@ object OdpReader {
                 // (a table carries a preview picture of itself as well: the table is drawn instead)
                 if (e.child("table") == null) e.child("image")?.attr("href")?.removePrefix("./")?.takeIf { h -> listOf(".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp").any { h.lowercase().endsWith(it) } }?.let { href ->
                     val bytes = pkg.media[href]
-                    if (bytes != null) { media[href] = bytes; out += SlideShape.Picture(x, y, w, h, 0f, href); return }
+                    if (bytes != null) { media[href] = bytes; out += SlideShape.Picture(x, y, w, h, rot, href); return }
                 }
-                e.child("text-box")?.let { tb -> out += SlideShape.Box(x, y, w, h, 0f, "rect", fill, line, 0.75f, paragraphs(tb, styles, presentationClass(e)), anchor = anchor(g)) }
+                e.child("text-box")?.let { tb -> out += SlideShape.Box(x, y, w, h, rot, "rect", fill, line, 0.75f, paragraphs(tb, styles, presentationClass(e)), anchor = anchor(g)) }
                 // A table: its cells as boxes in a grid (columns by their widths, rows sharing the height)
                 e.child("table")?.let { t ->
                     val widths = t.all("table-column").flatMap { c -> List((c.attr("number-columns-repeated")?.toIntOrNull() ?: 1).coerceIn(1, 64)) { length(styles.props(c.attr("style-name"), "table-column")["column-width"]) } }
@@ -211,7 +214,7 @@ object OdpReader {
                     e.child("enhanced-geometry")?.attr("type") == "round-rectangle" -> "roundRect"
                     else -> "rect"
                 }
-                out += SlideShape.Box(x, y, w, h, 0f, geometry, fill ?: if (e.name == "custom-shape") 0xFF729FCF.toInt() else null, line, 0.75f, paragraphs(e, styles, null), anchor = anchor(g).let { if (it == "top") "center" else it })
+                out += SlideShape.Box(x, y, w, h, rot, geometry, fill ?: if (e.name == "custom-shape") 0xFF729FCF.toInt() else null, line, 0.75f, paragraphs(e, styles, null), anchor = anchor(g).let { if (it == "top") "center" else it })
             }
             "g" -> for (c in e.elements) shape(c, styles, pkg, media, out, depth + 1)
         }
@@ -230,18 +233,50 @@ object OdpReader {
         for (e in p.elements) {
             if (e.name !in SHAPES) continue
             val id = (n++).toString()
-            if (e.name == "g" || e.attr("transform") != null) continue
-            val x = length(e.attr("x")) ?: continue; val y = length(e.attr("y")) ?: continue
-            val w = length(e.attr("width"))?.takeIf { it > 0 } ?: continue; val h = length(e.attr("height"))?.takeIf { it > 0 } ?: continue
+            if (e.name == "g") { groupBox(e)?.let { b -> out += Frame(id, "group", b[0], b[1], b[2] - b[0], b[3] - b[1]) }; continue }
+            val place = shapePlace { e.attr(it) } ?: continue
+            if (e.attr("transform") == null && (e.attr("x") == null || e.attr("y") == null)) continue
+            val (x, y, w, h) = place
+            if (w <= 0 || h <= 0) continue
             val kind = when {
                 e.name == "frame" && e.child("image") != null && e.child("text-box") == null -> "picture"
                 e.name == "frame" && e.child("table") != null -> "table"
                 e.name == "frame" -> "text"
                 else -> "shape"
             }
-            out += Frame(id, kind, x, y, w, h)
+            out += Frame(id, kind, x, y, w, h, place[4])
         }
         return out.take(Deck.MAX_SHAPES)
+    }
+
+    /**
+     * A group's box (left, top, right, bottom), from the shapes in it; null when one of them is turned
+     * or placed otherwise than by a box or a line's ends (it is not moved then).
+     */
+    fun groupBox(g: ONode, depth: Int = 0): FloatArray? {
+        if (depth > 20) return null
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        var any = false
+        for (e in g.elements) {
+            if (e.name !in SHAPES) continue
+            val box: FloatArray = when {
+                e.name == "g" -> groupBox(e, depth + 1) ?: return null
+                e.attr("transform") != null -> return null
+                e.attr("x1") != null -> {
+                    val x1 = length(e.attr("x1")) ?: return null; val y1 = length(e.attr("y1")) ?: return null
+                    val x2 = length(e.attr("x2")) ?: return null; val y2 = length(e.attr("y2")) ?: return null
+                    floatArrayOf(minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2))
+                }
+                else -> {
+                    val x = length(e.attr("x")) ?: return null; val y = length(e.attr("y")) ?: return null
+                    val w = length(e.attr("width")) ?: return null; val h = length(e.attr("height")) ?: return null
+                    floatArrayOf(x, y, x + w, y + h)
+                }
+            }
+            any = true
+            l = minOf(l, box[0]); t = minOf(t, box[1]); r = maxOf(r, box[2]); b = maxOf(b, box[3])
+        }
+        return if (any && r > l && b > t) floatArrayOf(l, t, r, b) else null
     }
 
     private fun anchor(g: Map<String, String>) = when (g["textarea-vertical-align"]) { "middle" -> "center"; "bottom" -> "bottom"; else -> "top" }

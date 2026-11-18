@@ -38,7 +38,10 @@ class OdtEdit private constructor(
     private val xml: String,
     private val digest: ByteArray,
     private val ns: Prefixes,
-    private val slots: List<Slot>,
+    private val slots: MutableList<Slot>,
+    /** The tables' rows, by number less one (a slot's [Slot.row]). */
+    private val rows: MutableList<Row>,
+    private var containers: Int,
     override val paragraphs: List<EditPara>,
     private val styles: OdfPackage.Styles,
     /** Text styles of the content (automatic ones): their attributes as written, to make new ones from. */
@@ -54,7 +57,19 @@ class OdtEdit private constructor(
     class AutoStyle(val parent: String?, val props: Map<String, String>)
 
     /** Where a paragraph is in the file; [row] is its table row (0 outside tables); [list] where it is in a list. */
-    private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0, val list: ListPos? = null)
+    private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0, val list: ListPos? = null, val src: Int = 0)
+
+    /**
+     * A table's row: where it is ([src]: the file's content or a row added here), its table, the row
+     * it is inside (0 if none), whether one like it can be made ([plain]: only cells), whether it
+     * stands for one row only and none of its table's cells span rows ([merged] otherwise).
+     */
+    private class Row(val src: Int, val start: Int, val end: Int, val table: Int, val parent: Int, val plain: Boolean, val merged: Boolean, val hasSlots: Boolean)
+
+    /** The texts written from: the content first, then rows added here. */
+    private val texts = arrayListOf(xml)
+    private val after = HashMap<Int, MutableList<Int>>()
+    private val before = HashMap<Int, MutableList<Int>>()
 
     /** A paragraph in a list: the list style, its level (0 first), whether it begins its item, the item's element, and whether a list starts there. */
     private class ListPos(val style: String?, val level: Int, val firstInItem: Boolean, val item: String, val header: Boolean, val restart: Boolean)
@@ -231,7 +246,78 @@ class OdtEdit private constructor(
         if (b.slot != a.slot + 1) return false
         val sa = slots[a.slot]; val sb = slots[b.slot]
         if (sa.container != sb.container) return false
-        return (sa.end until sb.start).all { xml[it].isWhitespace() }
+        return sa.src == sb.src && (sa.end until sb.start).all { texts[sa.src][it].isWhitespace() }
+    }
+
+    // --- Table rows ---
+
+    private fun within(row: Int, r: Int): Boolean { var x = row; var guard = 0; while (x != 0 && guard++ < 100) { if (x == r) return true; x = rows[x - 1].parent }; return false }
+    private fun sameTable(row: Int, table: Int): Boolean { var x = row; var guard = 0; while (x != 0 && guard++ < 100) { if (rows[x - 1].table == table) return true; x = rows[x - 1].parent }; return false }
+
+    override fun rowRange(list: List<EditPara>, p: EditPara): IntRange? {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: return null
+        val first = list.indexOfFirst { within(slots[it.slot].row, r) }
+        if (first < 0) return null
+        var last = first
+        while (last + 1 < list.size && within(slots[list[last + 1].slot].row, r)) last++
+        return first..last
+    }
+
+    override fun canAddRow(p: EditPara): Boolean = slots[p.slot].row.takeIf { it != 0 }?.let { rows[it - 1].plain && !rows[it - 1].merged } ?: false
+
+    override fun canDeleteRow(list: List<EditPara>, p: EditPara): Boolean {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: return false
+        val row = rows[r - 1]
+        if (row.merged) return false
+        val range = rowRange(list, p) ?: return false
+        if (range.any { list[it].anchors.isNotEmpty() }) return false
+        return list.withIndex().any { (i, q) -> i !in range && slots[q.slot].row.let { x -> x != 0 && !within(x, r) && sameTable(x, row.table) } }
+    }
+
+    private val noIds by lazy { Regex("\\s(?:xml:id|${Regex.escape(ns.text)}:id)=(?:\"[^\"]*\"|'[^']*')") }
+    /** What a cell holds as a value (a number, a date, a formula): an empty one has none. */
+    private val values = Regex("\\s[\\w.-]+:(?:value-type|value|date-value|time-value|boolean-value|string-value|formula|currency)=(?:\"[^\"]*\"|'[^']*')")
+
+    @Synchronized
+    override fun addRow(p: EditPara, below: Boolean): List<EditPara> {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: throw IOException("Not in a table")
+        val row = rows[r - 1]
+        if (!row.plain || row.merged) throw IOException("Unusual row")
+        val x = texts[row.src]
+        val tr = XmlScan.children(x, row.start, row.end).firstOrNull() ?: throw IOException("No row")
+        fun open(e: Elem) = x.substring(e.start, e.openEnd).let { if (e.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }.replace(noIds, "")
+        val t = ns.text
+        val b = StringBuilder(open(tr))
+        for (c in XmlScan.children(x, tr)) if (c.name == "${ns.table}:covered-table-cell") {
+            // Under a cell spanning columns: empty, as it was
+            b.append(open(c).replace(values, "").removeSuffix(">").trimEnd()).append("/>")
+        } else if (c.name == "${ns.table}:table-cell") {
+            b.append(open(c).replace(values, ""))
+            val first = if (c.empty) null else XmlScan.children(x, c).firstOrNull()
+            if (first != null && (first.name == "$t:p" || first.name == "$t:h")) b.append(open(first).replace(Regex("\\s$t:(?:outline-level|is-list-header|restart-numbering|start-value)=(?:\"[^\"]*\"|'[^']*')"), "")).append("</${first.name}>")
+            else b.append("<$t:p></$t:p>")
+            b.append("</").append(c.name).append('>')
+        }
+        b.append("</").append(tr.name).append('>')
+        val src = texts.size
+        val text = b.toString()
+        texts += text
+        val made = XmlScan.children(text, 0, text.length).first()
+        val id = rows.size + 1
+        rows += Row(src, made.start, made.end, row.table, row.parent, plain = true, merged = false, hasSlots = true)
+        val out = ArrayList<EditPara>()
+        val interned = HashMap<String, RunStyle>()
+        for (tc in XmlScan.children(text, made)) {
+            if (tc.name != "${ns.table}:table-cell") continue
+            val container = ++containers
+            for (e in XmlScan.children(text, tc)) if (e.name == "$t:p" || e.name == "$t:h") {
+                slots += Slot(e.start, e.end, container, id, null, src)
+                val q = readParagraph(text, ns, e, slots.size - 1, interned, ArrayList()) { 0 }
+                out += EditPara(newKey(), q.slot, q.text, q.marks, q.pPr, q.startTag, q.head, q.tail, q.editable, q.original, q.typing, q.anchors)
+            }
+        }
+        if (below) after.getOrPut(r) { ArrayList() }.add(0, id) else before.getOrPut(r) { ArrayList() }.add(id)
+        return out
     }
 
     override fun join(a: EditPara, b: EditPara): EditPara = a.changed(text = a.text + b.text, marks = a.marks + b.marks, head = a.head + b.head, tail = a.tail + b.tail, pPr = b.pPr,
@@ -457,15 +543,34 @@ class OdtEdit private constructor(
     fun contentXml(list: List<EditPara>): String {
         val made = Made()
         val body = StringBuilder(xml.length - bodyStart + 4096)
-        var pos = bodyStart
-        var i = 0
-        for ((k, slot) in slots.withIndex()) {
-            body.append(xml, pos, slot.start)
-            while (i < list.size && list[i].slot == k) { write(list[i], body, made); i++ }
-            pos = slot.end
+        val bySlot = list.groupBy { it.slot }
+        // Rows with a paragraph still in the list (and the rows they are in); others are taken out
+        val alive = HashSet<Int>()
+        for (p in list) { var r = slots[p.slot].row; var guard = 0; while (r != 0 && guard++ < 100 && alive.add(r)) r = rows[r - 1].parent }
+        val slotsBySrc = slots.indices.groupBy { slots[it].src }
+        val rowsBySrc = rows.indices.groupBy { rows[it].src }
+        class Event(val start: Int, val end: Int, val order: Int, val go: () -> Unit)
+        fun rewrite(src: Int, from: Int, to: Int, depth: Int) {
+            if (depth > 200) throw IOException("Too deep")
+            val x = texts[src]
+            val events = ArrayList<Event>()
+            for (k in slotsBySrc[src].orEmpty()) { val s = slots[k]; if (s.start >= from && s.end <= to) events += Event(s.start, s.end, 2) { bySlot[k]?.forEach { write(it, body, made) } } }
+            for (i in rowsBySrc[src].orEmpty()) {
+                val row = rows[i]; val id = i + 1
+                if (row.start < from || row.end > to) continue
+                before[id]?.let { l -> events += Event(row.start, row.start, 1) { for (n in l) rows[n - 1].let { rewrite(it.src, it.start, it.end, depth + 1) } } }
+                if (id !in alive && row.hasSlots) events += Event(row.start, row.end, 2) {}
+                after[id]?.let { l -> events += Event(row.end, row.end, 0) { for (n in l) rows[n - 1].let { rewrite(it.src, it.start, it.end, depth + 1) } } }
+            }
+            events.sortWith(compareBy<Event>({ it.start }, { if (it.end == it.start) 0 else 1 }, { it.order }))
+            var pos = from
+            for (e in events) {
+                if (e.start < pos) continue
+                body.append(x, pos, e.start); e.go(); pos = maxOf(pos, e.end)
+            }
+            body.append(x, pos, to)
         }
-        body.append(xml, pos, xml.length)
-        if (i != list.size) throw IOException("Paragraphs out of order")
+        rewrite(0, bodyStart, xml.length, 0)
         val defs = made.defs.toString() + listStyles(body.toString())
         val b = StringBuilder(xml.length + 4096)
         val a = autoStyles
@@ -593,9 +698,11 @@ class OdtEdit private constructor(
             val comments = ArrayList<Comment>()
             val t = ns.text; val tb = ns.table
             // The paragraphs in reading order: in the text, sections, lists (each item a place of its own) and tables
+            val rowList = ArrayList<Row>()
             class Collector {
                 var containers = 0
                 var rows = 0
+                var tables = 0
                 var atoms = 0
                 fun paragraph(e: Elem, list: ListPos?, container: Int, row: Int) {
                     slots += Slot(e.start, e.end, container, row, list)
@@ -607,7 +714,12 @@ class OdtEdit private constructor(
                         "$t:p", "$t:h" -> paragraph(e, null, container, row)
                         "$t:list" -> list(e, null, 0, true, depth + 1)
                         "$t:section" -> collect(XmlScan.children(xml, e), ++containers, row, depth + 1)
-                        "$tb:table" -> table(e, depth + 1)
+                        "$tb:table" -> {
+                            val table = ++tables
+                            // Cells across rows, or rows standing for several: not added to or taken out
+                            val whole = xml.substring(e.start, e.end)
+                            table(e, depth + 1, table, row, whole.contains("rows-spanned") || whole.contains("number-rows-repeated"))
+                        }
                     }
                 }
                 fun list(e: Elem, inherited: String?, level: Int, top: Boolean, depth: Int) {
@@ -629,19 +741,24 @@ class OdtEdit private constructor(
                         firstItem = false
                     }
                 }
-                fun table(e: Elem, depth: Int) {
+                fun table(e: Elem, depth: Int, table: Int, parent: Int, merged: Boolean) {
                     if (depth > 40) return
                     for (r in XmlScan.children(xml, e)) when (r.name) {
                         "$tb:table-row" -> {
                             val rr = ++rows
+                            rowList += Row(0, r.start, r.end, table, parent, false, merged, false)
+                            val before = slots.size
+                            val plain = XmlScan.children(xml, r).all { it.name == "$tb:table-cell" || it.name == "$tb:covered-table-cell" }
                             for (c in XmlScan.children(xml, r)) if (c.name == "$tb:table-cell") collect(XmlScan.children(xml, c), ++containers, rr, depth + 1)
+                            rowList[rr - 1] = Row(0, r.start, r.end, table, parent, plain, merged, slots.size > before)
                         }
-                        "$tb:table-header-rows", "$tb:table-rows", "$tb:table-row-group" -> table(r, depth + 1)
+                        "$tb:table-header-rows", "$tb:table-rows", "$tb:table-row-group" -> table(r, depth + 1, table, parent, merged)
                     }
                 }
             }
-            Collector().collect(XmlScan.children(xml, text), 0, 0, 0)
-            return OdtEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, slots, paras, styles, autoText, auto, body.start, comments)
+            val collector = Collector()
+            collector.collect(XmlScan.children(xml, text), 0, 0, 0)
+            return OdtEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, slots, rowList, collector.containers, paras, styles, autoText, auto, body.start, comments)
         }
 
         private fun readParagraph(xml: String, ns: Prefixes, e: Elem, slot: Int, interned: HashMap<String, RunStyle>, comments: MutableList<Comment>, atom: () -> Int): EditPara {

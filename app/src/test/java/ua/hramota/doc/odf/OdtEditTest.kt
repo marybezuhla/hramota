@@ -195,4 +195,33 @@ class OdtEditTest {
         val out2 = ByteArrayOutputStream().also { again.save(gone, ByteArrayInputStream(out), it) }.toByteArray()
         assertTrue(OdtEdit.open(ByteArrayInputStream(out2)).comments().isEmpty())
     }
+
+    @Test fun tableRowsAddedAndTakenOut() {
+        val bytes = javaClass.classLoader!!.getResource("odf/04-tables.odt")!!.readBytes()
+        val edit = OdtEdit.open(java.io.ByteArrayInputStream(bytes))
+        val list = edit.paragraphs.toMutableList()
+        val paper = list.first { it.text == "Папір офісний А4" }
+        assertTrue(edit.canAddRow(paper))
+        val made = edit.addRow(paper, below = true)
+        assertEquals(4, made.size)
+        val range = edit.rowRange(list, paper)!!
+        list.addAll(range.last + 1, made)
+        list[range.last + 2] = made[1].changed(text = "Конверти", marks = List(8) { made[1].typing })
+        val third = list.first { it.text.startsWith("Ручки") }
+        assertTrue(edit.canDeleteRow(list, third))
+        val tr = edit.rowRange(list, third)!!
+        list.subList(tr.first, tr.last + 1).clear()
+        assertTrue(edit.shown(list)[list.indexOf(made[0])].rowStart)
+        val out = java.io.ByteArrayOutputStream()
+        edit.save(list, java.io.ByteArrayInputStream(bytes), out)
+        val saved = out.toByteArray()
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "odt-rows.odt").writeBytes(saved) }
+        val again = OdtEdit.open(java.io.ByteArrayInputStream(saved))
+        assertEquals(list.map { it.text }, again.paragraphs.map { it.text })
+        val c = part(saved, "content.xml")!!
+        assertTrue(c.contains("Конверти") && !c.contains("Ручки"))
+        // The new row's cells keep their style, no value of their own
+        val row = c.substring(c.lastIndexOf("<table:table-row", c.indexOf("Конверти")), c.indexOf("</table:table-row>", c.indexOf("Конверти")))
+        assertTrue(row, row.contains("table:style-name=\"Table1.A1\"") && !row.contains("value-type"))
+    }
 }

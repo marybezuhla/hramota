@@ -178,3 +178,49 @@ fun length(v: String?): Float? {
 
 /** An ODF colour ("#3b5b92") as ARGB; null for "transparent" or anything else. */
 fun color(v: String?): Int? = v?.trim()?.takeIf { it.length == 7 && it.startsWith("#") }?.substring(1)?.toLongOrNull(16)?.let { (0xFF000000 or it).toInt() }
+
+/**
+ * Where a drawing shape stands, in points: x, y, width, height of its box before turning, and its
+ * turn in degrees clockwise (about the box's middle, as a slide shape's). From svg:x/y/width/height,
+ * or from draw:transform ("rotate (r) translate (x y)": turned about the box's corner, r in radians
+ * counter-clockwise). Null when it has no box, or is skewed or scaled.
+ */
+fun shapePlace(attr: (String) -> String?): FloatArray? {
+    val w = length(attr("width")) ?: return null
+    val h = length(attr("height")) ?: return null
+    val t = attr("transform")?.trim()
+    if (t.isNullOrEmpty()) {
+        val x = length(attr("x")) ?: 0f; val y = length(attr("y")) ?: 0f
+        return floatArrayOf(x, y, w, h, 0f)
+    }
+    var angle = 0.0; var tx = 0f; var ty = 0f
+    var rest = t
+    val op = Regex("^([a-zA-Z]+)\\s*\\(([^)]*)\\)\\s*")
+    var guard = 0
+    while (rest.isNotEmpty() && guard++ < 8) {
+        val m = op.find(rest) ?: return null
+        val args = m.groupValues[2].trim().split(Regex("[\\s,]+")).filter { it.isNotEmpty() }
+        when (m.groupValues[1]) {
+            // (a turn after a move would turn the move as well: not met in files, not read)
+            "rotate" -> { if (tx != 0f || ty != 0f) return null; angle += args.firstOrNull()?.toDoubleOrNull() ?: return null }
+            "translate" -> { tx += length(args.getOrNull(0)) ?: return null; ty += length(args.getOrNull(1) ?: "0") ?: return null }
+            else -> return null
+        }
+        rest = rest.substring(m.value.length)
+    }
+    // The box's middle, turned about its corner and moved
+    val c = Math.cos(angle); val s = Math.sin(angle)
+    val cx = tx + (w / 2 * c + h / 2 * s).toFloat()
+    val cy = ty + (-w / 2 * s + h / 2 * c).toFloat()
+    return floatArrayOf(cx - w / 2, cy - h / 2, w, h, (-Math.toDegrees(angle)).toFloat())
+}
+
+/** draw:transform for a box at [x], [y] (points, before turning), [w] by [h], turned [degrees] clockwise about its middle. */
+fun shapeTransform(x: Float, y: Float, w: Float, h: Float, degrees: Float): String {
+    val a = -Math.toRadians(degrees.toDouble())
+    val c = Math.cos(a); val s = Math.sin(a)
+    val cx = x + w / 2; val cy = y + h / 2
+    val tx = cx - (w / 2 * c + h / 2 * s); val ty = cy - (-w / 2 * s + h / 2 * c)
+    fun cm(pt: Double) = String.format(java.util.Locale.ROOT, "%.3fcm", pt * 2.54 / 72)
+    return String.format(java.util.Locale.ROOT, "rotate (%.10f) translate (%s %s)", a, cm(tx), cm(ty))
+}

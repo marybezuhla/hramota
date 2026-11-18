@@ -122,4 +122,57 @@ class OdpEditTest {
         val manifest = ZipInputStream(ByteArrayInputStream(saved)).use { z -> var m = ""; while (true) { val e = z.nextEntry ?: break; if (e.name == "META-INF/manifest.xml") m = String(z.readBytes(), Charsets.UTF_8) }; m }
         assertTrue(manifest, manifest.contains("Pictures/hramota-") && manifest.contains("image/png"))
     }
+
+    /** The sample with a turned shape and a group put on its first slide. */
+    private fun withTurnedAndGroup(): ByteArray {
+        val out = ByteArrayOutputStream()
+        val z = java.util.zip.ZipOutputStream(out)
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zin ->
+            while (true) {
+                val e = zin.nextEntry ?: break
+                var data = zin.readBytes()
+                if (e.name == "content.xml") {
+                    val c = String(data, Charsets.UTF_8)
+                    val at = c.indexOf("<presentation:notes")
+                    data = (c.substring(0, at) + "<draw:custom-shape svg:width=\"4cm\" svg:height=\"2cm\" draw:transform=\"rotate (0.785398163397448) translate (5cm 8cm)\"><draw:enhanced-geometry draw:type=\"rectangle\"/></draw:custom-shape>" +
+                        "<draw:g><draw:rect svg:x=\"1cm\" svg:y=\"1cm\" svg:width=\"2cm\" svg:height=\"1cm\"/><draw:line svg:x1=\"1cm\" svg:y1=\"3cm\" svg:x2=\"4cm\" svg:y2=\"3cm\"/></draw:g>" + c.substring(at)).toByteArray(Charsets.UTF_8)
+                }
+                val n = ZipEntry(e.name)
+                if (e.name == "mimetype") { n.method = ZipEntry.STORED; n.size = data.size.toLong(); n.compressedSize = data.size.toLong(); n.crc = java.util.zip.CRC32().apply { update(data) }.value }
+                z.putNextEntry(n); z.write(data); z.closeEntry()
+            }
+        }
+        z.finish()
+        return out.toByteArray()
+    }
+
+    @Test fun turnedShapesAndGroupsAreMoved() {
+        val src = withTurnedAndGroup()
+        val edit = OdpEdit.open(ByteArrayInputStream(src))
+        val frames = edit.readBack(ByteArrayInputStream(src)).slides[0].frames
+        val turned = frames.first { it.id == "2" }
+        assertEquals(-45f, turned.rotation, 0.01f)
+        // Its box before turning: 4 × 2 cm, its middle where the turn put it
+        assertEquals(113.39f, turned.w, 0.1f); assertEquals(56.69f, turned.h, 0.1f)
+        val group = frames.first { it.id == "3" }
+        assertEquals("group", group.kind)
+        assertEquals(28.35f, group.x, 0.1f); assertEquals(85.04f, group.w, 0.1f); assertEquals(56.69f, group.h, 0.1f)
+        val emu = { pt: Float -> (pt * 12700).toLong() }
+        val placed = mapOf(
+            ua.hramota.doc.slides.edit.PptxEdit.ShapeRef(0, "2") to longArrayOf(emu(turned.x + 36f), emu(turned.y), emu(turned.w), emu(turned.h)),
+            // The group twice as big, its corner at 2 cm, 2 cm
+            ua.hramota.doc.slides.edit.PptxEdit.ShapeRef(0, "3") to longArrayOf(720000, 720000, 2160000, 1440000),
+        )
+        val out = ByteArrayOutputStream()
+        edit.save(edit.paragraphs, (0 until edit.slideCount).toList(), ByteArrayInputStream(src), out, ua.hramota.doc.slides.edit.PptxEdit.Shapes(placed = placed))
+        val saved = out.toByteArray()
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "odp-turned.odp").writeBytes(saved); java.io.File(it, "odp-turned.pages").writeText("${edit.slideCount}") }
+        val again = edit.readBack(ByteArrayInputStream(saved)).slides[0].frames
+        val t2 = again.first { it.id == "2" }
+        assertEquals(turned.x + 36f, t2.x, 0.1f); assertEquals(turned.y, t2.y, 0.1f); assertEquals(-45f, t2.rotation, 0.01f)
+        val g2 = again.first { it.id == "3" }
+        assertEquals(56.69f, g2.x, 0.1f); assertEquals(56.69f, g2.y, 0.1f); assertEquals(170.08f, g2.w, 0.2f); assertEquals(113.39f, g2.h, 0.2f)
+        val c = ZipInputStream(ByteArrayInputStream(saved)).use { z -> var m = ""; while (true) { val e = z.nextEntry ?: break; if (e.name == "content.xml") m = String(z.readBytes(), Charsets.UTF_8) }; m }
+        assertTrue(c, c.contains("svg:x2=\"8.000cm\"") && c.contains("svg:y1=\"6.000cm\""))
+    }
 }

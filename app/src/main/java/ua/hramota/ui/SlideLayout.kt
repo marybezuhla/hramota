@@ -39,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -156,7 +157,10 @@ fun SlideLayoutScreen(state: SlideEditorState, slide: Int, source: () -> InputSt
                     for (f in frames) {
                         val shown = if (live?.id == f.id) live!! else f
                         val on = shown.id == selected
-                        drawRect(if (on) accent else outline, Offset(shown.x * k, shown.y * k), Size(shown.w * k, shown.h * k), style = Stroke(if (on) 3.dp.toPx() else 1.dp.toPx()))
+                        // A turned shape outlined turned, as it stands
+                        rotate(shown.rotation, Offset((shown.x + shown.w / 2) * k, (shown.y + shown.h / 2) * k)) {
+                            drawRect(if (on) accent else outline, Offset(shown.x * k, shown.y * k), Size(shown.w * k, shown.h * k), style = Stroke(if (on) 3.dp.toPx() else 1.dp.toPx()))
+                        }
                         if (on) drawCircle(accent, handle / 2, Offset((shown.x + shown.w) * k, (shown.y + shown.h) * k))
                     }
                 }

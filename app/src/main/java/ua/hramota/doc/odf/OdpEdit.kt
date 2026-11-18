@@ -145,12 +145,78 @@ class OdpEdit private constructor(
     private fun cm(emu: Long) = String.format(java.util.Locale.ROOT, "%.3fcm", emu / 360000.0)
     private fun place(rect: LongArray) = "$svg:width=\"${cm(rect[2])}\" $svg:height=\"${cm(rect[3])}\" $svg:x=\"${cm(rect[0])}\" $svg:y=\"${cm(rect[1])}\""
 
-    /** A shape's start tag at a new place and size. */
-    private fun placedTag(tag: String, rect: LongArray): String {
+    /** A shape's start tag at a new place and size (a turned one keeps its turn, about its middle). */
+    private fun placedTag(tag: String, rect: LongArray, e: Elem? = null): String {
         val s = svg ?: return tag
-        val bare = tag.replace(Regex("\\s${Regex.escape(s)}:(?:x|y|width|height)=(?:\"[^\"]*\"|'[^']*')"), "")
+        val turned = e?.let { el -> attrOf(el, "transform") != null }
+        val bare = tag.replace(Regex("\\s(?:${Regex.escape(s)}:(?:x|y|width|height)|${Regex.escape(draw)}:transform)=(?:\"[^\"]*\"|'[^']*')"), "")
         val end = if (bare.endsWith("/>")) bare.length - 2 else bare.length - 1
-        return bare.substring(0, end).trimEnd() + " " + place(rect) + bare.substring(end)
+        val placed = if (turned == true) {
+            val turn = shapePlace { attrOf(e, it) }?.get(4) ?: 0f
+            val pt = { emu: Long -> emu / 12700f }
+            "$s:width=\"${cm(rect[2])}\" $s:height=\"${cm(rect[3])}\" $draw:transform=\"${shapeTransform(pt(rect[0]), pt(rect[1]), pt(rect[2]), pt(rect[3]), turn)}\""
+        } else place(rect)
+        return bare.substring(0, end).trimEnd() + " " + placed + bare.substring(end)
+    }
+
+    /** An attribute of a drawing element by its local name (svg:x, draw:transform…). */
+    private fun attrOf(e: Elem, local: String): String? = e.attrs.entries.firstOrNull { (k, _) -> k.substringAfter(':', "") == local && (k.startsWith("$svg:") || k.startsWith("$draw:")) }?.value
+
+    /** A group's box (points: left, top, right, bottom) from the shapes in it, as the reader finds it. */
+    private fun groupBox(x: String, g: Elem, depth: Int = 0): FloatArray? {
+        if (depth > 20 || g.empty) return null
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        var any = false
+        for (e in XmlScan.children(x, g)) {
+            if (!e.name.startsWith("$draw:") || e.local !in OdpReader.SHAPES) continue
+            val box = when {
+                e.local == "g" -> groupBox(x, e, depth + 1) ?: return null
+                attrOf(e, "transform") != null -> return null
+                attrOf(e, "x1") != null -> {
+                    val x1 = length(attrOf(e, "x1")) ?: return null; val y1 = length(attrOf(e, "y1")) ?: return null
+                    val x2 = length(attrOf(e, "x2")) ?: return null; val y2 = length(attrOf(e, "y2")) ?: return null
+                    floatArrayOf(minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2))
+                }
+                else -> {
+                    val ex = length(attrOf(e, "x")) ?: return null; val ey = length(attrOf(e, "y")) ?: return null
+                    val w = length(attrOf(e, "width")) ?: return null; val h = length(attrOf(e, "height")) ?: return null
+                    floatArrayOf(ex, ey, ex + w, ey + h)
+                }
+            }
+            any = true
+            l = minOf(l, box[0]); t = minOf(t, box[1]); r = maxOf(r, box[2]); b = maxOf(b, box[3])
+        }
+        return if (any && r > l && b > t) floatArrayOf(l, t, r, b) else null
+    }
+
+    /**
+     * A group moved and sized to [rect] (EMU): each shape in it moved and sized alike — its start tag
+     * written anew (events for the writer: start, end of the tag, the new tag).
+     */
+    private fun groupMoves(x: String, g: Elem, rect: LongArray): List<Triple<Int, Int, String>> {
+        val s = svg ?: return emptyList()
+        val box = groupBox(x, g) ?: return emptyList()
+        val nl = rect[0] / 12700f; val nt = rect[1] / 12700f
+        val sx = (rect[2] / 12700f) / (box[2] - box[0]); val sy = (rect[3] / 12700f) / (box[3] - box[1])
+        fun cmOf(pt: Float) = String.format(java.util.Locale.ROOT, "%.3fcm", pt * 2.54 / 72)
+        val out = ArrayList<Triple<Int, Int, String>>()
+        fun walk(e: Elem, depth: Int) {
+            if (depth > 20 || e.empty) return
+            for (c in XmlScan.children(x, e)) {
+                if (!c.name.startsWith("$draw:") || c.local !in OdpReader.SHAPES) continue
+                if (c.local == "g") { walk(c, depth + 1); continue }
+                val values = LinkedHashMap<String, String>()
+                for (k in listOf("x", "x1", "x2")) length(attrOf(c, k))?.let { values["$s:$k"] = cmOf(nl + (it - box[0]) * sx) }
+                for (k in listOf("y", "y1", "y2")) length(attrOf(c, k))?.let { values["$s:$k"] = cmOf(nt + (it - box[1]) * sy) }
+                length(attrOf(c, "width"))?.let { values["$s:width"] = cmOf(it * sx) }
+                length(attrOf(c, "height"))?.let { values["$s:height"] = cmOf(it * sy) }
+                var tag = x.substring(c.start, c.openEnd)
+                for ((k, v) in values) tag = tag.replace(Regex("(\\s${Regex.escape(k)}=)(?:\"[^\"]*\"|'[^']*')"), "$1\"$v\"")
+                out += Triple(c.start, c.openEnd, tag)
+            }
+        }
+        walk(g, 0)
+        return out
     }
 
     /** The graphic style of shapes added here: no line, no fill, text from the top (made once, when written). */
@@ -449,7 +515,8 @@ class OdpEdit private constructor(
                     val ref = PptxEdit.ShapeRef(i, n.toString())
                     when {
                         ref in shapes.removed -> events += Triple(e.start, e.end) {}
-                        ref in shapes.placed -> events += Triple(e.start, e.openEnd) { b.append(placedTag(x.substring(e.start, e.openEnd), shapes.placed.getValue(ref))) }
+                        ref in shapes.placed && e.local == "g" -> for ((a, z, tag) in groupMoves(x, e, shapes.placed.getValue(ref))) events += Triple(a, z) { b.append(tag) }
+                        ref in shapes.placed -> events += Triple(e.start, e.openEnd) { b.append(placedTag(x.substring(e.start, e.openEnd), shapes.placed.getValue(ref), e)) }
                     }
                 }
             } else added.firstOrNull { it.src == src }?.let { a ->
