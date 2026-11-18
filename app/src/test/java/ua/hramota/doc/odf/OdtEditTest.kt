@@ -58,7 +58,7 @@ class OdtEditTest {
     @Test fun paragraphsAreRead() {
         val edit = OdtEdit.open(ByteArrayInputStream(odt()))
         assertEquals(listOf("Привіт,  світе жирно", "Перший пункт", "Другий", "У клітинці", "Див. сайт", "Сьогодні 18.11.2026, нотатка1."), edit.paragraphs.map { it.text })
-        assertEquals(listOf(true, true, true, true, true), edit.paragraphs.map { it.editable })
+        assertEquals(List(6) { true }, edit.paragraphs.map { it.editable })
         val p = edit.paragraphs[0]
         assertTrue(edit.look(p, p.marks.last()).bold)
         assertFalse(edit.look(p, p.marks.first()).bold)
