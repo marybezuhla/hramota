@@ -35,34 +35,54 @@ import java.util.zip.ZipOutputStream
  * everything else in the file stays as it was. Looks, rows and columns, notes are not changed here.
  */
 class OdsEdit private constructor(
-    private val xml: String,
     private val digest: ByteArray,
     private val ns: Prefixes,
-    private val sheets: List<OSheet>,
-    /** The content's own automatic styles, by name, as written (new ones are made from them). */
-    private val autoStyles: Map<String, Elem> = emptyMap(),
-    /** Where the content's automatic styles are (new ones go at their end); null when it has none. */
-    private val autoElem: Elem? = null,
-    private val bodyStart: Int = 0,
-    /** Every style name the document has (new names are not taken from them). */
-    private val taken: Set<String> = emptySet(),
+    first: Doc,
 ) : SheetEdit {
+    /**
+     * The content as it now stands: the file's, or with rows or columns inserted or deleted (then
+     * with every formula worked out and written again when saved).
+     */
+    private class Doc(
+        val xml: String,
+        val sheets: List<OSheet>,
+        /** The content's own automatic styles, by name, as written (new ones are made from them). */
+        val autoStyles: Map<String, Elem>,
+        /** Where the content's automatic styles are (new ones go at their end); null when it has none. */
+        val autoElem: Elem?,
+        val bodyStart: Int,
+        /** Every style name the document has (new names are not taken from them). */
+        val taken: Set<String>,
+        /** Rows or columns were moved: every formula is worked out and written again. */
+        val moved: Boolean = false,
+    )
+
+    @Volatile private var doc: Doc = first
+    private val xml: String get() = doc.xml
+    private val sheets: List<OSheet> get() = doc.sheets
+    private val autoStyles: Map<String, Elem> get() = doc.autoStyles
+    private val autoElem: Elem? get() = doc.autoElem
+    private val bodyStart: Int get() = doc.bodyStart
+    private val taken: Set<String> get() = doc.taken
+
     /** The prefixes the file gives the OpenDocument namespaces ([number], [dc] null when it has none). */
     class Prefixes(val office: String, val table: String, val text: String, val style: String = "style", val fo: String = "fo", val number: String? = null, val dc: String? = null)
 
     /** A cell of the file: its type and value as written, its shown text, its formula (and as Excel writes it, if it can be). */
-    private class OCell(val type: String?, val value: String?, val text: String, val formula: String?, val excel: String?, val currency: String?)
+    private class OCell(val type: String?, val value: String?, val text: String, val formula: String?, val excel: String?, val currency: String?,
+                        /** The cell's style's name; its text formatted inside (spans, links). */
+                        val style: String? = null, val rich: Boolean = false)
 
     private class OSheet(val name: String, val table: Elem, val cells: HashMap<Long, OCell>, val locked: HashSet<Long>, val lockedAreas: List<IntArray>,
                          /** Columns' default cell styles: (first, last, style). */
-                         val columns: List<Triple<Int, Int, String?>> = emptyList()) {
+                         val columns: List<Triple<Int, Int, String?>> = emptyList(),
+                         /** Cells with a note in the file. */
+                         val annotated: Set<Long> = emptySet()) {
         fun cell(row: Int, col: Int) = cells[key(row, col)]
         fun columnStyle(col: Int): String? = columns.firstOrNull { col in it.first..it.second }?.third
     }
 
-    override val sheetNames = sheets.map { SheetEdit.SheetName(it.name, true) }
-    override val canRows = false
-    override val canSort = false
+    override val sheetNames = first.sheets.map { SheetEdit.SheetName(it.name, true) }
     override val extension = "ods"
 
     private val inputs = HashMap<CellKey, Input>()
@@ -112,8 +132,36 @@ class OdsEdit private constructor(
         }
     }
 
-    override fun stored(cell: CellKey): Input? = null
-    override fun style(cell: CellKey): Int? = null
+    /**
+     * What the cell holds, exactly (for moving it whole, as sorting does): null for a formula, an
+     * error, a date or time, text formatted inside, or a cell with a note, which are not moved.
+     */
+    @Synchronized
+    override fun stored(cell: CellKey): Input? {
+        inputs[cell]?.let { return if (it is Input.Formula) null else it }
+        val sh = sheets.getOrNull(cell.sheet) ?: return null
+        if (key(cell.row, cell.col) in sh.annotated) return null
+        val raw = sh.cell(cell.row, cell.col) ?: return Input.Clear
+        if (raw.formula != null || raw.rich || raw.type == "date" || raw.type == "time") return null
+        return when (val v = rawValue(raw)) {
+            is Value.Num -> Input.Number(v.v)
+            is Value.Text -> Input.Text(v.v)
+            is Value.Bool -> Input.Bool(v.v)
+            is Value.Err -> null
+            Value.Empty -> Input.Clear
+        }
+    }
+
+    /** Cell styles' names by the numbers [style] gives (0: none, the column's own). */
+    private val styleNumbers = arrayListOf<String?>(null)
+
+    /** The cell's style, as a number this editor knows it by (a look with it puts that style back). */
+    @Synchronized
+    override fun style(cell: CellKey): Int? {
+        val name = sheets.getOrNull(cell.sheet)?.cell(cell.row, cell.col)?.style ?: return 0
+        val at = styleNumbers.indexOf(name)
+        return if (at >= 0) at else { styleNumbers += name; styleNumbers.size - 1 }
+    }
 
     override fun parse(typed: String, dateCell: Boolean, date1904: Boolean): Input? {
         val t = typed.replace("\r", "")
@@ -206,7 +254,7 @@ class OdsEdit private constructor(
         val out = HashMap<CellKey, Value>()
         for (k in inputs.keys) out[k] = cells.valueOf(k)
         // Every formula of the file worked out again (only while something was changed)
-        if (inputs.isNotEmpty()) for ((s, sh) in sheets.withIndex()) for ((k, c) in sh.cells) {
+        if (inputs.isNotEmpty() || doc.moved) for ((s, sh) in sheets.withIndex()) for ((k, c) in sh.cells) {
             if (c.excel == null) continue
             val ck = CellKey(s, (k / COLS).toInt(), (k % COLS).toInt())
             if (ck !in inputs) out[ck] = cells.valueOf(ck)
@@ -236,10 +284,11 @@ class OdsEdit private constructor(
     @Synchronized override fun setWidth(sheet: Int, col: Int, chars: Float?) { if (chars == null) widths.remove(sheet to col) else widths[sheet to col] = chars.coerceIn(0.5f, 255f) }
     override val size: Long get() = xml.length.toLong()
 
-    private class Snap(val inputs: Map<CellKey, Input>, val looks: Map<CellKey, CellLook>, val widths: Map<Pair<Int, Int>, Float>, val notes: Map<CellKey, String>) : SheetSnapshot
-    @Synchronized override fun snapshot(): SheetSnapshot = Snap(HashMap(inputs), HashMap(looks), HashMap(widths), HashMap(notes))
+    private class Snap(val doc: Doc, val inputs: Map<CellKey, Input>, val looks: Map<CellKey, CellLook>, val widths: Map<Pair<Int, Int>, Float>, val notes: Map<CellKey, String>) : SheetSnapshot
+    @Synchronized override fun snapshot(): SheetSnapshot = Snap(doc, HashMap(inputs), HashMap(looks), HashMap(widths), HashMap(notes))
     @Synchronized override fun restore(s: SheetSnapshot) {
         s as Snap
+        if (s.doc !== doc) { doc = s.doc; synchronized(parsedFile) { parsedFile.clear() } }
         inputs.clear(); parsedInputs.clear(); for ((k, v) in s.inputs) set(k, v)
         looks.clear(); looks.putAll(s.looks); widths.clear(); widths.putAll(s.widths); notes.clear(); notes.putAll(s.notes)
     }
@@ -342,8 +391,228 @@ class OdsEdit private constructor(
         val at = before?.start ?: root.closeStart
         return x.substring(0, at) + add + x.substring(at)
     }
-    override fun moveRows(sheet: Int, at: Int, n: Int) = XlsxEdit.RowRefusal.WORKBOOK
-    override fun moveColumns(sheet: Int, at: Int, n: Int) = XlsxEdit.RowRefusal.WORKBOOK
+    // --- Rows and columns ---
+
+    override val canRows get() = true
+    override val canSort get() = true
+
+    private class Refused(val why: XlsxEdit.RowRefusal) : Exception()
+
+    /**
+     * Inserts [n] empty rows before row [at] of [sheet] ([n] > 0), or deletes [-n] rows from [at]
+     * ([n] < 0), as LibreOffice does: formulas on every sheet follow. Null when done, otherwise why
+     * not (nothing is changed then). Call off the main thread.
+     */
+    @Synchronized override fun moveRows(sheet: Int, at: Int, n: Int): XlsxEdit.RowRefusal? = move(sheet, at, n, false)
+
+    /** As [moveRows], for columns. */
+    @Synchronized override fun moveColumns(sheet: Int, at: Int, n: Int): XlsxEdit.RowRefusal? = move(sheet, at, n, true)
+
+    private fun move(sheet: Int, at: Int, n: Int, cols: Boolean): XlsxEdit.RowRefusal? {
+        if (n == 0) return null
+        if (at < 0) return XlsxEdit.RowRefusal.SHEET
+        val d = doc
+        val sh = d.sheets.getOrNull(sheet) ?: return XlsxEdit.RowRefusal.SHEET
+        val tb = ns.table
+        if (sh.lockedAreas.isNotEmpty() || sh.table.attrs["$tb:protected"] == "true") return XlsxEdit.RowRefusal.LOCKED
+        val x = d.xml
+        // In the sheet: drawings tied to cells, conditional formats, its own names, print ranges, checks of what is typed
+        if (BLOCKERS_IN_TABLE.containsMatchIn(x.substring(sh.table.start, sh.table.end))) return XlsxEdit.RowRefusal.SHEET
+        // Elsewhere: ranges of the sheet named, filtered, checked or summed by their address (not followed here)
+        val name = sh.name
+        for (part in listOf(x.substring(d.bodyStart, sh.table.start), x.substring(sh.table.end))) for (m in ADDRESSES.findAll(part)) {
+            val v = XmlScan.unescape(m.groupValues[1].ifEmpty { m.groupValues[2] })
+            if (v.contains(name) || v.contains("'" + name.replace("'", "''") + "'")) return XlsxEdit.RowRefusal.WORKBOOK
+        }
+        val move = Formula.RowMove(at, n, cols)
+        return try {
+            // What was typed here follows its row (worked out first: nothing changes if it cannot)
+            fun moved(k: CellKey): CellKey? = if (k.sheet != sheet) k else if (cols) move.row(k.col)?.let { k.copy(col = it) } else move.row(k.row)?.let { k.copy(row = it) }
+            val newInputs = HashMap<CellKey, Input>()
+            for ((k, i) in inputs) {
+                val key = moved(k) ?: continue
+                newInputs[key] = if (i is Input.Formula) Input.Formula(Formula.moveRows(i.text, k.sheet == sheet, name, move) ?: throw Refused(XlsxEdit.RowRefusal.FORMULAS)) else i
+            }
+            val newLooks = HashMap<CellKey, CellLook>(); for ((k, v) in looks) moved(k)?.let { newLooks[it] = v }
+            val newNotes = HashMap<CellKey, String>(); for ((k, v) in notes) moved(k)?.let { newNotes[it] = v }
+            val newWidths = HashMap<Pair<Int, Int>, Float>()
+            for ((k, v) in widths) { val key = if (!cols || k.first != sheet) k else move.row(k.second)?.let { k.first to it } ?: continue; newWidths[key] = v }
+
+            // The formulas of every sheet, then the sheet's rows or columns
+            val step = movedFormulas(x, d, sheet, name, move)
+            val table = tablesOf(step).getOrNull(sheet) ?: throw Refused(XlsxEdit.RowRefusal.SHEET)
+            val newTable = if (cols) movedColumns(step, table, at, n) else movedRows(step, table, at, n)
+            val next = parse(step.substring(0, table.start) + newTable + step.substring(table.end), ns, moved = true)
+
+            doc = next
+            synchronized(parsedFile) { parsedFile.clear() }
+            inputs.clear(); parsedInputs.clear(); for ((k, i) in newInputs) set(k, i)
+            looks.clear(); looks.putAll(newLooks)
+            notes.clear(); notes.putAll(newNotes)
+            widths.clear(); widths.putAll(newWidths)
+            null
+        } catch (e: Refused) {
+            e.why
+        }
+    }
+
+    /** The content with every formula that refers to the moved rows following them. */
+    private fun movedFormulas(x: String, d: Doc, sheet: Int, name: String, move: Formula.RowMove): String {
+        val re = Regex("(\\s${Regex.escape(ns.table)}:formula=)(?:\"([^\"]*)\"|'([^']*)')")
+        val b = StringBuilder(x.length + 1024)
+        var pos = 0
+        for (m in re.findAll(x)) {
+            val at = m.range.first
+            val inTable = d.sheets.indexOfFirst { at in it.table.start until it.table.end }
+            if (inTable < 0) continue
+            val raw = XmlScan.unescape(m.groupValues[2].ifEmpty { m.groupValues[3] })
+            val own = inTable == sheet
+            val excel = fromOdf(raw)
+            if (excel == null) { if (own || raw.contains(name)) throw Refused(XlsxEdit.RowRefusal.FORMULAS); continue }
+            val moved = Formula.moveRows(excel, own, name, move) ?: throw Refused(XlsxEdit.RowRefusal.FORMULAS)
+            if (moved == excel) continue
+            val odf = toOdf(moved) ?: throw Refused(XlsxEdit.RowRefusal.FORMULAS)
+            b.append(x, pos, at).append(m.groupValues[1]).append('"').append(XmlScan.escape(odf)).append('"')
+            pos = m.range.last + 1
+        }
+        return b.append(x, pos, x.length).toString()
+    }
+
+    /** The spreadsheet's tables in [x], in order. */
+    private fun tablesOf(x: String): List<Elem> {
+        val root = XmlScan.children(x, 0, x.length).firstOrNull { it.local == "document-content" } ?: return emptyList()
+        val body = XmlScan.children(x, root).firstOrNull { it.name == "${ns.office}:body" } ?: return emptyList()
+        val sp = XmlScan.children(x, body).firstOrNull { it.name == "${ns.office}:spreadsheet" } ?: return emptyList()
+        return XmlScan.children(x, sp).filter { it.name == "${ns.table}:table" }
+    }
+
+    /** [e] written again with its repeat count [k] (as it is when that is its own). */
+    private fun again(x: String, e: Elem, attr: String, k: Int): String =
+        if (k == repeat(e, attr)) x.substring(e.start, e.end) else repeated(x.substring(e.start, e.openEnd), attr, k) + x.substring(e.openEnd, e.end)
+
+    /** Nothing in it but looks: no value, text, formula, note or drawing. */
+    private fun blank(x: String, e: Elem) = e.empty || !FILLED.containsMatchIn(x.substring(e.start, e.end))
+
+    /**
+     * Things in a row (cells), or a table's rows or columns, one after another, each repeated
+     * [attr] times: [n] new ones ([fresh]) put before number [at], or [-n] taken out from it. The
+     * last one, when blank and repeated more than [n] times, is shortened by as many as are put in,
+     * so the whole stays as long (LibreOffice fills its sheets to their last row and column so).
+     */
+    private inner class Line(val x: String, val attr: String, val at: Int, val n: Int, val last: Elem?, val fresh: (Elem) -> String, val check: (Elem, Int) -> Unit) {
+        var count = 0
+        var done = n < 0
+        fun item(e: Elem, b: StringBuilder) {
+            var rn = repeat(e, attr)
+            check(e, count)
+            if (n > 0 && e.start == last?.start && rn > n && blank(x, e)) rn -= n
+            if (n > 0) {
+                if (!done && at >= count && at < count + rn) {
+                    if (at > count) b.append(again(x, e, attr, at - count))
+                    b.append(fresh(e)); done = true
+                    b.append(again(x, e, attr, count + rn - at))
+                } else b.append(again(x, e, attr, rn))
+            } else {
+                val end = at - n
+                val kept = if (at >= count + rn || end <= count) rn else (at - count).coerceAtLeast(0) + (count + rn - end).coerceAtLeast(0)
+                if (kept > 0) b.append(again(x, e, attr, kept))
+            }
+            count += rn
+        }
+    }
+
+    /** The last element named [names] at any depth inside [from, to) (rows inside groups too). */
+    private fun lastOf(x: String, from: Int, to: Int, item: String, groups: Set<String>): Elem? {
+        var found: Elem? = null
+        for (c in XmlScan.children(x, from, to)) when (c.name) {
+            item -> found = c
+            in groups -> if (!c.empty) lastOf(x, c.openEnd, c.closeStart, item, groups)?.let { found = it }
+        }
+        return found
+    }
+
+    private fun movedRows(x: String, t: Elem, at: Int, n: Int): String {
+        val tb = ns.table
+        val groups = setOf("$tb:table-header-rows", "$tb:table-rows", "$tb:table-row-group")
+        val end = at - minOf(n, 0)
+        val line = Line(x, "$tb:number-rows-repeated", at, n, lastOf(x, t.openEnd, t.closeStart, "$tb:table-row", groups),
+            fresh = { r -> "<$tb:table-row" + (r.attrs["$tb:style-name"]?.let { " $tb:style-name=\"${XmlScan.escape(it)}\"" } ?: "") + (if (n > 1) " $tb:number-rows-repeated=\"$n\"" else "") + "><$tb:table-cell/></$tb:table-row>" },
+            check = { r, row ->
+                // Merged cells across the rows' edge would be cut: refused
+                if (!r.empty && x.indexOf("rows-spanned", r.start).let { it in r.start until r.end }) for (c in XmlScan.children(x, r)) {
+                    val span = c.attrs["$tb:number-rows-spanned"]?.toIntOrNull() ?: 1
+                    if (span <= 1) continue
+                    val top = row; val bottom = row + span - 1
+                    val cut = if (n > 0) top < at && bottom >= at else top < end && bottom >= at && !(top >= at && bottom < end)
+                    if (cut) throw Refused(XlsxEdit.RowRefusal.LOCKED)
+                }
+            })
+        val b = StringBuilder()
+        fun rows(from: Int, to: Int) {
+            var pos = from
+            for (r in XmlScan.children(x, from, to)) {
+                b.append(x, pos, r.start); pos = r.end
+                when (r.name) {
+                    "$tb:table-row" -> line.item(r, b)
+                    in groups -> if (r.empty) b.append(x, r.start, r.end) else { b.append(x, r.start, r.openEnd); rows(r.openEnd, r.closeStart); b.append(x, r.closeStart, r.end) }
+                    else -> b.append(x, r.start, r.end)
+                }
+            }
+            b.append(x, pos, to)
+        }
+        b.append(x, t.start, t.openEnd)
+        rows(t.openEnd, t.closeStart)
+        b.append(x, t.closeStart, t.end)
+        return b.toString()
+    }
+
+    private fun movedColumns(x: String, t: Elem, at: Int, n: Int): String {
+        val tb = ns.table
+        val rowGroups = setOf("$tb:table-header-rows", "$tb:table-rows", "$tb:table-row-group")
+        val colGroups = setOf("$tb:table-columns", "$tb:table-header-columns", "$tb:table-column-group")
+        val end = at - minOf(n, 0)
+        val b = StringBuilder()
+        val columns = Line(x, "$tb:number-columns-repeated", at, n, lastOf(x, t.openEnd, t.closeStart, "$tb:table-column", colGroups),
+            fresh = { c -> again(x, c, "$tb:number-columns-repeated", n) }, check = { _, _ -> })
+        fun row(r: Elem) {
+            if (r.empty) { b.append(x, r.start, r.end); return }
+            val cells = XmlScan.children(x, r).filter { it.name == "$tb:table-cell" || it.name == "$tb:covered-table-cell" }
+            val line = Line(x, "$tb:number-columns-repeated", at, n, cells.lastOrNull(),
+                fresh = { "<$tb:table-cell" + (if (n > 1) " $tb:number-columns-repeated=\"$n\"" else "") + "/>" },
+                check = { c, col ->
+                    val span = c.attrs["$tb:number-columns-spanned"]?.toIntOrNull() ?: 1
+                    if (span > 1) {
+                        val left = col; val right = col + span - 1
+                        val cut = if (n > 0) left < at && right >= at else left < end && right >= at && !(left >= at && right < end)
+                        if (cut) throw Refused(XlsxEdit.RowRefusal.LOCKED)
+                    }
+                })
+            b.append(x, r.start, r.openEnd)
+            var pos = r.openEnd
+            for (c in XmlScan.children(x, r)) {
+                b.append(x, pos, c.start); pos = c.end
+                if (c.name == "$tb:table-cell" || c.name == "$tb:covered-table-cell") line.item(c, b) else b.append(x, c.start, c.end)
+            }
+            b.append(x, pos, r.end)
+        }
+        fun walk(from: Int, to: Int) {
+            var pos = from
+            for (c in XmlScan.children(x, from, to)) {
+                b.append(x, pos, c.start); pos = c.end
+                when (c.name) {
+                    "$tb:table-column" -> columns.item(c, b)
+                    "$tb:table-row" -> row(c)
+                    in colGroups, in rowGroups -> if (c.empty) b.append(x, c.start, c.end) else { b.append(x, c.start, c.openEnd); walk(c.openEnd, c.closeStart); b.append(x, c.closeStart, c.end) }
+                    else -> b.append(x, c.start, c.end)
+                }
+            }
+            b.append(x, pos, to)
+        }
+        b.append(x, t.start, t.openEnd)
+        walk(t.openEnd, t.closeStart)
+        b.append(x, t.closeStart, t.end)
+        return b.toString()
+    }
 
     // --- Saving ---
 
@@ -537,7 +806,13 @@ class OdsEdit private constructor(
         for ((s, sh) in sheets.withIndex()) {
             val writes = TreeMap<Int, TreeMap<Int, (Elem?) -> String>>()
             /** The style a cell gets: its own (or its column's) with the look put on it. */
-            fun styleOf(k: CellKey, e: Elem?): String? = looks[k]?.let { look -> made.cellStyle(e?.attrs?.get("${ns.table}:style-name") ?: sh.columnStyle(k.col), look) }
+            fun styleOf(k: CellKey, e: Elem?): String? = looks[k]?.let { look ->
+                // A look that names a style (a cell moved by sorting) starts from that one
+                val base = if (look.style != null) synchronized(this) { styleNumbers.getOrNull(look.style.toIntOrNull() ?: 0) } ?: sh.columnStyle(k.col)
+                    else e?.attrs?.get("${ns.table}:style-name") ?: sh.columnStyle(k.col)
+                val rest = look.copy(style = null)
+                if (rest.isEmpty) base ?: "Default" else made.cellStyle(base, rest)
+            }
             for ((k, v) in values) {
                 if (k.sheet != s) continue
                 val input = inputs[k]
@@ -554,7 +829,7 @@ class OdsEdit private constructor(
             val colStyles = TreeMap<Int, (String?) -> String>()
             for ((sc, w) in widths) if (sc.first == s) colStyles[sc.second] = { base -> made.columnStyle(base, w) }
             // Formulas Hramota cannot work out may depend on what changed: written without their old values, so LibreOffice works them out
-            if (inputs.isNotEmpty()) for ((k, c) in sh.cells) {
+            if (inputs.isNotEmpty() || doc.moved) for ((k, c) in sh.cells) {
                 if (c.formula == null) continue
                 val supported = c.excel?.let { parsedOf(s, k, c) }?.supported == true
                 if (supported) continue
@@ -641,6 +916,12 @@ class OdsEdit private constructor(
         private const val MAX_ROWS = 1_048_576
         private const val MAX_COLS = 16_384
         private val VALUE_ATTRS = setOf("office:value-type", "office:value", "office:date-value", "office:time-value", "office:boolean-value", "office:string-value", "office:currency", "table:formula")
+        /** In a sheet: what is tied to its cells or ranges other than through them (rows are not moved then). */
+        private val BLOCKERS_IN_TABLE = Regex("<(?:[\\w.-]+:)?(?:conditional-formats|named-expressions|shapes|scenario|table-source|dde-source)\\b|\\s[\\w.-]+:(?:end-cell-address|print-ranges|content-validation-name)=")
+        /** Addresses of cells and ranges outside the sheets' cells (named ranges, filters, checks, pivot tables). */
+        private val ADDRESSES = Regex("\\s[\\w.-]+:(?:cell-range-address|base-cell-address|target-range-address|range-address|cell-address|source-cell-range-addresses|target-cell-address|expression|condition)=(?:\"([^\"]*)\"|'([^']*)')")
+        /** What makes a cell, row or column more than its looks. */
+        private val FILLED = Regex("value-type=|formula=|<(?:[\\w.-]+:)?(?:p|h|annotation|frame|custom-shape)[\\s/>]")
         private val SHEET_REF = Regex("('(?:[^']|'')+'|[\\p{L}_][\\p{L}\\p{N}_.]*)!")
         private const val OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
         private const val TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
@@ -832,6 +1113,12 @@ class OdsEdit private constructor(
             fun prefix(uri: String) = root.attrs.entries.firstOrNull { it.value == uri && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:") ?: throw IOException("Unusual namespaces")
             fun prefixOrNull(uri: String) = root.attrs.entries.firstOrNull { it.value == uri && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
             val ns = Prefixes(prefix(OFFICE), prefix(TABLE), prefix(TEXT), prefixOrNull(STYLE) ?: "style", prefixOrNull(FO) ?: "fo", prefixOrNull(NUMBER), prefixOrNull(DC))
+            return OdsEdit(MessageDigest.getInstance("SHA-256").digest(bytes), ns, parse(xml, ns))
+        }
+
+        /** The content's sheets and cells, read for editing. */
+        private fun parse(xml: String, ns: Prefixes, moved: Boolean = false): Doc {
+            val root = XmlScan.children(xml, 0, xml.length).firstOrNull { it.local == "document-content" } ?: throw IOException("No content")
             val o = ns.office; val tb = ns.table; val t = ns.text
             val top = XmlScan.children(xml, root)
             val body = top.firstOrNull { it.name == "$o:body" } ?: throw IOException("No body")
@@ -848,6 +1135,7 @@ class OdsEdit private constructor(
                 val cells = HashMap<Long, OCell>()
                 val locked = HashSet<Long>()
                 val areas = ArrayList<IntArray>()
+                val annotated = HashSet<Long>()
                 var row = 0
                 val columns = ArrayList<Triple<Int, Int, String?>>()
                 var col0 = 0
@@ -858,13 +1146,14 @@ class OdsEdit private constructor(
                     }
                 }
                 cols(table)
+                var rich = false
                 fun textOf(c: Elem): String = XmlScan.children(xml, c).filter { it.name == "$t:p" || it.name == "$t:h" }.joinToString("\n") { p ->
                     val sb = StringBuilder()
                     fun walk(e: Elem) {
                         var pos = e.openEnd
                         for (k in XmlScan.children(xml, e)) {
                             sb.append(XmlScan.unescape(xml.substring(pos, k.start))); pos = k.end
-                            when (k.local) { "s" -> sb.append(" ".repeat((k.attrs["$t:c"]?.toIntOrNull() ?: 1).coerceIn(1, 100))); "tab" -> sb.append('\t'); "line-break" -> sb.append('\n'); "annotation" -> {}; else -> if (!k.empty) walk(k) }
+                            when (k.local) { "s" -> sb.append(" ".repeat((k.attrs["$t:c"]?.toIntOrNull() ?: 1).coerceIn(1, 100))); "tab" -> sb.append('\t'); "line-break" -> sb.append('\n'); "annotation" -> {}; else -> { rich = true; if (!k.empty) walk(k) } }
                         }
                         sb.append(XmlScan.unescape(xml.substring(pos, e.closeStart)))
                     }
@@ -884,23 +1173,27 @@ class OdsEdit private constructor(
                                 val covered = c.name == "$tb:covered-table-cell"
                                 val type = c.attrs["$o:value-type"]
                                 val formula = c.attrs["$tb:formula"]
+                                rich = false
                                 val text = if (c.empty) "" else textOf(c)
+                                val noted = !c.empty && XmlScan.children(xml, c).any { it.local == "annotation" }
                                 val has = type != null || formula != null || text.isNotEmpty()
                                 // Array formulas: the whole area stays as it is
                                 c.attrs["$tb:number-matrix-columns-spanned"]?.toIntOrNull()?.let { mc ->
                                     val mr = c.attrs["$tb:number-matrix-rows-spanned"]?.toIntOrNull() ?: 1
                                     areas += intArrayOf(row, col, row + mr - 1, col + mc - 1)
                                 }
+                                if (noted && !has && !covered) annotated += key(row, col)
                                 if (covered || has) {
                                     // Repeats of a cell that holds something: each one (within what the reader shows)
                                     val rows = if (rn > 1000) 1000 else rn
                                     val cols = if (cn > 1024) 1024 else cn
                                     if (has || covered) {
                                         val oc = if (has) OCell(type, c.attrs["$o:value"] ?: c.attrs["$o:date-value"] ?: c.attrs["$o:time-value"] ?: c.attrs["$o:boolean-value"] ?: c.attrs["$o:string-value"],
-                                            text, formula, formula?.let(::fromOdf)?.takeIf { Formula.parse(it).node != null }, c.attrs["$o:currency"]) else null
+                                            text, formula, formula?.let(::fromOdf)?.takeIf { Formula.parse(it).node != null }, c.attrs["$o:currency"], c.attrs["$tb:style-name"], rich) else null
                                         for (dr in 0 until rows) for (dc in 0 until cols) {
                                             val k = key(row + dr, col + dc)
                                             if (covered) locked += k
+                                            if (noted) annotated += k
                                             if (oc != null) { cells[k] = oc; if (++total > MAX_CELLS) throw IOException("Too many cells to edit") }
                                         }
                                     }
@@ -913,11 +1206,11 @@ class OdsEdit private constructor(
                     }
                 }
                 rows(table, 0)
-                sheets += OSheet(name, table, cells, locked, areas, columns)
+                sheets += OSheet(name, table, cells, locked, areas, columns, annotated)
             }
             if (sheets.isEmpty()) throw IOException("No sheets")
             // Names the document's other parts may use too (styles.xml is not read here): new ones get a prefix of their own
-            return OdsEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, sheets, autoStyles, autoElem, body.start, taken)
+            return Doc(xml, sheets, autoStyles, autoElem, body.start, taken, moved)
         }
 
         private fun readAll(input: InputStream, limit: Long): ByteArray {

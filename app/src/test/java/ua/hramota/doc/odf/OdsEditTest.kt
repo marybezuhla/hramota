@@ -160,4 +160,74 @@ class OdsEditTest {
         assertEquals("7000", again.content(CellKey(0, 5, 1)))
         assertEquals("Квітень", again.content(CellKey(0, 6, 0)))
     }
+
+    @Test fun rowsInsertedAndDeleted() {
+        val bytes = javaClass.classLoader!!.getResource("odf/01-budget.ods")!!.readBytes()
+        val edit = OdsEdit.open(ByteArrayInputStream(bytes))
+        assertTrue(edit.canRows && edit.canSort)
+        val before = edit.snapshot()
+        // A row before March: March and the rows after it move down, their sums with them
+        assertNull(edit.moveRows(0, 5, 1))
+        assertEquals("Березень", edit.content(CellKey(0, 6, 0)))
+        assertEquals("=SUM(B7:D7)", edit.content(CellKey(0, 6, 4)))
+        assertEquals("", edit.content(CellKey(0, 5, 0)))
+        edit.set(CellKey(0, 5, 0), edit.parse("Додатково", false)!!)
+        edit.set(CellKey(0, 5, 1), edit.parse("100", false)!!)
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes), out)
+        val saved = out.toByteArray()
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "ods-rows.ods").writeBytes(saved); java.io.File(it, "ods-rows.expect").writeText("6,2,100\n7,1,Березень\n7,5,10500\n10,5,15700\n") }
+        val c = part(saved, "content.xml")!!
+        assertTrue(c, c.contains("of:=SUM([.B7:.D7])"))
+        // As many rows as before: the empty ones at the end one fewer
+        val rows = Regex("<table:table table:name=\"Бюджет\".*?</table:table>", RegexOption.DOT_MATCHES_ALL).find(c)!!.value
+        val count = Regex("<table:table-row\\b([^>]*)>").findAll(rows).sumOf { m -> Regex("number-rows-repeated=\"(\\d+)\"").find(m.groupValues[1])?.groupValues?.get(1)?.toInt() ?: 1 }
+        assertEquals(1_048_576, count)
+        val wb = OdsReader.read(ByteArrayInputStream(saved))
+        assertEquals("Додатково", wb.sheets[0].row(5)!!.let { r -> wb.sheets[0].text(r, r.find(0)) })
+        // Undone: as the file was
+        edit.restore(before)
+        assertEquals("Березень", edit.content(CellKey(0, 5, 0)))
+        assertEquals("=SUM(B6:D6)", edit.content(CellKey(0, 5, 4)))
+        // February deleted: March moves up
+        assertNull(edit.moveRows(0, 4, -1))
+        assertEquals("Березень", edit.content(CellKey(0, 4, 0)))
+        assertEquals("=SUM(B5:D5)", edit.content(CellKey(0, 4, 4)))
+        // The title is one cell across five columns: a column put inside it is refused
+        assertEquals(ua.hramota.doc.sheet.edit.XlsxEdit.RowRefusal.LOCKED, edit.moveColumns(0, 2, 1))
+    }
+
+    @Test fun columnsInsertedAndDeleted() {
+        val bytes = ods()
+        val edit = OdsEdit.open(ByteArrayInputStream(bytes))
+        assertNull(edit.moveColumns(0, 1, 1))
+        assertEquals("=C1*2", edit.content(CellKey(0, 0, 3)))
+        assertEquals("=SUM(C1:C4)", edit.content(CellKey(0, 4, 0)))
+        assertEquals("=Дані!C1+1", edit.content(CellKey(1, 0, 0)))
+        assertEquals("", edit.content(CellKey(0, 0, 1)))
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes), out)
+        val c = part(out.toByteArray(), "content.xml")!!
+        assertTrue(c, c.contains("of:=[.C1]*2") && c.contains("of:=SUM([.C1:.C4])") && c.contains("[\$Дані.C1]"))
+        assertTrue(c, c.contains("<table:table-column table:number-columns-repeated=\"4\"/>"))
+        assertNull(edit.moveColumns(0, 1, -1))
+        assertEquals("=B1*2", edit.content(CellKey(0, 0, 2)))
+        assertEquals("=Дані!B1+1", edit.content(CellKey(1, 0, 0)))
+    }
+
+    @Test fun sortableCells() {
+        val bytes = javaClass.classLoader!!.getResource("odf/01-budget.ods")!!.readBytes()
+        val edit = OdsEdit.open(ByteArrayInputStream(bytes))
+        assertEquals(ua.hramota.doc.sheet.edit.Input.Number(6200.0), edit.stored(CellKey(0, 3, 1)))
+        assertEquals(ua.hramota.doc.sheet.edit.Input.Text("Січень"), edit.stored(CellKey(0, 3, 0)))
+        assertNull(edit.stored(CellKey(0, 3, 4)))
+        assertEquals(ua.hramota.doc.sheet.edit.Input.Clear, edit.stored(CellKey(0, 30, 3)))
+        // A style moved with a cell is written with its own name
+        val s = edit.style(CellKey(0, 3, 4))!!
+        edit.set(CellKey(0, 3, 1), ua.hramota.doc.sheet.edit.Input.Number(1.0))
+        assertTrue(edit.setLook(CellKey(0, 3, 1), ua.hramota.doc.sheet.edit.CellLook(style = s.toString())))
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes), out)
+        assertTrue(OdsReader.read(ByteArrayInputStream(out.toByteArray())).sheets[0].let { sh -> sh.row(3)!!.let { r -> sh.style(r, r.find(1)).bold } })
+    }
 }
