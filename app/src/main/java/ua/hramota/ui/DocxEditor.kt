@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
@@ -26,6 +28,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -391,6 +394,7 @@ fun DocxEditorScreen(
     val find = remember { FindState() }
     var replacedCount by remember { mutableStateOf<Int?>(null) }
     BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
     Scaffold(
         topBar = {
           Column {
@@ -402,29 +406,45 @@ fun DocxEditorScreen(
                     }
                 },
                 actions = {
-                    val commentsLabel = stringResource(R.string.comments_count, state.comments.size)
-                    if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}", modifier = Modifier.clearAndSetSemantics { contentDescription = commentsLabel }) }
+                    // Undo and redo, finding, saving: always at hand; on a phone the rest under ⋮
+                    Tool("↶", stringResource(R.string.edit_undo), enabled = !saving && state.canUndo) { state.undo() }
+                    Tool("↷", stringResource(R.string.edit_redo), enabled = !saving && state.canRedo) { state.redo() }
                     IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
-                    if (pagesOf != null) TextButton(onClick = { pagesShown = true }, enabled = !saving) { Text(stringResource(R.string.edit_pages)) }
+                    val commentsLabel = stringResource(R.string.comments_count, state.comments.size)
+                    if (wide) {
+                        if (state.comments.isNotEmpty()) TextButton(onClick = { listing = true }) { Text("💬 ${state.comments.size}", modifier = Modifier.clearAndSetSemantics { contentDescription = commentsLabel }) }
+                        if (pagesOf != null) TextButton(onClick = { pagesShown = true }, enabled = !saving) { Text(stringResource(R.string.edit_pages)) }
+                    } else if (pagesOf != null || state.comments.isNotEmpty()) Box {
+                        var more by remember { mutableStateOf(false) }
+                        IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more)) }
+                        DropdownMenu(more, onDismissRequest = { more = false }) {
+                            if (pagesOf != null) DropdownMenuItem(text = { Text(stringResource(R.string.edit_pages)) }, enabled = !saving, onClick = { more = false; pagesShown = true })
+                            if (state.comments.isNotEmpty()) DropdownMenuItem(text = { Text(commentsLabel) }, onClick = { more = false; listing = true })
+                        }
+                    }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
+            // On a tablet the tools stand under the title, as in an office program
+            if (wide) EditToolbar(state, enabled = !saving, wide = true, onComment = { commenting = true })
             if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
           }
         },
-        // (also while finding: undo is there)
-        bottomBar = { EditToolbar(state, enabled = !saving, onComment = { commenting = true }) },
+        bottomBar = { if (!wide) EditToolbar(state, enabled = !saving, wide = false, onComment = { commenting = true }) },
     ) { padding ->
         val listState = rememberLazyListState()
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
+        // On a tablet: the text as a page, as wide as a sheet of paper, on the desk around it
+        Box(Modifier.fillMaxSize().padding(padding).then(if (wide) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier), contentAlignment = Alignment.TopCenter) {
+          LazyColumn(
+            Modifier.fillMaxHeight().then(if (wide) Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 24.dp).background(MaterialTheme.colorScheme.surface) else Modifier.fillMaxWidth()),
             state = listState,
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-        ) {
+            contentPadding = PaddingValues(horizontal = if (wide) 48.dp else 20.dp, vertical = if (wide) 40.dp else 16.dp),
+          ) {
             itemsIndexed(state.paras, key = { _, p -> p.key }) { i, p ->
                 val shown = state.shown.getOrNull(i) ?: return@itemsIndexed
                 Column { EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true }) }
             }
+          }
         }
         // After Enter or a join the cursor's paragraph is brought into view
         LaunchedEffect(state.moveTo) {
@@ -564,29 +584,45 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
     }
 }
 
+/**
+ * The writing tools. On a phone, a row under the text where every tool shows at once: styles, bold,
+ * italic, underline, the two lists, and under "⋯" strike-through and a comment. On a tablet, one row
+ * under the title with everything, styles named.
+ */
 @Composable
-private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> Unit) {
+private fun EditToolbar(state: EditorState, enabled: Boolean, wide: Boolean, onComment: () -> Unit) {
     val i = state.indexOf(state.focused)
     val active = enabled && i >= 0 && state.paras.getOrNull(i)?.editable == true
     val look = if (active) state.currentLook() else Look()
     val shown = state.shown.getOrNull(i)
-    Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
-        Column(Modifier.navigationBarsPadding()) {
-            HorizontalDivider()
+    Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().then(if (wide) Modifier else Modifier.imePadding())) {
+        Column(if (wide) Modifier else Modifier.navigationBarsPadding()) {
+            if (!wide) HorizontalDivider()
             Row(
-                Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (wide) Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally) else Arrangement.SpaceEvenly,
             ) {
-                Tool("↶", stringResource(R.string.edit_undo), enabled = enabled && state.canUndo) { state.undo() }
-                Tool("↷", stringResource(R.string.edit_redo), enabled = enabled && state.canRedo) { state.redo() }
+                KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind, compact = !wide)
                 Tool("B", stringResource(R.string.edit_bold), active, look.bold, TextStyle(fontWeight = FontWeight.Bold), toggles = true) { state.toggle(EditorState.Mark.BOLD) }
                 Tool("I", stringResource(R.string.edit_italic), active, look.italic, TextStyle(fontStyle = FontStyle.Italic), toggles = true) { state.toggle(EditorState.Mark.ITALIC) }
                 Tool("U", stringResource(R.string.edit_underline), active, look.underline, TextStyle(textDecoration = TextDecoration.Underline), toggles = true) { state.toggle(EditorState.Mark.UNDERLINE) }
-                Tool("S", stringResource(R.string.edit_strike), active, look.strike, TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(EditorState.Mark.STRIKE) }
-                Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
-                KindMenu(state, enabled = active && state.edit.canStyle, kind = shown?.kind)
+                if (wide) Tool("S", stringResource(R.string.edit_strike), active, look.strike, TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(EditorState.Mark.STRIKE) }
                 Tool("•", stringResource(R.string.edit_bullets), active && state.edit.canList, shown?.list == ListKind.BULLET, toggles = true) { state.toggleList(ListKind.BULLET) }
                 Tool("1.", stringResource(R.string.edit_numbers), active && state.edit.canList, shown?.list == ListKind.NUMBER, toggles = true) { state.toggleList(ListKind.NUMBER) }
+                if (wide) Tool("💬", stringResource(R.string.comment_add), active && state.edit.canComment, onClick = onComment)
+                else Box {
+                    var more by remember { mutableStateOf(false) }
+                    Tool("⋯", stringResource(R.string.edit_more_tools), active) { more = true }
+                    DropdownMenu(more, onDismissRequest = { more = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.edit_strike), textDecoration = TextDecoration.LineThrough) },
+                            leadingIcon = { if (look.strike) Text("✓") },
+                            onClick = { more = false; state.toggle(EditorState.Mark.STRIKE) },
+                        )
+                        DropdownMenuItem(text = { Text(stringResource(R.string.comment_add)) }, leadingIcon = { Text("💬") }, enabled = state.edit.canComment, onClick = { more = false; onComment() })
+                    }
+                }
             }
         }
     }
@@ -618,12 +654,13 @@ internal fun Tool(label: String, description: String, enabled: Boolean = true, o
 }
 
 @Composable
-private fun KindMenu(state: EditorState, enabled: Boolean, kind: Kind?) {
+private fun KindMenu(state: EditorState, enabled: Boolean, kind: Kind?, compact: Boolean = false) {
     var open by remember { mutableStateOf(false) }
     val names = listOf(Kind.NORMAL to R.string.edit_kind_normal, Kind.H1 to R.string.edit_kind_h1, Kind.H2 to R.string.edit_kind_h2, Kind.H3 to R.string.edit_kind_h3)
     Box {
         val current = names.firstOrNull { it.first == kind }?.second ?: R.string.edit_kind_normal
-        Tool(stringResource(current) + " ▾", stringResource(R.string.edit_kind), enabled, state = stringResource(current)) { open = true }
+        // On a phone just "Aa" (the style is said aloud and shown in the list)
+        Tool(if (compact) "Aa▾" else stringResource(current) + " ▾", stringResource(R.string.edit_kind), enabled, state = stringResource(current)) { open = true }
         DropdownMenu(open, onDismissRequest = { open = false }) {
             for ((k, label) in names) DropdownMenuItem(
                 text = { Text(stringResource(label), style = textStyleFor(k, MaterialTheme.colorScheme.onSurface).copy(fontWeight = if (k == Kind.NORMAL) FontWeight.Normal else FontWeight.Bold)) },

@@ -351,6 +351,31 @@ class ScreensTest {
     @Test fun sheetEditorLargeFont() = shot("14-edit-xlsx-large-font") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
     @Config(qualifiers = "en-w400dp-h860dp-xhdpi")
     @Test fun sheetEditorEnglish() = shot("14-edit-xlsx-en") { ua.hramota.ui.SheetEditorScreen("Family budget.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
+    // Tablets (and LibreOffice files): the same editors laid out wide
+    private fun res(name: String) = File(javaClass.classLoader!!.getResource(name)!!.toURI())
+    private fun deck(name: String) = ua.hramota.ui.SlideEditorState(
+        if (name.endsWith(".odp")) ua.hramota.doc.odf.OdpEdit.open(res(name).inputStream()) else ua.hramota.doc.slides.edit.PptxEdit.open(res(name).inputStream()))
+    private fun odtEditor() = ua.hramota.ui.EditorState(ua.hramota.doc.odf.OdtEdit.open(res("odf/03-lists.odt").inputStream()))
+        .also { s -> s.paras.firstOrNull { it.text.length > 30 }?.let { s.focused = it.key } }
+    private fun odsEditor(): ua.hramota.ui.SheetEditorState {
+        val e = ua.hramota.doc.odf.OdsEdit.open(res("odf/01-budget.ods").inputStream())
+        return ua.hramota.ui.SheetEditorState(e, e.readBack(res("odf/01-budget.ods").inputStream()))
+    }
+    @Config(qualifiers = "uk-w1200dp-h800dp-mdpi")
+    @Test fun editorTablet() = shot("16-tablet-docx") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "uk-w1200dp-h800dp-mdpi")
+    @Test fun sheetEditorTablet() = shot("16-tablet-xlsx") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
+    @Config(qualifiers = "uk-w1200dp-h800dp-mdpi")
+    @Test fun slideEditorTablet() = shot("16-tablet-pptx") { ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", androidx.compose.runtime.remember { deck("slides/01-project.pptx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "uk-w800dp-h1280dp-mdpi")
+    @Test fun editorTabletTall() = shot("16-tablet-docx-portrait") { ua.hramota.ui.DocxEditorScreen("Таблиці.docx", androidx.compose.runtime.remember { editor("04-tables.docx") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "uk-w1200dp-h800dp-mdpi-night")
+    @Test fun slideEditorTabletDark() = shot("16-tablet-pptx-dark") { ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", androidx.compose.runtime.remember { deck("slides/01-project.pptx") }, saving = false, onSave = {}, onClose = {}) }
+    @Test fun odtEditorScreen() = shot("17-edit-odt") { ua.hramota.ui.DocxEditorScreen("Списки.odt", androidx.compose.runtime.remember { odtEditor() }, saving = false, onSave = {}, onClose = {}) }
+    @Test fun odsEditorScreen() = shot("17-edit-ods") { ua.hramota.ui.SheetEditorScreen("Бюджет.ods", androidx.compose.runtime.remember { odsEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 2) }
+    @Test fun odpEditorScreen() = shot("17-edit-odp") { ua.hramota.ui.SlideEditorScreen("Проєкт.odp", androidx.compose.runtime.remember { deck("odf/01-project.odp") }, saving = false, onSave = {}, onClose = {}) }
+    @Config(qualifiers = "uk-w1200dp-h800dp-mdpi")
+    @Test fun odsEditorTablet() = shot("17-tablet-ods") { ua.hramota.ui.SheetEditorScreen("Бюджет.ods", androidx.compose.runtime.remember { odsEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 2) }
     @Config(fontScale = 1.5f)
     @Test fun slideEditorLargeFont() = shot("15-edit-pptx-large-font") {
         val st = androidx.compose.runtime.remember {

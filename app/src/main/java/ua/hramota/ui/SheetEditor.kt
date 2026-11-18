@@ -611,12 +611,15 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     draft = state::draft, leave = state::flush, discard = state::discard, version = state.version,
                     rows = if (!state.edit.canRows) null else ({ sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } }),
                     columns = if (!state.edit.canRows) null else ({ sheet, col, delete, right -> scope.launch { state.columns(sheet, col, delete, right) } }),
+                    formatBar = { sheet, row, col ->
+                        CellFormatBar(state.currentLook(sheet, row, col), enabled = !saving && !state.busy, canLook = state.edit.canLook, canWidth = state.edit.canWidth,
+                            onLook = { look -> state.look(sheet, row, col, look) }, onWidth = { sizing = Triple(sheet, row, col) })
+                    },
                     cellActions = { sheet, row, col ->
                         val ctx = context
                         val e = state.edit
                         listOfNotNull(
                             if (e.canLook) ctx.getString(R.string.sheet_format) to { formatting = Triple(sheet, row, col) } else null,
-                            if (e.canWidth) ctx.getString(R.string.sheet_width) to { sizing = Triple(sheet, row, col) } else null,
                             if (e.canSort) ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) } else null,
                             if (e.canSort) ctx.getString(R.string.sheet_sort_down) to { state.sort(sheet, row, col, descending = true, headings = true) } else null,
                             ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },

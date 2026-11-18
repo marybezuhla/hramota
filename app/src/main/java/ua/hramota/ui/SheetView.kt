@@ -148,6 +148,7 @@ fun WorkbookDocument(
         }
         if (editing != null) {
             selected?.let { (r, c) ->
+                editing.formatBar?.invoke(index, r, c)
                 EditBar(editing, index, r, c, onDone = { next -> selected = next }, onClose = { selected = null })
             }
         } else selected?.let { (r, c) ->
@@ -521,6 +522,8 @@ class SheetEditing(
     val version: Int = 0,
     /** More for the chosen cell (its look, the column's width, sorting, a filter): label and action. */
     val cellActions: ((sheet: Int, row: Int, col: Int) -> List<Pair<String, () -> Unit>>)? = null,
+    /** Quick tools for the chosen cell's look, shown above its field. */
+    val formatBar: (@Composable (sheet: Int, row: Int, col: Int) -> Unit)? = null,
 )
 
 /** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */

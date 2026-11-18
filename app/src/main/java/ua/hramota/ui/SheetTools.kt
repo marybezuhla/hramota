@@ -147,3 +147,52 @@ internal fun FilterDialog(column: String, values: List<Pair<String, Int>>, onDis
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
+
+/**
+ * The chosen cell's look at a touch: bold, italic, fill, alignment, number format, and the column's
+ * width. Each control shows the cell as it is; what more there is (sorting, a filter, a note) is in ⋮.
+ */
+@Composable
+internal fun CellFormatBar(now: CellStyle, enabled: Boolean, canLook: Boolean, canWidth: Boolean, onLook: (CellLook) -> Unit, onWidth: () -> Unit) {
+    if (!canLook && !canWidth) return
+    androidx.compose.material3.Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            if (canLook) {
+                Tool("B", stringResource(R.string.edit_bold), enabled, now.bold, androidx.compose.ui.text.TextStyle(fontWeight = FontWeight.Bold), toggles = true) { onLook(CellLook(bold = !now.bold)) }
+                Tool("I", stringResource(R.string.edit_italic), enabled, now.italic, androidx.compose.ui.text.TextStyle(fontStyle = FontStyle.Italic), toggles = true) { onLook(CellLook(italic = !now.italic)) }
+                var fills by remember { mutableStateOf(false) }
+                Box {
+                    Tool("◧", stringResource(R.string.sheet_fill), enabled, now.fill != null && now.fill != 0) { fills = true }
+                    androidx.compose.material3.DropdownMenu(fills, onDismissRequest = { fills = false }) {
+                        Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (c in FILLS) Box(
+                                Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).background(if (c == 0) Color.White else Color(c))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+                                    .clickable { fills = false; onLook(CellLook(fill = c)) },
+                                contentAlignment = Alignment.Center,
+                            ) { if (c == 0) Text("∅", color = Color.Gray) }
+                        }
+                    }
+                }
+                var aligns by remember { mutableStateOf(false) }
+                Box {
+                    val side = now.align ?: "general"
+                    Tool(when (side) { "center" -> "↔"; "right" -> "⇥"; "left" -> "⇤"; else -> "≡" }, stringResource(R.string.sheet_align), enabled) { aligns = true }
+                    androidx.compose.material3.DropdownMenu(aligns, onDismissRequest = { aligns = false }) {
+                        for ((s, label) in listOf("left" to R.string.align_left, "center" to R.string.align_center, "right" to R.string.align_right, "general" to R.string.align_auto))
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(label), fontWeight = if (s == side) FontWeight.Bold else null) }, onClick = { aligns = false; onLook(CellLook(align = s)) })
+                    }
+                }
+                var formats by remember { mutableStateOf(false) }
+                Box {
+                    Tool("123", stringResource(R.string.sheet_number_format), enabled) { formats = true }
+                    androidx.compose.material3.DropdownMenu(formats, onDismissRequest = { formats = false }) {
+                        for ((code, label) in FORMATS)
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(label), fontWeight = if (code == (now.format ?: "General")) FontWeight.Bold else null) }, onClick = { formats = false; onLook(CellLook(format = code)) })
+                    }
+                }
+            }
+            if (canWidth) Tool("↔▯", stringResource(R.string.sheet_width), enabled) { onWidth() }
+        }
+    }
+}

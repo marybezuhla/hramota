@@ -5,7 +5,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,7 +25,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -404,6 +410,26 @@ fun SlideEditorScreen(
     val find = remember { FindState() }
     var replacedCount by remember { mutableStateOf<Int?>(null) }
     BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
+    // The text tools: under the text on a phone, under the title on a tablet; all seen at once
+    val tools: @Composable () -> Unit = {
+        val i = state.indexOf(state.focused)
+        val active = !saving && i >= 0 && state.paras.getOrNull(i)?.editable == true
+        Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().then(if (wide) Modifier else Modifier.imePadding())) {
+            Column(if (wide) Modifier else Modifier.navigationBarsPadding()) {
+                if (!wide) HorizontalDivider()
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (wide) Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally) else Arrangement.SpaceEvenly,
+                ) {
+                    Tool("B", stringResource(R.string.edit_bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold), toggles = true) { state.toggle(SlideEditorState.Mark.BOLD) }
+                    Tool("I", stringResource(R.string.edit_italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic), toggles = true) { state.toggle(SlideEditorState.Mark.ITALIC) }
+                    Tool("U", stringResource(R.string.edit_underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline), toggles = true) { state.toggle(SlideEditorState.Mark.UNDERLINE) }
+                    Tool("S", stringResource(R.string.edit_strike), active, active && state.has(SlideEditorState.Mark.STRIKE), TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(SlideEditorState.Mark.STRIKE) }
+                }
+            }
+        }
+    }
     Scaffold(
         topBar = {
           Column {
@@ -411,32 +437,17 @@ fun SlideEditorScreen(
                 title = { Text(name.substringBeforeLast('.', name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = { if (state.dirty) askClose = true else onClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.edit_close)) } },
                 actions = {
+                    Tool("↶", stringResource(R.string.edit_undo), enabled = !saving && state.canUndo) { state.undo() }
+                    Tool("↷", stringResource(R.string.edit_redo), enabled = !saving && state.canRedo) { state.redo() }
                     IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
+            if (wide) tools()
             if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
           }
         },
-        bottomBar = {
-          run {
-            val i = state.indexOf(state.focused)
-            val active = !saving && i >= 0 && state.paras.getOrNull(i)?.editable == true
-            Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
-                Column(Modifier.navigationBarsPadding()) {
-                    HorizontalDivider()
-                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Tool("↶", stringResource(R.string.edit_undo), enabled = !saving && state.canUndo) { state.undo() }
-                        Tool("↷", stringResource(R.string.edit_redo), enabled = !saving && state.canRedo) { state.redo() }
-                        Tool("B", stringResource(R.string.edit_bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold), toggles = true) { state.toggle(SlideEditorState.Mark.BOLD) }
-                        Tool("I", stringResource(R.string.edit_italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic), toggles = true) { state.toggle(SlideEditorState.Mark.ITALIC) }
-                        Tool("U", stringResource(R.string.edit_underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline), toggles = true) { state.toggle(SlideEditorState.Mark.UNDERLINE) }
-                        Tool("S", stringResource(R.string.edit_strike), active, active && state.has(SlideEditorState.Mark.STRIKE), TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(SlideEditorState.Mark.STRIKE) }
-                    }
-                }
-            }
-          }
-        },
+        bottomBar = { if (!wide) tools() },
     ) { padding ->
         val list = state.paras
         val order = state.order
@@ -458,7 +469,31 @@ fun SlideEditorScreen(
                 at += ps.size
             }
         }
-        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+        // Where each slide's heading is in the list (to go to it from the rail)
+        val headings = remember(order, bySlide) {
+            var at = 0
+            order.map { slide -> at.also { at += 1 + bySlide[slide].orEmpty().size } }
+        }
+        Row(Modifier.fillMaxSize().padding(padding)) {
+          if (wide) {
+            // A tablet: the slides as small pictures down the left, as in a presentation program
+            val current by remember(headings) { androidx.compose.runtime.derivedStateOf { headings.indexOfLast { it <= listState.firstVisibleItemIndex }.coerceAtLeast(0) } }
+            LazyColumn(
+                Modifier.width(176.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainer),
+                contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                itemsIndexed(order, key = { _, slide -> "rail-$slide" }) { n, slide ->
+                    SlideRailItem(
+                        number = n + 1, selected = n == current, aspect = aspect,
+                        picture = thumbnail?.takeIf { slide < state.edit.slideCount }?.let { t -> val f: suspend (Int) -> ImageBitmap? = { w -> t(slide, w) }; f }, slide = slide,
+                        onClick = { scope.launch { listState.animateScrollToItem(headings.getOrElse(n) { 0 }) } },
+                    )
+                }
+            }
+            VerticalDivider()
+          }
+          Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+        LazyColumn(Modifier.fillMaxHeight().widthIn(max = 820.dp).fillMaxWidth(), state = listState, contentPadding = PaddingValues(horizontal = if (wide) 32.dp else 16.dp, vertical = 12.dp)) {
             for ((n, slide) in order.withIndex()) {
                 item(key = "slide-$slide") {
                     SlideHeading(
@@ -498,6 +533,8 @@ fun SlideEditorScreen(
                 }
             }
         }
+          }
+        }
         replacedCount?.let { n ->
             AlertDialog(onDismissRequest = { replacedCount = null }, text = { Text(androidx.compose.ui.res.pluralStringResource(R.plurals.replaced_n, n, n)) },
                 confirmButton = { TextButton(onClick = { replacedCount = null }) { Text(stringResource(R.string.ok)) } })
@@ -518,6 +555,23 @@ fun SlideEditorScreen(
     )
     if (locked) AlertDialog(onDismissRequest = { locked = false }, text = { Text(stringResource(R.string.slide_locked_paragraph)) },
         confirmButton = { TextButton(onClick = { locked = false }) { Text(stringResource(R.string.ok)) } })
+}
+
+/** One slide in the tablet's rail: its number and a small picture; a tap goes to it. */
+@Composable
+private fun SlideRailItem(number: Int, selected: Boolean, aspect: Float, picture: (suspend (Int) -> ImageBitmap?)?, slide: Int, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val label = stringResource(R.string.slide_n, number)
+    Row(
+        Modifier.fillMaxWidth().clickable(onClickLabel = label, onClick = onClick).semantics { this.selected = selected },
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text("$number", style = MaterialTheme.typography.labelMedium, color = if (selected) colors.primary else colors.onSurfaceVariant, modifier = Modifier.width(22.dp).padding(top = 2.dp))
+        val frame = Modifier.weight(1f).aspectRatio(aspect).border(if (selected) 2.dp else 1.dp, if (selected) colors.primary else colors.outlineVariant)
+        val img = if (picture != null) produceState<ImageBitmap?>(null, slide) { value = picture(280) }.value else null
+        if (img != null) Image(img, contentDescription = label, modifier = frame)
+        else Box(frame.background(colors.surface).semantics { contentDescription = label })
+    }
 }
 
 /** A slide's heading while editing: its number and picture, and moving it, adding one after it, taking it out. */

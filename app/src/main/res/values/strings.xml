@@ -775,4 +775,10 @@
     <string name="spell_own_title">My words for spelling</string>
     <string name="spell_own_hint">Words added during the spelling check; kept only on this phone</string>
     <string name="spell_own_none">No words added yet</string>
+    <string name="align_left">Left</string>
+    <string name="align_center">Centre</string>
+    <string name="align_right">Right</string>
+    <string name="align_auto">Automatic</string>
+    <string name="edit_more_tools">More</string>
+    <string name="edit_kind_short">Styles</string>
 </resources>
