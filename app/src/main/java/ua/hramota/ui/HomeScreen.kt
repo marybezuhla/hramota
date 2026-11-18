@@ -38,6 +38,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -106,11 +109,16 @@ fun HomeScreen(
                     color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(end = 2.dp).clip(RoundedCornerShape(10.dp))
                         .background(if (on) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 10.dp, vertical = 12.dp))
+                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 9.dp, vertical = 12.dp))
             }
           }
-            if (tab == 1 && shelf.isNotEmpty()) TextButton(onClick = { searching = !searching }) { Text(if (searching) "✕" else "🔍", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (tab == 0 && recents.isNotEmpty()) TextButton(onClick = onClear) { Text(stringResource(R.string.recent_clear), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false) }
+            // Icons, so the three tabs keep the row's width on a phone
+            if (tab == 1 && shelf.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { searching = !searching }) {
+                Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, contentDescription = stringResource(R.string.find_short), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (tab == 0 && recents.isNotEmpty()) androidx.compose.material3.IconButton(onClick = onClear) {
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.recent_clear), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             androidx.compose.material3.IconButton(onClick = onSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
