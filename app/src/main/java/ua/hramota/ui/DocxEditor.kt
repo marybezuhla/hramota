@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -446,6 +447,8 @@ fun DocxEditorScreen(
         )),
     ) { padding ->
         val listState = rememberLazyListState()
+        // On a tablet: paragraphs, and tables' rows each as one item (cells: their paragraphs' places)
+        val blocks = remember(state.shown, wide) { if (wide) blocksOf(state.shown) else emptyList() }
         // On a tablet: the text as a page, as wide as a sheet of paper, on the desk around it
         Box(Modifier.fillMaxSize().padding(padding).then(if (wide) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh) else Modifier), contentAlignment = Alignment.TopCenter) {
           LazyColumn(
@@ -453,9 +456,19 @@ fun DocxEditorScreen(
             state = listState,
             contentPadding = PaddingValues(horizontal = if (wide) 48.dp else 20.dp, vertical = if (wide) 40.dp else 16.dp),
           ) {
-            itemsIndexed(state.paras, key = { _, p -> p.key }) { i, p ->
+            if (!wide) itemsIndexed(state.paras, key = { _, p -> p.key }) { i, p ->
                 val shown = state.shown.getOrNull(i) ?: return@itemsIndexed
                 Column { EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true }) }
+            } else items(blocks, key = { b -> state.paras.getOrNull(b.first)?.key ?: -b.first.toLong() }) { b ->
+                // A tablet: a table's row with its cells side by side, as Word shows it
+                if (b.cells == null) {
+                    val p = state.paras.getOrNull(b.first) ?: return@items
+                    val shown = state.shown.getOrNull(b.first) ?: return@items
+                    Column { EditParagraph(state, b.first, p, shown, readOnly = saving, onLocked = { locked = true }) }
+                } else TableRow(b.cells) { i ->
+                    val p = state.paras.getOrNull(i); val shown = state.shown.getOrNull(i)
+                    if (p != null && shown != null) EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true }, grid = true)
+                }
             }
           }
         }
@@ -463,7 +476,8 @@ fun DocxEditorScreen(
         LaunchedEffect(state.moveTo) {
             val key = state.moveTo?.first ?: return@LaunchedEffect
             val i = state.indexOf(key)
-            if (i >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == i }) listState.scrollToItem(i)
+            val item = if (wide) blocks.indexOfFirst { i in it.range } else i
+            if (item >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == item }) listState.scrollToItem(item)
         }
     }
     if (askClose) AlertDialog(
@@ -495,6 +509,41 @@ fun DocxEditorScreen(
     )
 }
 
+/** A paragraph ([cells] null) or a table's row: its paragraphs [range], grouped into its cells. */
+private class Block(val first: Int, val range: IntRange, val cells: List<IntRange>?)
+
+/** The paragraphs as a tablet shows them: a table's row together, its cells side by side. */
+private fun blocksOf(shown: List<Shown>): List<Block> {
+    val out = ArrayList<Block>()
+    var i = 0
+    while (i < shown.size) {
+        if (!shown[i].inTable) { out += Block(i, i..i, null); i++; continue }
+        val start = i
+        val cells = ArrayList<IntRange>()
+        var cell = i
+        i++
+        while (i < shown.size && shown[i].inTable && !shown[i].rowStart) {
+            if (shown[i].cellStart) { cells += cell until i; cell = i }
+            i++
+        }
+        cells += cell until i
+        out += Block(start, start until i, cells)
+    }
+    return out
+}
+
+/** A table's row: its cells side by side with lines between, each cell's paragraphs one under another. */
+@Composable
+private fun TableRow(cells: List<IntRange>, paragraph: @Composable (Int) -> Unit) {
+    val line = MaterialTheme.colorScheme.outlineVariant
+    Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).border(androidx.compose.ui.unit.Dp.Hairline, line)) {
+        for ((n, c) in cells.withIndex()) {
+            if (n > 0) androidx.compose.material3.VerticalDivider(color = line)
+            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp, vertical = 2.dp)) { for (i in c) paragraph(i) }
+        }
+    }
+}
+
 private fun textStyleFor(kind: Kind, color: androidx.compose.ui.graphics.Color) = TextStyle(
     color = color,
     fontSize = when (kind) { Kind.H1 -> 24.sp; Kind.H2 -> 21.sp; Kind.H3 -> 19.sp; else -> 17.sp },
@@ -502,20 +551,21 @@ private fun textStyleFor(kind: Kind, color: androidx.compose.ui.graphics.Color) 
 )
 
 @Composable
-private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown, readOnly: Boolean, onLocked: () -> Unit) {
+private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown, readOnly: Boolean, onLocked: () -> Unit, grid: Boolean = false) {
     val color = MaterialTheme.colorScheme.onSurface
     val style = textStyleFor(shown.kind, if (p.editable) color else color.copy(alpha = 0.6f))
     // Table cells: a row begins with a gap and a line, the cells of a row follow closely
     val top = when {
+        grid -> 0.dp
         shown.rowStart -> 10.dp
         shown.cellStart -> 2.dp
         shown.inTable -> 0.dp
         else -> when (shown.kind) { Kind.H1 -> 18.dp; Kind.H2 -> 14.dp; Kind.H3 -> 10.dp; else -> 4.dp }
     }
     val colors = MaterialTheme.colorScheme
-    val cell = if (shown.inTable) Modifier.background(colors.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 10.dp, vertical = 3.dp) else Modifier
-    if (shown.rowStart) HorizontalDivider(Modifier.padding(top = top), color = colors.outlineVariant)
-    Row(Modifier.fillMaxWidth().padding(top = if (shown.rowStart) 2.dp else top, bottom = if (shown.inTable) 0.dp else 4.dp).then(cell)) {
+    val cell = if (shown.inTable && !grid) Modifier.background(colors.surfaceVariant.copy(alpha = 0.55f)).padding(horizontal = 10.dp, vertical = 3.dp) else Modifier
+    if (shown.rowStart && !grid) HorizontalDivider(Modifier.padding(top = top), color = colors.outlineVariant)
+    Row(Modifier.fillMaxWidth().padding(top = if (shown.rowStart && !grid) 2.dp else top, bottom = if (shown.inTable) 0.dp else 4.dp).then(cell)) {
         shown.marker?.let { m -> Text(m, style = style, modifier = Modifier.width(28.dp)) }
         if (!p.editable) {
             Text(

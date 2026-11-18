@@ -15,6 +15,15 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
@@ -73,10 +82,16 @@ class InkState {
     /** Shows [list] (after an undo in the editor, say), without counting as a change by hand. */
     fun show(list: List<Stroke>) { if (strokes.toList() != list) { strokes.clear(); strokes.addAll(list); undone.clear() } }
 
-    /** Takes out whole strokes the eraser went over. */
+    /** Takes out whole strokes the eraser went over (only those near its path are looked at closely). */
     private fun erase(path: List<InkPoint>) {
         val r = 10f
-        val hit = strokes.filter { s -> s.points.any { a -> path.any { b -> (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) < r * r } } }
+        var left = Float.MAX_VALUE; var top = Float.MAX_VALUE; var right = -Float.MAX_VALUE; var bottom = -Float.MAX_VALUE
+        for (b in path) { left = minOf(left, b.x); top = minOf(top, b.y); right = maxOf(right, b.x); bottom = maxOf(bottom, b.y) }
+        left -= r; top -= r; right += r; bottom += r
+        val hit = strokes.filter { s ->
+            s.points.any { a -> a.x in left..right && a.y in top..bottom } &&
+                s.points.any { a -> a.x in left..right && a.y in top..bottom && path.any { b -> (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) < r * r } }
+        }
         if (hit.isNotEmpty()) { strokes.removeAll(hit.toSet()); undone.clear(); onChange?.invoke() }
     }
 }
@@ -125,9 +140,16 @@ fun InkCanvas(state: InkState, modifier: Modifier = Modifier, background: DrawSc
             state.drawing++
         }
     }) {
+        // Three layers: the page's lines; the strokes written, kept as a picture (only a new stroke is
+        // drawn onto it, so thousands of them cost nothing while writing); the stroke being written
+        Canvas(Modifier.matchParentSize()) { background() }
+        val cache = remember(state) { InkPicture() }
+        Spacer(Modifier.matchParentSize().drawWithCache {
+            val list = state.strokes.toList()
+            val image = cache.update(list, size, density, layoutDirection)
+            onDrawBehind { if (image != null) drawImage(image) else for (s in list) drawStroke(s, density) }
+        })
         Canvas(Modifier.matchParentSize()) {
-            background()
-            for (s in state.strokes) drawStroke(s, density)
             @Suppress("UNUSED_EXPRESSION") state.drawing
             state.live?.let { if (state.tool != InkTool.ERASER) drawStroke(Stroke(it.toList(), state.color, if (state.tool == InkTool.MARKER) state.width * 5 else state.width, state.tool, state.liveStylus), density) }
         }
@@ -135,6 +157,35 @@ fun InkCanvas(state: InkState, modifier: Modifier = Modifier, background: DrawSc
 }
 
 private const val FINGER = 0.5f
+
+/**
+ * The strokes written, drawn once into a picture as big as the page: a stroke added is drawn onto
+ * it alone; anything else (undo, erasing, another page's strokes, a new size) draws them all again.
+ * Null for a page too big to keep so (its strokes are drawn as they are then).
+ */
+private class InkPicture {
+    private var image: ImageBitmap? = null
+    private var drawn: List<Stroke> = emptyList()
+    private val scope = CanvasDrawScope()
+
+    fun update(list: List<Stroke>, size: Size, density: Float, dir: LayoutDirection): ImageBitmap? {
+        val w = size.width.toInt(); val h = size.height.toInt()
+        if (w <= 0 || h <= 0 || w.toLong() * h > MAX_PIXELS) { image = null; drawn = emptyList(); return null }
+        var img = image
+        val extends = img != null && img.width == w && img.height == h && list.size >= drawn.size && drawn.indices.all { list[it] === drawn[it] }
+        if (img == null || img.width != w || img.height != h) img = try { ImageBitmap(w, h) } catch (e: OutOfMemoryError) { image = null; drawn = emptyList(); return null }
+        val from = if (extends) drawn.size else 0
+        val canvas = androidx.compose.ui.graphics.Canvas(img)
+        scope.draw(Density(density), dir, canvas, size) {
+            if (from == 0) drawRect(Color.Transparent, blendMode = BlendMode.Clear)
+            for (i in from until list.size) drawStroke(list[i], density)
+        }
+        image = img; drawn = list
+        return img
+    }
+
+    companion object { const val MAX_PIXELS = 16L * 1024 * 1024 }
+}
 
 /** Draws a stroke: as one path for a finger or a marker, piece by piece (width by pressure) for a stylus pen. */
 fun DrawScope.drawStroke(s: Stroke, density: Float) {

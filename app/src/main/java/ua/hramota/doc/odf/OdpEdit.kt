@@ -20,39 +20,205 @@ import java.util.zip.ZipOutputStream
 
 /**
  * An OpenDocument presentation (ODP) opened for editing in the file itself: the text of its slides'
- * frames and speaker notes (bold, italic, underline, strike-through; paragraphs split and joined), and
- * slides moved and taken out. Only the paragraphs changed are written anew; everything else stays as
+ * frames and speaker notes (bold, italic, underline, strike-through; paragraphs split and joined),
+ * slides moved, taken out and added (laid out as the one before), speaker notes added. Only the paragraphs changed are written anew; everything else stays as
  * the file had it. In a run's [RunStyle.rPr] is its text style's name ("" for none).
  */
 class OdpEdit private constructor(
-    private val xml: String,
+    xml: String,
     private val digest: ByteArray,
     private val ns: OdtEdit.Prefixes,
-    private val pages: List<Elem>,
-    private val presentation: Elem,
-    private val slots: List<Slot>,
-    private val slotOf: HashMap<Long, Int>,
-    override val paragraphs: List<SlidePara>,
-    override val boxes: List<TextBox>,
+    private val draw: String,
+    /** The presentation and SVG namespaces' prefixes as the file declares them (null: not declared, notes are not added). */
+    private val pres: String?,
+    private val svg: String?,
+    filePages: List<Elem>,
     private val styles: OdfPackage.Styles,
     private val autoText: Map<String, OdtEdit.AutoStyle>,
     private val autoStyles: Elem?,
     private val bodyStart: Int,
 ) : SlideEdit {
-    /** Where a paragraph is: its place in the file, its page, and the list item it is in (its element's name), if any. */
-    private class Slot(val start: Int, val end: Int, val page: Int, val item: String?, val container: Int, val level: Int = 0)
+    /**
+     * Where a paragraph is: its place in its text ([src]: the file's content, or a slide or notes made
+     * here), its page, its text box, and the list item it is in (its element's name), if any.
+     */
+    private class Slot(val start: Int, val end: Int, val page: Int, val item: String?, val container: Int, val level: Int = 0, val src: Int = 0, val box: Int = -1)
 
+    /** A slide: where it is written ([src], [elem]), and what was put into it here ([splices]). */
+    private class Page(val src: Int, val elem: Elem, val splices: MutableList<Splice> = ArrayList())
+
+    /** In a page's text, [start] to [end] written instead as text [src] (speaker notes added). */
+    private class Splice(val start: Int, val end: Int, val src: Int)
+
+    /** The texts slides are written from: the file's content first, then slides and notes made here. */
+    private val texts = arrayListOf(xml)
+    private val xml: String get() = texts[0]
+    private val pages = ArrayList<Page>()
+    private val fileStart = filePages.first().start
+    private val fileEnd = filePages.last().end
+    private val slots = ArrayList<Slot>()
+    private val slotOf = HashMap<Long, Int>()
+    private val initial = ArrayList<SlidePara>()
+    private val boxList = ArrayList<TextBox>()
+    private val interned = HashMap<String, RunStyle>()
+    private var containers = 0
+    private var nextKey = 1L
+
+    init {
+        for (e in filePages) { pages += Page(0, e); initial += collect(0, pages.size - 1, e) }
+    }
+
+    override val paragraphs: List<SlidePara> get() = initial
+    override val boxes: List<TextBox> get() = boxList
     override val slideCount get() = pages.size
     override val extension = "odp"
-    override val canAddSlides = false
     override val canPlace = false
-    override val canNotes = false
+    override val canNotes get() = pres != null && svg != null
 
-    private var nextKey = paragraphs.size.toLong() + 1
+    // --- Reading text boxes (the file's, and those made here) ---
 
-    override fun addSlide(after: Int?, lang: String): Pair<Int, List<SlidePara>> = throw IOException("Not here")
+    private fun paragraphsIn(src: Int, page: Int, e: Elem, box: Int, item: String?, container: Int, depth: Int, level: Int, out: MutableList<SlidePara>) {
+        if (depth > 30) return
+        val x = texts[src]; val t = ns.text
+        for (c in XmlScan.children(x, e)) when (c.name) {
+            "$t:p", "$t:h" -> {
+                slots += Slot(c.start, c.end, page, item, container, level.coerceAtLeast(0), src, box)
+                val p = readParagraph(x, ns, c, nextKey++, box, interned)
+                slotOf[p.key] = slots.size - 1
+                out += p
+            }
+            "$t:list" -> for (it in XmlScan.children(x, c)) if (it.name == "$t:list-item" || it.name == "$t:list-header") paragraphsIn(src, page, it, box, it.name, ++containers, depth + 1, level + 1, out)
+        }
+    }
+
+    private fun shape(src: Int, page: Int, c: Elem, depth: Int, notes: Boolean, out: MutableList<SlidePara>) {
+        if (depth > 20) return
+        val x = texts[src]; val t = ns.text; val p = pres ?: "presentation"
+        when (c.name) {
+            "$draw:frame" -> {
+                val tb = XmlScan.children(x, c).firstOrNull { it.name == "$draw:text-box" } ?: return
+                val kind = when (c.attrs["$p:class"]) { "title" -> "title"; "subtitle" -> "subtitle"; "notes" -> "notes"; else -> if (notes) "notes" else "body" }
+                boxList += TextBox(page, kind, 0, 0, 0)
+                paragraphsIn(src, page, tb, boxList.size - 1, null, ++containers, depth + 1, -1, out)
+            }
+            "$draw:custom-shape", "$draw:rect", "$draw:ellipse" -> if (XmlScan.children(x, c).any { it.name == "$t:p" || it.name == "$t:list" }) {
+                boxList += TextBox(page, "body", 0, 0, 0)
+                paragraphsIn(src, page, c, boxList.size - 1, null, ++containers, depth + 1, -1, out)
+            }
+            "$draw:g" -> for (k in XmlScan.children(x, c)) shape(src, page, k, depth + 1, notes, out)
+            "$p:notes" -> for (k in XmlScan.children(x, c)) shape(src, page, k, depth + 1, true, out)
+        }
+    }
+
+    /** The paragraphs of a slide's (or its notes') shapes; a text box with no paragraph is left out (nothing to edit). */
+    private fun collect(src: Int, page: Int, e: Elem): List<SlidePara> {
+        val out = ArrayList<SlidePara>()
+        for (c in XmlScan.children(texts[src], e)) shape(src, page, c, 0, false, out)
+        return out
+    }
+
+    // --- Slides and notes added ---
+
+    private val ids by lazy { Regex("\\s(?:xml:id|${Regex.escape(draw)}:id|${Regex.escape(ns.text)}:id)=(?:\"[^\"]*\"|'[^']*')") }
+    private fun withoutIds(tag: String) = tag.replace(ids, "")
+    /** An element's start tag, as one that has content. */
+    private fun openTag(x: String, e: Elem) = withoutIds(x.substring(e.start, e.openEnd).let { if (e.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it })
+
+    /** An empty paragraph where [box]'s text begins, in the lists it begins in (so it looks as the first one did). */
+    private fun emptyFirst(x: String, box: Elem, depth: Int = 0): String {
+        val t = ns.text
+        val c = if (box.empty || depth > 10) null else XmlScan.children(x, box).firstOrNull { it.name == "$t:p" || it.name == "$t:h" || it.name == "$t:list" || it.name == "$t:list-item" }
+        return when (c?.name) {
+            null -> "<$t:p></$t:p>"
+            "$t:list", "$t:list-item" -> openTag(x, c) + emptyFirst(x, c, depth + 1) + "</${c.name}>"
+            else -> openTag(x, c) + "</${c.name}>"
+        }
+    }
+
+    /**
+     * A new slide after [after], laid out as it is (its master, layout, title and text placeholders,
+     * empty; its pictures and other shapes are not copied). Returns its number and its paragraphs.
+     */
+    @Synchronized
+    override fun addSlide(after: Int?, lang: String): Pair<Int, List<SlidePara>> {
+        val base = pages.getOrNull(after ?: 0) ?: throw IOException("No such slide")
+        val x = texts[base.src]; val e = base.elem
+        val p = pres ?: throw IOException("No presentation namespace")
+        if (e.selfClosing) throw IOException("Empty slide")
+        // A name of its own (the slides' names are told apart by LibreOffice)
+        val names = pages.mapNotNull { it.elem.attrs["$draw:name"] }.toHashSet()
+        var n = pages.size + 1
+        while ("page$n" in names) n++
+        val start = openTag(x, e).replace(Regex("\\s${Regex.escape(draw)}:name=(?:\"[^\"]*\"|'[^']*')"), "")
+        val b = StringBuilder(start.dropLast(1)).append(" $draw:name=\"page$n\">")
+        for (c in XmlScan.children(x, e)) when {
+            c.name == "$draw:frame" && c.attrs["$p:class"] in PLACEHOLDERS -> {
+                val tb = XmlScan.children(x, c).firstOrNull { it.name == "$draw:text-box" } ?: continue
+                b.append(openTag(x, c).replace(Regex("\\s$p:placeholder=(?:\"[^\"]*\"|'[^']*')"), ""))
+                    .append(openTag(x, tb)).append(emptyFirst(x, tb)).append("</$draw:text-box></$draw:frame>")
+            }
+            c.name == "$p:notes" && !c.selfClosing -> {
+                b.append(openTag(x, c))
+                for (k in XmlScan.children(x, c)) when {
+                    k.name == "$draw:page-thumbnail" -> b.append(withoutIds(x.substring(k.start, k.end)))
+                    k.name == "$draw:frame" && k.attrs["$p:class"] == "notes" -> b.append(openTag(x, k)).append("<$draw:text-box/></$draw:frame>")
+                }
+                b.append("</${c.name}>")
+            }
+        }
+        b.append("</${e.name}>")
+        val src = texts.size
+        texts += b.toString()
+        val elem = XmlScan.children(texts[src], 0, texts[src].length).firstOrNull() ?: throw IOException("Slide not made")
+        pages += Page(src, elem)
+        return (pages.size - 1) to collect(src, pages.size - 1, elem)
+    }
+
+    /** Notes added here, by slide: their text and paragraph (to add them again after an undo). */
+    private val notesMade = HashMap<Int, Pair<Int, Int>>()
+
+    /** Speaker notes for a slide without them: one empty paragraph, in the notes' frame (made when there is none). */
+    @Synchronized
+    override fun addNotes(slide: Int, lang: String): List<SlidePara>? {
+        val p = pres ?: return null; val sv = svg ?: return null
+        val pg = pages.getOrNull(slide) ?: return null
+        val t = ns.text
+        notesMade[slide]?.let { (src, slot) ->
+            // Added before and undone: the same paragraph again
+            val s = slots[slot]; val x = texts[src]
+            val e = XmlScan.children(x, 0, x.length).let { all -> fun find(l: List<Elem>): Elem? { for (c in l) { if (c.start == s.start) return c; if (!c.empty) find(XmlScan.children(x, c))?.let { return it } }; return null }; find(all) } ?: return null
+            val para = readParagraph(x, ns, e, nextKey++, s.box, interned)
+            slotOf[para.key] = slot
+            return listOf(para)
+        }
+        if (slots.any { it.page == slide && it.box >= 0 && boxList[it.box].kind == "notes" }) return null
+        if (pg.elem.selfClosing) return null
+        val x = texts[pg.src]
+        val frame = "<$draw:frame $p:class=\"notes\" $sv:width=\"16.799cm\" $sv:height=\"13.364cm\" $sv:x=\"2.1cm\" $sv:y=\"14.107cm\"><$draw:text-box><$t:p></$t:p></$draw:text-box></$draw:frame>"
+        val notes = XmlScan.children(x, pg.elem).firstOrNull { it.name == "$p:notes" }
+        val box = notes?.takeIf { !it.selfClosing }?.let { XmlScan.children(x, it).firstOrNull { f -> f.name == "$draw:frame" && f.attrs["$p:class"] == "notes" } }
+            ?.let { XmlScan.children(x, it).firstOrNull { c -> c.name == "$draw:text-box" } }
+        val (snippet, splice) = when {
+            // The notes' frame is there, empty: a paragraph put in it
+            box != null -> (openTag(x, box) + "<$t:p></$t:p></$draw:text-box>") to (box.start to box.end)
+            notes == null -> "<$p:notes>$frame</$p:notes>" to (pg.elem.closeStart to pg.elem.closeStart)
+            notes.selfClosing -> (openTag(x, notes) + frame + "</${notes.name}>") to (notes.start to notes.end)
+            else -> frame to (notes.closeStart to notes.closeStart)
+        }
+        val src = texts.size
+        texts += snippet
+        pg.splices += Splice(splice.first, splice.second, src)
+        val root = XmlScan.children(snippet, 0, snippet.length).firstOrNull() ?: return null
+        val out = ArrayList<SlidePara>()
+        if (root.name == "$draw:text-box") {
+            boxList += TextBox(slide, "notes", 0, 0, 0)
+            paragraphsIn(src, slide, root, boxList.size - 1, null, ++containers, 0, -1, out)
+        } else shape(src, slide, root, 0, true, out)
+        out.firstOrNull()?.let { notesMade[slide] = src to slotOf.getValue(it.key) }
+        return out
+    }
+
     override fun canRemove(slide: Int, order: Collection<Int>) = order.size > 1
-    override fun addNotes(slide: Int, lang: String): List<SlidePara>? = null
     override fun canComment(slide: Int) = false
     override fun setComments(slide: Int, list: List<String>) {}
     override fun addTextBox(slide: Int, rect: LongArray, lang: String): Pair<PptxEdit.ShapeRef, List<SlidePara>> = throw IOException("Not here")
@@ -80,7 +246,7 @@ class OdpEdit private constructor(
         val sa = slots[slot(a)]; val sb = slots[slot(b)]
         if (sa === sb) return true
         // Side by side in one place (one list item, or the frame itself), nothing between them
-        return slot(b) == slot(a) + 1 && sa.container == sb.container && b.startTag.firstOrNull() == '<' && !b.startTag.startsWith("</") && (sa.end until sb.start).all { xml[it].isWhitespace() }
+        return slot(b) == slot(a) + 1 && sa.src == sb.src && sa.container == sb.container && b.startTag.firstOrNull() == '<' && !b.startTag.startsWith("</") && (sa.end until sb.start).all { texts[sa.src][it].isWhitespace() }
     }
 
     override fun canSplit(p: SlidePara) = p.editable
@@ -174,25 +340,28 @@ class OdpEdit private constructor(
     }
 
     /** content.xml with the slides in [order] and their changed paragraphs written anew. */
+    @Synchronized
     fun contentXml(list: List<SlidePara>, order: List<Int>): String {
         val made = Made()
         val bySlot = list.groupBy { slot(it) }
-        fun page(i: Int): String {
+        val bySlide = HashMap<Int, MutableList<Int>>()
+        for ((k, s) in slots.withIndex()) bySlide.getOrPut(s.page) { ArrayList() } += k
+        // [src] from [from] to [to], its paragraphs (on page [i]) written as they now are, what was put in written in its place
+        fun rewrite(src: Int, from: Int, to: Int, i: Int, b: StringBuilder) {
+            val x = texts[src]
+            val events = ArrayList<Triple<Int, Int, () -> Unit>>()
+            for (k in bySlide[i].orEmpty()) { val s = slots[k]; if (s.src == src && s.start >= from && s.end <= to) events += Triple(s.start, s.end) { bySlot[k]?.forEach { write(it, b, made) } } }
             val pg = pages[i]
-            val b = StringBuilder(pg.end - pg.start)
-            var pos = pg.start
-            for ((k, s) in slots.withIndex()) {
-                if (s.page != i) continue
-                b.append(xml, pos, s.start)
-                bySlot[k]?.forEach { write(it, b, made) }
-                pos = s.end
-            }
-            return b.append(xml, pos, pg.end).toString()
+            if (pg.src == src) for (sp in pg.splices) if (sp.start >= from && sp.end <= to) events += Triple(sp.start, sp.end) { rewrite(sp.src, 0, texts[sp.src].length, i, b) }
+            events.sortWith(compareBy({ it.first }, { it.second }))
+            var pos = from
+            for ((start, end, w) in events) { if (start < pos) throw IOException("Overlapping changes"); b.append(x, pos, start); w(); pos = end }
+            b.append(x, pos, to)
         }
         val body = StringBuilder(xml.length - bodyStart + 4096)
-        body.append(xml, bodyStart, pages.first().start)
-        for (i in order) { if (i !in pages.indices) throw IOException("No such slide"); body.append(page(i)) }
-        body.append(xml, pages.last().end, xml.length)
+        body.append(xml, bodyStart, fileStart)
+        for (i in order) { val pg = pages.getOrNull(i) ?: throw IOException("No such slide"); rewrite(pg.src, pg.elem.start, pg.elem.end, i, body) }
+        body.append(xml, fileEnd, xml.length)
         val defs = made.defs.toString()
         val b = StringBuilder(xml.length + 4096)
         val a = autoStyles
@@ -262,6 +431,9 @@ class OdpEdit private constructor(
         private const val FO = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
         private const val DRAW = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
         private const val PRESENTATION = "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
+        private const val SVG = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+        /** Frames a new slide keeps (empty): the layout's title and text. */
+        private val PLACEHOLDERS = setOf("title", "subtitle", "outline", "text")
 
         /** Opens an ODP for editing. Call off the main thread. */
         fun open(input: InputStream): OdpEdit {
@@ -291,7 +463,7 @@ class OdpEdit private constructor(
             fun prefixOrNull(uri: String) = root.attrs.entries.firstOrNull { it.value == uri && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
             fun prefix(uri: String) = prefixOrNull(uri) ?: throw IOException("Unusual namespaces")
             val ns = OdtEdit.Prefixes(prefix(OFFICE), prefix(TEXT), prefix(STYLE), prefix(FO), "table", null)
-            val draw = prefix(DRAW); val pres = prefixOrNull(PRESENTATION) ?: "presentation"
+            val draw = prefix(DRAW)
             val top = XmlScan.children(xml, root)
             val body = top.firstOrNull { it.name == "${ns.office}:body" } ?: throw IOException("No body")
             val presentation = XmlScan.children(xml, body).firstOrNull { it.name == "${ns.office}:presentation" } ?: throw IOException("No presentation")
@@ -310,47 +482,7 @@ class OdpEdit private constructor(
             // Pages must stand together (nothing between them is lost when they are put in another order)
             for (k in 1 until pages.size) if ((pages[k - 1].end until pages[k].start).any { !xml[it].isWhitespace() }) throw IOException("Unusual slides")
 
-            val slots = ArrayList<Slot>()
-            val slotOf = HashMap<Long, Int>()
-            val paras = ArrayList<SlidePara>()
-            val boxes = ArrayList<TextBox>()
-            val interned = HashMap<String, RunStyle>()
-            val t = ns.text
-            var containers = 0
-            class Collector(val page: Int) {
-                fun paragraphs(e: Elem, box: Int, item: String?, container: Int, depth: Int, level: Int = -1) {
-                    if (depth > 30) return
-                    for (c in XmlScan.children(xml, e)) when (c.name) {
-                        "$t:p", "$t:h" -> {
-                            slots += Slot(c.start, c.end, page, item, container, level.coerceAtLeast(0))
-                            val p = readParagraph(xml, ns, c, paras.size.toLong() + 1, box, interned)
-                            slotOf[p.key] = slots.size - 1
-                            paras += p
-                        }
-                        "$t:list" -> for (it in XmlScan.children(xml, c)) if (it.name == "$t:list-item" || it.name == "$t:list-header") paragraphs(it, box, it.name, ++containers, depth + 1, level + 1)
-                    }
-                }
-                fun shapes(e: Elem, depth: Int, notes: Boolean) {
-                    if (depth > 20) return
-                    for (c in XmlScan.children(xml, e)) when (c.name) {
-                        "$draw:frame" -> {
-                            val tb = XmlScan.children(xml, c).firstOrNull { it.name == "$draw:text-box" } ?: continue
-                            val kind = when (c.attrs["$pres:class"]) { "title" -> "title"; "subtitle" -> "subtitle"; "notes" -> "notes"; else -> if (notes) "notes" else "body" }
-                            boxes += TextBox(page, kind, 0, 0, 0)
-                            paragraphs(tb, boxes.size - 1, null, ++containers, depth + 1)
-                        }
-                        "$draw:custom-shape", "$draw:rect", "$draw:ellipse" -> if (XmlScan.children(xml, c).any { it.name == "$t:p" || it.name == "$t:list" }) {
-                            boxes += TextBox(page, "body", 0, 0, 0)
-                            paragraphs(c, boxes.size - 1, null, ++containers, depth + 1)
-                        }
-                        "$draw:g" -> shapes(c, depth + 1, notes)
-                        "$pres:notes" -> shapes(c, depth + 1, true)
-                    }
-                }
-            }
-            for ((i, pg) in pages.withIndex()) Collector(i).shapes(pg, 0, false)
-            // A text box with no paragraph is left out (nothing to edit)
-            return OdpEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, pages, presentation, slots, slotOf, paras, boxes, styles, autoText, auto, body.start)
+            return OdpEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, draw, prefixOrNull(PRESENTATION), prefixOrNull(SVG), pages, styles, autoText, auto, body.start)
         }
 
         private fun readParagraph(xml: String, ns: OdtEdit.Prefixes, e: Elem, key: Long, box: Int, interned: HashMap<String, RunStyle>): SlidePara {
