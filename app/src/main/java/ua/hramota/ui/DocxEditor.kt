@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -434,9 +435,9 @@ fun DocxEditorScreen(
     ) { padding ->
         val listState = rememberLazyListState()
         // On a tablet: the text as a page, as wide as a sheet of paper, on the desk around it
-        Box(Modifier.fillMaxSize().padding(padding).then(if (wide) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxSize().padding(padding).then(if (wide) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh) else Modifier), contentAlignment = Alignment.TopCenter) {
           LazyColumn(
-            Modifier.fillMaxHeight().then(if (wide) Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 24.dp).padding(top = 16.dp).shadow(2.dp).background(MaterialTheme.colorScheme.surface) else Modifier.fillMaxWidth()),
+            Modifier.fillMaxHeight().then(if (wide) Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 24.dp).padding(top = 16.dp).shadow(3.dp).background(MaterialTheme.colorScheme.surfaceContainerLowest).border(1.dp, MaterialTheme.colorScheme.outlineVariant) else Modifier.fillMaxWidth()),
             state = listState,
             contentPadding = PaddingValues(horizontal = if (wide) 48.dp else 20.dp, vertical = if (wide) 40.dp else 16.dp),
           ) {
