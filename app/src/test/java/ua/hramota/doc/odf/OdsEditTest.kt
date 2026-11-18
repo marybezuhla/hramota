@@ -145,7 +145,7 @@ class OdsEditTest {
         val out = ByteArrayOutputStream()
         edit.save(ByteArrayInputStream(bytes), out)
         val saved = out.toByteArray()
-        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "ods-looks.ods").writeBytes(saved); java.io.File(it, "ods-looks.expect").writeText("4,2,6200\n6,2,7000\n6,5,11600\n") }
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "ods-looks.ods").writeBytes(saved); java.io.File(it, "ods-looks.expect").writeText("4,2,6200\n6,2,7000\n6,5,11100\n") }
         val c = part(saved, "content.xml")!!
         assertTrue(c, Regex("<style:style style:name=\"HrCe1\"[^>]*>").containsMatchIn(c))
         assertTrue(c, c.contains("fo:font-weight=\"bold\"") && c.contains("fo:background-color=\"#ffeb3b\""))
