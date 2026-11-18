@@ -287,8 +287,8 @@ class OdsEdit private constructor(
                 x = withProps(x, "$st:text-properties", text)
                 defs.append(x)
             } else {
-                defs.append("<$st:style $st:name="$name" $st:family="table-cell" $st:parent-style-name="${XmlScan.escape(base ?: "Default")}"")
-                if (!data.isNullOrEmpty()) defs.append(" $st:data-style-name="$data"")
+                defs.append("<$st:style $st:name=\"$name\" $st:family=\"table-cell\" $st:parent-style-name=\"${XmlScan.escape(base ?: "Default")}\"")
+                if (!data.isNullOrEmpty()) defs.append(" $st:data-style-name=\"$data\"")
                 defs.append('>')
                 fun el(local: String, m: Map<String, String>) { if (m.isNotEmpty()) { defs.append("<$st:$local"); for ((k, v) in m) defs.append(' ').append(k).append("=\"").append(XmlScan.escape(v)).append('"'); defs.append("/>") } }
                 el("table-cell-properties", cell); el("paragraph-properties", para); el("text-properties", text)
@@ -305,7 +305,7 @@ class OdsEdit private constructor(
             val auto = base?.let { autoStyles[it] }
             if (auto != null) {
                 defs.append(withProps(setAttr(xml.substring(auto.start, auto.end), "$st:name", name), "$st:table-column-properties", mapOf("$st:column-width" to cm, "$st:use-optimal-column-width" to "false")))
-            } else defs.append("<$st:style $st:name="$name" $st:family="table-column"><$st:table-column-properties fo:break-before="auto" $st:column-width="$cm"/></$st:style>".replace("fo:", "${ns.fo}:"))
+            } else defs.append("<$st:style $st:name=\"$name\" $st:family=\"table-column\"><$st:table-column-properties ${ns.fo}:break-before=\"auto\" $st:column-width=\"$cm\"/></$st:style>")
             name
         }
     }
