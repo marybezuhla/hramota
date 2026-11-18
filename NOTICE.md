@@ -18,7 +18,7 @@
 
 ## Голоси для читання вголос (`app/src/main/voice`, `app/src/main/assets/voice`, `app/src/debug/assets/voice`)
 
-Моделі голосів не входять у застосунок для людей: їх завантажують окремо (Тетяна — з випуску Писанки v1.0.0, Cori — з Hugging Face за ревізією 293cad05), і Грамота приймає лише точний файл (`VoiceFiles`). У репозиторії вони лишаються для тестів на пристрої й як джерело файлу Тетяни.
+Моделі голосів не входять у застосунок для людей: їх завантажують окремо (Тетяна — з випуску «Голоси» Основи, Cori — з Hugging Face за ревізією 293cad05), і Грамота приймає лише точний файл (`VoiceFiles`). У репозиторії вони лишаються для тестів на пристрої й як джерело файлу Тетяни.
 
 - **«Тетяна»** — модель [robinhad/ukrainian-tts](https://github.com/robinhad/ukrainian-tts) v5.0.0 (MIT; записи — ukrainian-tts-datasets, Apache 2.0), перетворена в ONNX (`tools/voices/export_espnet.py`, джерела перевіряються за SHA-256).
 - **Словник наголосів** — [ukrainian-word-stress](https://github.com/lang-uk/ukrainian-word-stress) 2.1.0 (MIT), перетворений `tools/voices/build_stress.py`.
