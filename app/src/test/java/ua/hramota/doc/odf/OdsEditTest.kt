@@ -209,7 +209,9 @@ class OdsEditTest {
         edit.save(ByteArrayInputStream(bytes), out)
         val c = part(out.toByteArray(), "content.xml")!!
         assertTrue(c, c.contains("of:=[.C1]*2") && c.contains("of:=SUM([.C1:.C4])") && c.contains("[\$Дані.C1]"))
-        assertTrue(c, c.contains("<table:table-column table:number-columns-repeated=\"4\"/>"))
+        // Four columns now
+        val first = c.substring(0, c.indexOf("</table:table>"))
+        assertEquals(4, Regex("<table:table-column\\b([^>]*)/>").findAll(first).sumOf { m -> Regex("number-columns-repeated=\"(\\d+)\"").find(m.groupValues[1])?.groupValues?.get(1)?.toInt() ?: 1 })
         assertNull(edit.moveColumns(0, 1, -1))
         assertEquals("=B1*2", edit.content(CellKey(0, 0, 2)))
         assertEquals("=Дані!B1+1", edit.content(CellKey(1, 0, 0)))

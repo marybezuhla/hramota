@@ -495,17 +495,17 @@ class OdsEdit private constructor(
 
     /**
      * Things in a row (cells), or a table's rows or columns, one after another, each repeated
-     * [attr] times: [n] new ones ([fresh]) put before number [at], or [-n] taken out from it. The
-     * last one, when blank and repeated more than [n] times, is shortened by as many as are put in,
-     * so the whole stays as long (LibreOffice fills its sheets to their last row and column so).
+     * [attr] times: [n] new ones ([fresh]) put before number [at], or [-n] taken out from it. [trim],
+     * a blank one repeated many times, is shortened by as many as are put in, so the whole stays
+     * within the sheet (LibreOffice fills its sheets to their last row and column).
      */
-    private inner class Line(val x: String, val attr: String, val at: Int, val n: Int, val last: Elem?, val fresh: (Elem) -> String, val check: (Elem, Int) -> Unit) {
+    private inner class Line(val x: String, val attr: String, val at: Int, val n: Int, val trim: Elem?, val fresh: (Elem) -> String, val check: (Elem, Int) -> Unit) {
         var count = 0
         var done = n < 0
         fun item(e: Elem, b: StringBuilder) {
             var rn = repeat(e, attr)
             check(e, count)
-            if (n > 0 && e.start == last?.start && rn > n && blank(x, e)) rn -= n
+            if (n > 0 && e.start == trim?.start) rn -= n
             if (n > 0) {
                 if (!done && at >= count && at < count + rn) {
                     if (at > count) b.append(again(x, e, attr, at - count))
@@ -521,21 +521,35 @@ class OdsEdit private constructor(
         }
     }
 
-    /** The last element named [names] at any depth inside [from, to) (rows inside groups too). */
-    private fun lastOf(x: String, from: Int, to: Int, item: String, groups: Set<String>): Elem? {
-        var found: Elem? = null
+    /** The elements named [item] inside [from, to), in order, at any depth of [groups] (rows inside groups too). */
+    private fun itemsOf(x: String, from: Int, to: Int, item: String, groups: Set<String>, out: MutableList<Elem> = ArrayList()): List<Elem> {
         for (c in XmlScan.children(x, from, to)) when (c.name) {
-            item -> found = c
-            in groups -> if (!c.empty) lastOf(x, c.openEnd, c.closeStart, item, groups)?.let { found = it }
+            item -> out += c
+            in groups -> if (!c.empty) itemsOf(x, c.openEnd, c.closeStart, item, groups, out)
         }
-        return found
+        return out
+    }
+
+    /**
+     * When [n] more would not fit within [max]: the blank one, repeated more than [n] times, after
+     * which there is nothing but blank ones (shortened to make room); refused if there is none.
+     */
+    private fun trimOf(x: String, items: List<Elem>, attr: String, n: Int, max: Int): Elem? {
+        if (n <= 0) return null
+        val total = items.sumOf { repeat(it, attr).toLong() }
+        if (total + n <= max) return null
+        for (e in items.asReversed()) {
+            if (!blank(x, e)) break
+            if (repeat(e, attr) > n) return e
+        }
+        throw Refused(XlsxEdit.RowRefusal.FULL)
     }
 
     private fun movedRows(x: String, t: Elem, at: Int, n: Int): String {
         val tb = ns.table
         val groups = setOf("$tb:table-header-rows", "$tb:table-rows", "$tb:table-row-group")
         val end = at - minOf(n, 0)
-        val line = Line(x, "$tb:number-rows-repeated", at, n, lastOf(x, t.openEnd, t.closeStart, "$tb:table-row", groups),
+        val line = Line(x, "$tb:number-rows-repeated", at, n, trimOf(x, itemsOf(x, t.openEnd, t.closeStart, "$tb:table-row", groups), "$tb:number-rows-repeated", n, MAX_ROWS),
             fresh = { r -> "<$tb:table-row" + (r.attrs["$tb:style-name"]?.let { " $tb:style-name=\"${XmlScan.escape(it)}\"" } ?: "") + (if (n > 1) " $tb:number-rows-repeated=\"$n\"" else "") + "><$tb:table-cell/></$tb:table-row>" },
             check = { r, row ->
                 // Merged cells across the rows' edge would be cut: refused
@@ -572,12 +586,12 @@ class OdsEdit private constructor(
         val colGroups = setOf("$tb:table-columns", "$tb:table-header-columns", "$tb:table-column-group")
         val end = at - minOf(n, 0)
         val b = StringBuilder()
-        val columns = Line(x, "$tb:number-columns-repeated", at, n, lastOf(x, t.openEnd, t.closeStart, "$tb:table-column", colGroups),
+        val columns = Line(x, "$tb:number-columns-repeated", at, n, trimOf(x, itemsOf(x, t.openEnd, t.closeStart, "$tb:table-column", colGroups), "$tb:number-columns-repeated", n, MAX_COLS),
             fresh = { c -> again(x, c, "$tb:number-columns-repeated", n) }, check = { _, _ -> })
         fun row(r: Elem) {
             if (r.empty) { b.append(x, r.start, r.end); return }
             val cells = XmlScan.children(x, r).filter { it.name == "$tb:table-cell" || it.name == "$tb:covered-table-cell" }
-            val line = Line(x, "$tb:number-columns-repeated", at, n, cells.lastOrNull(),
+            val line = Line(x, "$tb:number-columns-repeated", at, n, trimOf(x, cells, "$tb:number-columns-repeated", n, MAX_COLS),
                 fresh = { "<$tb:table-cell" + (if (n > 1) " $tb:number-columns-repeated=\"$n\"" else "") + "/>" },
                 check = { c, col ->
                     val span = c.attrs["$tb:number-columns-spanned"]?.toIntOrNull() ?: 1
