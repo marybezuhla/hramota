@@ -27,3 +27,9 @@ fun UndoRedo(canUndo: Boolean, canRedo: Boolean, onUndo: () -> Unit, onRedo: () 
     IconButton(onClick = onUndo, enabled = canUndo) { Icon(UndoArrow, contentDescription = stringResource(R.string.edit_undo)) }
     IconButton(onClick = onRedo, enabled = canRedo) { Icon(UndoArrow, contentDescription = stringResource(R.string.edit_redo), modifier = Modifier.scale(scaleX = -1f, scaleY = 1f)) }
 }
+
+/** Undo in a phone's tool row, where the thumb reaches. */
+@Composable
+fun UndoTool(enabled: Boolean, onUndo: () -> Unit) {
+    IconButton(onClick = onUndo, enabled = enabled) { Icon(UndoArrow, contentDescription = stringResource(R.string.edit_undo)) }
+}

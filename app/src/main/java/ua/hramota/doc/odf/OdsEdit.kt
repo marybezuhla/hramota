@@ -438,11 +438,11 @@ class OdsEdit private constructor(
             val newWidths = HashMap<Pair<Int, Int>, Float>()
             for ((k, v) in widths) { val key = if (!cols || k.first != sheet) k else move.row(k.second)?.let { k.first to it } ?: continue; newWidths[key] = v }
 
-            // The formulas of every sheet, then the sheet's rows or columns
-            val step = movedFormulas(x, d, sheet, name, move)
-            val table = tablesOf(step).getOrNull(sheet) ?: throw Refused(XlsxEdit.RowRefusal.SHEET)
-            val newTable = if (cols) movedColumns(step, table, at, n) else movedRows(step, table, at, n)
-            val next = parse(step.substring(0, table.start) + newTable + step.substring(table.end), ns, moved = true)
+            // The sheet's rows or columns (cells deleted with them go, formulas and all), then the formulas of every sheet
+            val table = tablesOf(x).getOrNull(sheet) ?: throw Refused(XlsxEdit.RowRefusal.SHEET)
+            val newTable = if (cols) movedColumns(x, table, at, n) else movedRows(x, table, at, n)
+            val step = x.substring(0, table.start) + newTable + x.substring(table.end)
+            val next = parse(movedFormulas(step, sheet, name, move), ns, moved = true)
 
             doc = next
             synchronized(parsedFile) { parsedFile.clear() }
@@ -457,13 +457,14 @@ class OdsEdit private constructor(
     }
 
     /** The content with every formula that refers to the moved rows following them. */
-    private fun movedFormulas(x: String, d: Doc, sheet: Int, name: String, move: Formula.RowMove): String {
+    private fun movedFormulas(x: String, sheet: Int, name: String, move: Formula.RowMove): String {
+        val tables = tablesOf(x)
         val re = Regex("(\\s${Regex.escape(ns.table)}:formula=)(?:\"([^\"]*)\"|'([^']*)')")
         val b = StringBuilder(x.length + 1024)
         var pos = 0
         for (m in re.findAll(x)) {
             val at = m.range.first
-            val inTable = d.sheets.indexOfFirst { at in it.table.start until it.table.end }
+            val inTable = tables.indexOfFirst { at in it.start until it.end }
             if (inTable < 0) continue
             val raw = XmlScan.unescape(m.groupValues[2].ifEmpty { m.groupValues[3] })
             val own = inTable == sheet
