@@ -838,4 +838,7 @@
     <string name="numbers_short">Numbering</string>
     <string name="status_stats_short">%1$s: Σ %2$s · avg %3$s · %4$d</string>
     <string name="group_table">Table</string>
+    <string name="cells_merge_right">Merge right</string>
+    <string name="cells_merge_down">Merge down</string>
+    <string name="cells_split">Split cell</string>
 </resources>

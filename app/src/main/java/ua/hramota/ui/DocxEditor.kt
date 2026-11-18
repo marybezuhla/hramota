@@ -87,6 +87,7 @@ import ua.hramota.doc.docx.edit.ListKind
 import ua.hramota.doc.docx.edit.Look
 import ua.hramota.doc.docx.edit.RunStyle
 import ua.hramota.doc.docx.edit.Shown
+import ua.hramota.doc.docx.edit.TableOp
 
 /** Before each paragraph's text: its deletion (Backspace at the very start) joins it to the one before. */
 private const val ZW = '​'
@@ -178,6 +179,35 @@ class EditorState(val edit: TextEdit) : Replaceable {
         val list = paras.toMutableList()
         list[i] = edit.comment(paras[i], selection.min, selection.max, author.trim(), text.trim())
         commit(list, structure = true)
+        return true
+    }
+
+    private var tableCache: Triple<List<EditPara>, Long?, Set<TableOp>>? = null
+
+    /** What can be done to the table at the cursor (worked out once for each change). */
+    fun tableOps(): Set<TableOp> {
+        val f = focused
+        tableCache?.let { (l, k, ops) -> if (l === paras && k == f) return ops }
+        val p = paras.getOrNull(indexOf(f))
+        val ops = if (p == null || !shown.getOrNull(indexOf(f)).let { it?.inTable == true }) emptySet()
+            else TableOp.entries.filterTo(HashSet()) { edit.canTableOp(paras, p, it) }
+        tableCache = Triple(paras, f, ops)
+        return ops
+    }
+
+    /** [op] done at the cursor's cell; the cursor stays in its paragraph (or goes to the table's first). */
+    fun table(op: TableOp): Boolean {
+        val i = indexOf(focused); val p = paras.getOrNull(i) ?: return false
+        val (range, made) = try { edit.tableOp(paras, p, op) } catch (e: java.io.IOException) { null } ?: return false
+        val list = paras.toMutableList()
+        list.subList(range.first, range.last + 1).clear()
+        list.addAll(range.first, made)
+        commit(list, structure = true)
+        val stay = made.firstOrNull { it.key == p.key } ?: when (op) {
+            TableOp.ROW_BELOW, TableOp.ROW_ABOVE -> made.firstOrNull { q -> paras.none { it.key == q.key } }
+            else -> null
+        } ?: made.firstOrNull()
+        stay?.takeIf { it.editable }?.let { moveTo = it.key to 0 }
         return true
     }
 
@@ -677,6 +707,16 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
     }
 }
 
+/** A table's tools, in the order offered: what, its sign, its name. */
+private val TABLE_TOOLS = listOf(
+    Triple(TableOp.ROW_ABOVE, "↥", R.string.rows_insert_short),
+    Triple(TableOp.ROW_BELOW, "↧", R.string.rows_insert_below_short),
+    Triple(TableOp.ROW_DELETE, "✕", R.string.rows_delete_short),
+    Triple(TableOp.MERGE_RIGHT, "⇥▢", R.string.cells_merge_right),
+    Triple(TableOp.MERGE_DOWN, "⤓▢", R.string.cells_merge_down),
+    Triple(TableOp.SPLIT, "⊞", R.string.cells_split),
+)
+
 /** Splits text into words for counting. */
 private val WORDS = Regex("[\\s\\u00A0]+")
 
@@ -713,9 +753,9 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
                         // In a table: its rows
                         if (shown?.inTable == true) {
                             HorizontalDivider()
-                            DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_short)) }, leadingIcon = { Text("↥") }, enabled = state.canAddRow(), onClick = { more = false; state.addRow(below = false) })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_below_short)) }, leadingIcon = { Text("↧") }, enabled = state.canAddRow(), onClick = { more = false; state.addRow(below = true) })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.rows_delete_short)) }, leadingIcon = { Text("✕") }, enabled = state.canDeleteRow(), onClick = { more = false; state.deleteRow() })
+                            val ops = state.tableOps()
+                            for ((op, glyph, label) in TABLE_TOOLS)
+                                DropdownMenuItem(text = { Text(stringResource(label)) }, leadingIcon = { Text(glyph) }, enabled = op in ops, onClick = { more = false; state.table(op) })
                         }
                     }
                 }
@@ -751,9 +791,8 @@ private fun WordRibbon(state: EditorState, enabled: Boolean, find: FindState, on
         },
         RibbonTab(stringResource(R.string.ribbon_insert)) {
             RibbonGroup(stringResource(R.string.group_table)) {
-                RibbonButton("↥", stringResource(R.string.rows_insert_short), enabled && state.canAddRow()) { state.addRow(below = false) }
-                RibbonButton("↧", stringResource(R.string.rows_insert_below_short), enabled && state.canAddRow()) { state.addRow(below = true) }
-                RibbonButton("✕", stringResource(R.string.rows_delete_short), enabled && state.canDeleteRow()) { state.deleteRow() }
+                val ops = if (enabled) state.tableOps() else emptySet()
+                for ((op, glyph, label) in TABLE_TOOLS) RibbonButton(glyph, stringResource(label), op in ops) { state.table(op) }
             }
             RibbonGroup(stringResource(R.string.group_comments)) {
                 RibbonButton("💬", stringResource(R.string.comment_short), active && state.edit.canComment, onClick = onComment)

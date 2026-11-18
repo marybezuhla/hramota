@@ -226,4 +226,47 @@ class DocxEditTest {
         val total = l2.first { it.text == "Разом" }
         assertTrue(one.canDeleteRow(l2, total))
     }
+
+    @Test fun tableCellsMergedAndSplit() {
+        val name = "04-tables.docx"
+        val edit = DocxEdit.open(ByteArrayInputStream(bytes(name)))
+        var list = edit.paragraphs.toMutableList()
+        fun op(text: String, op: ua.hramota.doc.docx.edit.TableOp): Boolean {
+            val p = list.first { it.text == text }
+            assertTrue("$op at $text", edit.canTableOp(list, p, op))
+            val (range, made) = edit.tableOp(list, p, op)!!
+            list = list.toMutableList().apply { subList(range.first, range.last + 1).clear(); addAll(range.first, made) }
+            return true
+        }
+        // Heading "Товар" and "Кількість" one cell; "Папір…" and "Ручки…" one cell down
+        op("Товар", ua.hramota.doc.docx.edit.TableOp.MERGE_RIGHT)
+        op("Папір офісний А4", ua.hramota.doc.docx.edit.TableOp.MERGE_DOWN)
+        // A row under the paper row: it passes through the merged cell, which grows
+        op("10", ua.hramota.doc.docx.edit.TableOp.ROW_BELOW)
+        val p = list.first { it.text == "Папір офісний А4" }
+        assertFalse(edit.canTableOp(list, p, ua.hramota.doc.docx.edit.TableOp.MERGE_RIGHT))
+        assertTrue(edit.canTableOp(list, p, ua.hramota.doc.docx.edit.TableOp.SPLIT))
+        val saved = save(name, edit, list, "cells")
+        val doc = String(part(saved, "word/document.xml")!!, Charsets.UTF_8)
+        val first = doc.substring(doc.indexOf("<w:tbl>"), doc.indexOf("</w:tbl>"))
+        assertTrue(first, first.contains("<w:gridSpan w:val=\"2\"/>"))
+        assertEquals(1, Regex("<w:vMerge w:val=\"restart\"/>").findAll(first).count())
+        assertEquals(2, Regex("<w:vMerge/>").findAll(first).count())
+        assertEquals(6, Regex("<w:tr[ >]").findAll(first).count())
+        // Both texts of the merged cells in one cell, in order
+        val t = texts(saved)
+        assertTrue(t.indexOf("Папір офісний А4") >= 0 && t.indexOf("Папір офісний А4") < t.indexOf(t.first { it.startsWith("Ручки") }))
+        // Opened again: the same paragraphs; the grid read back the same
+        val again = DocxEdit.open(ByteArrayInputStream(saved))
+        assertEquals(list.map { it.text }, again.paragraphs.map { it.text })
+        val ap = again.paragraphs.first { it.text == "Папір офісний А4" }
+        assertTrue(again.canTableOp(again.paragraphs, ap, ua.hramota.doc.docx.edit.TableOp.SPLIT))
+        // Split back, the row under taken out: as many rows as at first
+        op("Папір офісний А4", ua.hramota.doc.docx.edit.TableOp.SPLIT)
+        op("Товар", ua.hramota.doc.docx.edit.TableOp.SPLIT)
+        val saved2 = save(name, edit, list, "cells2")
+        val doc2 = String(part(saved2, "word/document.xml")!!, Charsets.UTF_8)
+        val t2 = doc2.substring(doc2.indexOf("<w:tbl>"), doc2.indexOf("</w:tbl>"))
+        assertFalse(t2.contains("vMerge")); assertFalse(t2.contains("<w:gridSpan w:val=\"2\"/>"))
+    }
 }

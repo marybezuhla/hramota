@@ -224,4 +224,36 @@ class OdtEditTest {
         val row = c.substring(c.lastIndexOf("<table:table-row", c.indexOf("Конверти")), c.indexOf("</table:table-row>", c.indexOf("Конверти")))
         assertTrue(row, row.contains("table:style-name=\"Table1.A1\"") && !row.contains("value-type"))
     }
+
+    @Test fun tableCellsMergedAndSplit() {
+        val bytes = javaClass.classLoader!!.getResource("odf/04-tables.odt")!!.readBytes()
+        val edit = OdtEdit.open(java.io.ByteArrayInputStream(bytes))
+        var list = edit.paragraphs.toMutableList()
+        fun op(text: String, op: ua.hramota.doc.docx.edit.TableOp) {
+            val p = list.first { it.text == text }
+            assertTrue("$op at $text", edit.canTableOp(list, p, op))
+            val (range, made) = edit.tableOp(list, p, op)!!
+            list = list.toMutableList().apply { subList(range.first, range.last + 1).clear(); addAll(range.first, made) }
+        }
+        op("Товар", ua.hramota.doc.docx.edit.TableOp.MERGE_RIGHT)
+        op("Папір офісний А4", ua.hramota.doc.docx.edit.TableOp.MERGE_DOWN)
+        op("10", ua.hramota.doc.docx.edit.TableOp.ROW_BELOW)
+        val out = java.io.ByteArrayOutputStream()
+        edit.save(list, java.io.ByteArrayInputStream(bytes), out)
+        val saved = out.toByteArray()
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "odt-cells.odt").writeBytes(saved) }
+        val c = part(saved, "content.xml")!!
+        assertTrue(c, c.contains("table:number-columns-spanned=\"2\"") && c.contains("table:number-rows-spanned=\"3\""))
+        val again = OdtEdit.open(java.io.ByteArrayInputStream(saved))
+        assertEquals(list.map { it.text }, again.paragraphs.map { it.text })
+        // Back: split, the added row taken out
+        op("Папір офісний А4", ua.hramota.doc.docx.edit.TableOp.SPLIT)
+        op("Товар", ua.hramota.doc.docx.edit.TableOp.SPLIT)
+        val out2 = java.io.ByteArrayOutputStream()
+        edit.save(list, java.io.ByteArrayInputStream(bytes), out2)
+        val c2 = part(out2.toByteArray(), "content.xml")!!
+        val first = c2.substring(c2.indexOf("<table:table "), c2.indexOf("</table:table>"))
+        assertFalse(first, first.contains("number-rows-spanned"))
+        java.io.File("build/edited").let { java.io.File(it, "odt-cells2.odt").writeBytes(out2.toByteArray()) }
+    }
 }

@@ -10,6 +10,8 @@ import ua.hramota.doc.docx.edit.Kind
 import ua.hramota.doc.docx.edit.ListKind
 import ua.hramota.doc.docx.edit.Look
 import ua.hramota.doc.docx.edit.RunStyle
+import ua.hramota.doc.docx.edit.TableOp
+import ua.hramota.doc.docx.edit.TableGrid
 import ua.hramota.doc.docx.edit.Shown
 import ua.hramota.doc.docx.edit.TextEdit
 import ua.hramota.doc.docx.edit.XmlScan
@@ -42,6 +44,9 @@ class OdtEdit private constructor(
     /** The tables' rows, by number less one (a slot's [Slot.row]). */
     private val rows: MutableList<Row>,
     private var containers: Int,
+    /** Each table's number of columns; tables whose rows are in groups (headings repeated…), not changed as grids. */
+    private val tableColumns: Map<Int, Int>,
+    private val groupedTables: Set<Int>,
     override val paragraphs: List<EditPara>,
     private val styles: OdfPackage.Styles,
     /** Text styles of the content (automatic ones): their attributes as written, to make new ones from. */
@@ -277,6 +282,127 @@ class OdtEdit private constructor(
     private val noIds by lazy { Regex("\\s(?:xml:id|${Regex.escape(ns.text)}:id)=(?:\"[^\"]*\"|'[^']*')") }
     /** What a cell holds as a value (a number, a date, a formula): an empty one has none. */
     private val values = Regex("\\s[\\w.-]+:(?:value-type|value|date-value|time-value|boolean-value|string-value|formula|currency)=(?:\"[^\"]*\"|'[^']*')")
+
+    // --- Tables as grids: cells merged and split, rows added and taken out ---
+
+    /** A cell's look: its start tag (no spans, no value), its first paragraph's start tag. */
+    private class CellLook(val start: String, val pStart: String, val pName: String)
+
+    /** The table [p] is in as a grid, where its paragraphs are in [list], and which table it is; null if it cannot be. */
+    private fun gridOf(list: List<EditPara>, p: EditPara): Triple<IntRange, TableGrid<CellLook, String>, Int>? {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: return null
+        val table = rows[r - 1].table
+        if (table in groupedTables) return null
+        val tb = ns.table; val t = ns.text
+        fun inTable(q: EditPara) = slots[q.slot].let { s -> s.row != 0 && rows[s.row - 1].table == table && s.list == null }
+        val first = list.indexOfFirst(::inTable).takeIf { it >= 0 } ?: return null
+        val last = list.indexOfLast(::inTable)
+        val range = first..last
+        if (range.any { !inTable(list[it]) }) return null
+        val order = ArrayList<Int>()
+        for (i in range) { val x = slots[list[i].slot].row; if (order.lastOrNull() != x) { if (x in order) return null; order += x } }
+        val cells = ArrayList<TableGrid.Cell<CellLook>>()
+        val looks = ArrayList<String>()
+        val taken = HashSet<Long>()
+        val columns = tableColumns[table] ?: return null
+        for ((i, id) in order.withIndex()) {
+            val row = rows[id - 1]
+            val x = texts[row.src]
+            val tr = XmlScan.children(x, row.start, row.end).firstOrNull() ?: return null
+            if ((tr.attrs["$tb:number-rows-repeated"]?.toIntOrNull() ?: 1) > 1) return null
+            looks += x.substring(tr.start, tr.openEnd).let { if (tr.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }.replace(noIds, "")
+            var col = 0
+            for (c in XmlScan.children(x, tr)) {
+                val repeat = c.attrs["$tb:number-columns-repeated"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
+                when (c.name) {
+                    "$tb:covered-table-cell" -> col += repeat
+                    "$tb:table-cell" -> {
+                        val parts = if (c.empty) emptyList() else XmlScan.children(x, c)
+                        if (parts.any { it.name != "$t:p" && it.name != "$t:h" }) return null
+                        val mine = range.map { list[it] }.filter { q -> slots[q.slot].let { it.src == row.src && it.start >= c.start && it.end <= c.end } }.toMutableList()
+                        if (repeat > 1 && mine.any { it.text.isNotEmpty() }) return null
+                        val firstP = parts.firstOrNull()
+                        val pStart = firstP?.let { f -> x.substring(f.start, f.openEnd).let { if (f.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }.replace(noIds, "") } ?: "<$t:p>"
+                        val start = x.substring(c.start, c.openEnd).let { if (c.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }
+                            .replace(noIds, "").replace(values, "").replace(spans, "")
+                        val look = CellLook(start, pStart, firstP?.name ?: "$t:p")
+                        val cs = c.attrs["$tb:number-columns-spanned"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
+                        val rs = c.attrs["$tb:number-rows-spanned"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
+                        for (k in 0 until repeat) {
+                            // (a place covered by a cell above: this one stands after it)
+                            while (taken.contains(i.toLong() shl 20 or col.toLong())) col++
+                            cells += TableGrid.Cell(i, col, rs, cs, look, if (k == 0) mine else ArrayList())
+                            for (dr in 0 until rs) for (dc in 0 until cs) taken += (i + dr).toLong() shl 20 or (col + dc).toLong()
+                            col += cs
+                        }
+                    }
+                    else -> return null
+                }
+            }
+        }
+        // Cells spanning past the last row
+        if (cells.any { it.top + it.rows > order.size }) return null
+        val grid = TableGrid(looks, cells, maxOf(columns, cells.maxOfOrNull { it.left + it.cols } ?: 0))
+        return if (grid.valid()) Triple(range, grid, table) else null
+    }
+
+    private val spans by lazy { Regex("\\s${Regex.escape(ns.table)}:number-(?:columns|rows)-(?:spanned|repeated)=(?:\"[^\"]*\"|'[^']*')") }
+
+    override fun canTableOp(list: List<EditPara>, p: EditPara, op: TableOp): Boolean = gridOf(list, p)?.second?.can(op, p.key) ?: false
+
+    @Synchronized
+    override fun tableOp(list: List<EditPara>, p: EditPara, op: TableOp): Pair<IntRange, List<EditPara>>? {
+        val (range, grid, table) = gridOf(list, p) ?: return null
+        if (!grid.can(op, p.key) || !grid.apply(op, p.key) || !grid.valid()) return null
+        val tb = ns.table
+        val firstRow = slots[list[range.first].slot].row
+        val parent = rows[firstRow - 1].parent
+        val out = ArrayList<EditPara>()
+        val made = ArrayList<Int>()
+        val interned = HashMap<String, RunStyle>()
+        for ((i, look) in grid.rows.withIndex()) {
+            val b = StringBuilder(look)
+            val placeholders = ArrayList<Pair<IntRange, TableGrid.Cell<CellLook>>>()
+            for (k in 0 until grid.columns) {
+                val c = grid.at(i, k)
+                when {
+                    c == null -> b.append("<$tb:table-cell/>")
+                    c.top == i && c.left == k -> {
+                        val f = c.format
+                        b.append(f.start.dropLast(1))
+                        if (c.cols > 1) b.append(" $tb:number-columns-spanned=\"${c.cols}\"")
+                        if (c.rows > 1) b.append(" $tb:number-rows-spanned=\"${c.rows}\"")
+                        b.append('>')
+                        val at = b.length
+                        b.append(f.pStart).append("</").append(f.pName).append('>')
+                        placeholders += (at until b.length) to c
+                        b.append("</$tb:table-cell>")
+                    }
+                    else -> b.append("<$tb:covered-table-cell/>")
+                }
+            }
+            b.append("</$tb:table-row>")
+            val src = texts.size
+            val text = b.toString()
+            texts += text
+            val tr = XmlScan.children(text, 0, text.length).first()
+            val id = rows.size + 1
+            rows += Row(src, tr.start, tr.end, table, parent, plain = true, merged = false, hasSlots = true)
+            made += id
+            for ((place, c) in placeholders) {
+                val container = ++containers
+                slots += Slot(place.first, place.last + 1, container, id, null, src)
+                val slot = slots.size - 1
+                if (c.paras.isEmpty()) {
+                    val e = XmlScan.children(text, place.first, place.last + 1).first()
+                    val q = readParagraph(text, ns, e, slot, interned, ArrayList()) { 0 }
+                    out += EditPara(newKey(), slot, q.text, q.marks, q.pPr, q.startTag, q.head, q.tail, q.editable, q.original, q.typing, q.anchors)
+                } else for (q in c.paras) out += EditPara(q.key, slot, q.text, q.marks, q.pPr, q.startTag, q.head, q.tail, q.editable, q.original, q.typing, q.anchors)
+            }
+        }
+        before.getOrPut(firstRow) { ArrayList() }.addAll(made)
+        return range to out
+    }
 
     @Synchronized
     override fun addRow(p: EditPara, below: Boolean): List<EditPara> {
@@ -699,6 +825,8 @@ class OdtEdit private constructor(
             val t = ns.text; val tb = ns.table
             // The paragraphs in reading order: in the text, sections, lists (each item a place of its own) and tables
             val rowList = ArrayList<Row>()
+            val columnsOf = HashMap<Int, Int>()
+            val grouped = HashSet<Int>()
             class Collector {
                 var containers = 0
                 var rows = 0
@@ -716,8 +844,16 @@ class OdtEdit private constructor(
                         "$t:section" -> collect(XmlScan.children(xml, e), ++containers, row, depth + 1)
                         "$tb:table" -> {
                             val table = ++tables
-                            // Cells across rows, or rows standing for several: not added to or taken out
+                            // Cells across rows, or rows standing for several: not added to or taken out one by one
                             val whole = xml.substring(e.start, e.end)
+                            var n = 0
+                            fun cols(g: Elem, d: Int) { if (d > 5) return; for (c in XmlScan.children(xml, g)) when (c.name) {
+                                "$tb:table-column" -> n += c.attrs["$tb:number-columns-repeated"]?.toIntOrNull()?.coerceIn(1, 100_000) ?: 1
+                                "$tb:table-columns", "$tb:table-header-columns", "$tb:table-column-group" -> cols(c, d + 1)
+                                "$tb:table-header-rows", "$tb:table-rows", "$tb:table-row-group" -> grouped += table
+                            } }
+                            cols(e, 0)
+                            columnsOf[table] = n
                             table(e, depth + 1, table, row, whole.contains("rows-spanned") || whole.contains("number-rows-repeated"))
                         }
                     }
@@ -758,7 +894,7 @@ class OdtEdit private constructor(
             }
             val collector = Collector()
             collector.collect(XmlScan.children(xml, text), 0, 0, 0)
-            return OdtEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, slots, rowList, collector.containers, paras, styles, autoText, auto, body.start, comments)
+            return OdtEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, slots, rowList, collector.containers, columnsOf, grouped, paras, styles, autoText, auto, body.start, comments)
         }
 
         private fun readParagraph(xml: String, ns: Prefixes, e: Elem, slot: Int, interned: HashMap<String, RunStyle>, comments: MutableList<Comment>, atom: () -> Int): EditPara {

@@ -42,6 +42,10 @@ interface TextEdit {
     fun canAddRow(p: EditPara): Boolean = false
     /** [p]'s table row can be taken out (its paragraphs left out of the list). */
     fun canDeleteRow(list: List<EditPara>, p: EditPara): Boolean = false
+    /** Whether [op] can be done at [p]'s table cell. */
+    fun canTableOp(list: List<EditPara>, p: EditPara, op: TableOp): Boolean = false
+    /** [op] done at [p]'s table cell: where the table's paragraphs are in [list] and what goes in their place; null if it cannot. */
+    fun tableOp(list: List<EditPara>, p: EditPara, op: TableOp): Pair<IntRange, List<EditPara>>? = null
     /** An empty row like [p]'s, below or above it; its paragraphs, for the list next to the row's. */
     fun addRow(p: EditPara, below: Boolean): List<EditPara> = throw java.io.IOException("Rows are not added here")
 

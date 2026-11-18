@@ -78,6 +78,8 @@ class DocxEdit private constructor(
     /** The tables' rows, by number less one (a slot's [Slot.row]). */
     private val rows: MutableList<Row>,
     private var containers: Int,
+    /** Each table's columns' widths (twentieths of a point), from its grid; empty if it has none. */
+    private val gridWidths: Map<Int, List<Int>>,
     private val partDigests: Map<String, ByteArray>,
     private var stylesXml: String?,
     private var numberingXml: String?,
@@ -547,8 +549,6 @@ class DocxEdit private constructor(
         return out
     }
 
-    // --- Saving ---
-
     // --- Table rows ---
 
     /** Whether [row] is [r] or inside it. */
@@ -603,7 +603,7 @@ class DocxEdit private constructor(
             "tc" -> {
                 b.append(open(c))
                 val kids = XmlScan.children(x, c)
-                kids.firstOrNull { it.local == "tcPr" }?.let { b.append(x, it.start, it.end) }
+                kids.firstOrNull { it.local == "tcPr" }?.let { b.append(x.substring(it.start, it.end).replace(Regex("<$w:vMerge\\b[^>]*/>"), "")) }
                 val first = kids.firstOrNull { it.local == "p" }
                 val pPr = first?.let { f -> XmlScan.children(x, f).firstOrNull { it.local == "pPr" } }?.let { x.substring(it.start, it.end) } ?: ""
                 b.append("<$w:p>").append(pPr.replace(Regex("<$w:sectPr\\b.*?</$w:sectPr>", RegexOption.DOT_MATCHES_ALL), "")).append("</$w:p>")
@@ -629,6 +629,135 @@ class DocxEdit private constructor(
         }
         if (below) after.getOrPut(r) { ArrayList() }.add(0, id) else before.getOrPut(r) { ArrayList() }.add(id)
         return out
+    }
+
+    // --- Tables as grids: cells merged and split, rows added and taken out ---
+
+    /** A cell's look: its start tag, its properties but width and merging, its width, its first paragraph's properties. */
+    private class CellLook(val start: String, val cnf: String, val props: String, val width: String, val pPr: String)
+    /** A row's look: its start tag and properties. */
+    private class RowLook(val start: String, val inner: String)
+
+    /** The table [p] is in as a grid, where its paragraphs are in [list], and which table it is; null if it cannot be. */
+    private fun gridOf(list: List<EditPara>, p: EditPara): Triple<IntRange, TableGrid<CellLook, RowLook>, Int>? {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: return null
+        val table = rows[r - 1].table
+        // (a table inside a cell of it: not done here)
+        fun inTable(q: EditPara) = slots[q.slot].row.let { it != 0 && rows[it - 1].table == table }
+        val first = list.indexOfFirst(::inTable).takeIf { it >= 0 } ?: return null
+        val last = list.indexOfLast(::inTable)
+        val range = first..last
+        if (range.any { !inTable(list[it]) }) return null
+        val order = ArrayList<Int>()
+        for (i in range) { val x = slots[list[i].slot].row; if (order.lastOrNull() != x) { if (x in order) return null; order += x } }
+        val cells = ArrayList<TableGrid.Cell<CellLook>>()
+        val looks = ArrayList<RowLook>()
+        var columns = gridWidths[table]?.size ?: 0
+        for ((i, id) in order.withIndex()) {
+            val row = rows[id - 1]
+            val x = texts[row.src]
+            val tr = XmlScan.children(x, row.start, row.end).firstOrNull() ?: return null
+            val inner = StringBuilder()
+            var col = 0
+            val kids = XmlScan.children(x, tr)
+            for (c in kids) when (c.local) {
+                "trPr" -> {
+                    inner.append(x, c.start, c.end)
+                    XmlScan.children(x, c).firstOrNull { it.local == "gridBefore" }?.let { g -> col = g.attrs.entries.firstOrNull { it.key.endsWith(":val") }?.value?.toIntOrNull() ?: 0 }
+                }
+                "tblPrEx" -> inner.append(x, c.start, c.end)
+                "tc" -> {}
+                else -> return null
+            }
+            looks += RowLook(x.substring(tr.start, tr.openEnd).replace(noIds, ""), inner.toString())
+            for (tc in kids) if (tc.local == "tc") {
+                val parts = XmlScan.children(x, tc)
+                val tcPr = parts.firstOrNull { it.local == "tcPr" }
+                var span = 1; var merge: String? = null; var width = ""; var cnf = ""
+                val props = StringBuilder()
+                if (tcPr != null) for (k in XmlScan.children(x, tcPr)) when (k.local) {
+                    "gridSpan" -> span = k.attrs.entries.firstOrNull { it.key.endsWith(":val") }?.value?.toIntOrNull()?.coerceIn(1, 1000) ?: 1
+                    "vMerge" -> merge = k.attrs.entries.firstOrNull { it.key.endsWith(":val") }?.value ?: "continue"
+                    "hMerge" -> return null
+                    "tcW" -> width = x.substring(k.start, k.end)
+                    "cnfStyle" -> cnf = x.substring(k.start, k.end)
+                    else -> props.append(x, k.start, k.end)
+                }
+                if (parts.any { it.local != "tcPr" && it.local != "p" }) return null
+                val firstP = parts.firstOrNull { it.local == "p" }
+                val pPr = firstP?.let { f -> XmlScan.children(x, f).firstOrNull { it.local == "pPr" } }
+                    ?.let { x.substring(it.start, it.end).replace(Regex("<$w:sectPr\\b.*?</$w:sectPr>", RegexOption.DOT_MATCHES_ALL), "") } ?: ""
+                val mine = range.map { list[it] }.filter { q -> slots[q.slot].let { it.src == row.src && it.start >= tc.start && it.end <= tc.end } }.toMutableList()
+                val look = CellLook(x.substring(tc.start, tc.openEnd).let { if (tc.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }.replace(noIds, ""), cnf, props.toString(), width, pPr)
+                if (merge != null && merge != "restart") {
+                    // Merged with the cell above: it grows; text here (normally none) is not to be lost
+                    val above = cells.firstOrNull { it.left == col && it.cols == span && it.top + it.rows == i } ?: return null
+                    if (mine.any { it.text.isNotBlank() }) return null
+                    above.rows++
+                } else cells += TableGrid.Cell(i, col, 1, span, look, mine)
+                col += span
+            }
+            columns = maxOf(columns, col)
+        }
+        val grid = TableGrid(looks, cells, columns)
+        return if (grid.valid()) Triple(range, grid, table) else null
+    }
+
+    override fun canTableOp(list: List<EditPara>, p: EditPara, op: TableOp): Boolean = gridOf(list, p)?.second?.can(op, p.key) ?: false
+
+    /**
+     * [op] done at [p]'s cell: the table's rows written anew from its grid. Returns where its
+     * paragraphs were in [list] and what goes in their place; null if it cannot be done.
+     */
+    @Synchronized
+    override fun tableOp(list: List<EditPara>, p: EditPara, op: TableOp): Pair<IntRange, List<EditPara>>? {
+        val (range, grid, table) = gridOf(list, p) ?: return null
+        if (!grid.can(op, p.key) || !grid.apply(op, p.key) || !grid.valid()) return null
+        val firstRow = slots[list[range.first].slot].row
+        val parent = rows[firstRow - 1].parent
+        val widths = gridWidths[table].orEmpty()
+        val out = ArrayList<EditPara>()
+        val made = ArrayList<Int>()
+        val interned = HashMap<String, RunStyle>()
+        for ((i, look) in grid.rows.withIndex()) {
+            val b = StringBuilder(look.start).append(look.inner)
+            val placeholders = ArrayList<Pair<IntRange, TableGrid.Cell<CellLook>>>()
+            for (k in 0 until grid.columns) {
+                val c = grid.at(i, k)?.takeIf { it.left == k } ?: continue
+                val f = c.format
+                val width = if (widths.size >= c.left + c.cols && widths.subList(c.left, c.left + c.cols).all { it > 0 })
+                    "<$w:tcW $w:w=\"${widths.subList(c.left, c.left + c.cols).sum()}\" $w:type=\"dxa\"/>" else f.width
+                b.append(f.start).append("<$w:tcPr>").append(f.cnf).append(width)
+                if (c.cols > 1) b.append("<$w:gridSpan $w:val=\"${c.cols}\"/>")
+                if (c.rows > 1) b.append(if (c.top == i) "<$w:vMerge $w:val=\"restart\"/>" else "<$w:vMerge/>")
+                b.append(f.props).append("</$w:tcPr>")
+                val at = b.length
+                b.append("<$w:p>").append(f.pPr).append("</$w:p>")
+                if (c.top == i) placeholders += (at until b.length) to c
+                b.append("</$w:tc>")
+            }
+            b.append("</$w:tr>")
+            val src = texts.size
+            val text = b.toString()
+            texts += text
+            val tr = XmlScan.children(text, 0, text.length).first()
+            val id = rows.size + 1
+            rows += Row(src, tr.start, tr.end, table, parent, plain = true, merged = false, hasSlots = true)
+            made += id
+            for ((place, c) in placeholders) {
+                val container = ++containers
+                slots += Slot(place.first, place.last + 1, container, id, src)
+                val slot = slots.size - 1
+                if (c.paras.isEmpty()) {
+                    val e = XmlScan.children(text, place.first, place.last + 1).first()
+                    val q = paragraph(text, w, e, slot, interned)
+                    out += EditPara(newKey(), slot, q.text, q.marks, q.pPr, q.startTag, q.head, q.tail, q.editable, q.original, q.typing, q.anchors)
+                } else for (q in c.paras) out += EditPara(q.key, slot, q.text, q.marks, q.pPr, q.startTag, q.head, q.tail, q.editable, q.original, q.typing, q.anchors)
+            }
+        }
+        // The new rows stand where the table's first row was (the old rows go: none of their paragraphs is left)
+        before.getOrPut(firstRow) { ArrayList() }.addAll(made)
+        return range to out
     }
 
     // --- Saving ---
@@ -840,6 +969,7 @@ class DocxEdit private constructor(
                     (it.local == "lock" && it.attrs.entries.any { a -> a.key.endsWith("val") && (a.value == "contentLocked" || a.value == "sdtContentLocked") }) }
             }
             val rowList = ArrayList<Row>()
+            val widths = HashMap<Int, List<Int>>()
             var tables = 0
             fun collect(elems: List<Elem>, container: Int, row: Int, locked: Boolean = false) {
                 for (e in elems) {
@@ -848,7 +978,11 @@ class DocxEdit private constructor(
                         "p" -> { slots += Slot(e.start, e.end, container, row); paras += paragraph(xml, w, e, slots.size - 1, interned).let { if (locked && it.editable) EditPara(it.key, it.slot, it.text, it.marks, it.pPr, it.startTag, it.head, it.tail, false, it.original, it.typing, it.anchors) else it } }
                         "tbl" -> {
                             val table = ++tables
-                            val merged = xml.indexOf("vMerge", e.start).let { it in e.start until e.end }
+                            // Cells merged down: rows are added and taken out through the table's grid
+                            val merged = false
+                            XmlScan.children(xml, e).firstOrNull { it.local == "tblGrid" }?.let { g ->
+                                widths[table] = XmlScan.children(xml, g).filter { it.local == "gridCol" }.map { c -> c.attrs.entries.firstOrNull { it.key.endsWith(":w") }?.value?.toIntOrNull() ?: 0 }
+                            }
                             for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") {
                                 val r = ++rows
                                 rowList += Row(0, tr.start, tr.end, table, row, false, merged, false)
@@ -864,7 +998,7 @@ class DocxEdit private constructor(
                 }
             }
             collect(XmlScan.children(xml, body), 0, 0)
-            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, rowList, containers, digests, styles, numbering, rels, types, paras,
+            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, rowList, containers, widths, digests, styles, numbering, rels, types, paras,
                 commentParts["word/comments.xml"], commentParts)
         }
 

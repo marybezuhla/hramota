@@ -852,4 +852,7 @@
     <string name="numbers_short">Нумерація</string>
     <string name="status_stats_short">%1$s: Σ %2$s · сер. %3$s · %4$d</string>
     <string name="group_table">Таблиця</string>
+    <string name="cells_merge_right">Об\'єднати з правою</string>
+    <string name="cells_merge_down">Об\'єднати з нижньою</string>
+    <string name="cells_split">Розділити клітинку</string>
 </resources>
