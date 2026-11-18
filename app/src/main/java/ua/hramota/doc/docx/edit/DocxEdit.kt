@@ -988,7 +988,12 @@ class DocxEdit private constructor(
                                 rowList += Row(0, tr.start, tr.end, table, row, false, merged, false)
                                 val plain = !locked && XmlScan.children(xml, tr).all { it.local in setOf("trPr", "tblPrEx", "tc") }
                                 val before = slots.size
-                                for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers, r, locked)
+                                for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") {
+                                    // A cell merged with the one above: Word shows that one's text; this one's is not edited
+                                    val below = XmlScan.children(xml, tc).firstOrNull { it.local == "tcPr" }?.let { pr -> XmlScan.children(xml, pr).firstOrNull { it.local == "vMerge" } }
+                                        ?.let { v -> v.attrs.entries.none { it.key.endsWith(":val") && it.value == "restart" } } ?: false
+                                    collect(XmlScan.children(xml, tc), ++containers, r, locked || below)
+                                }
                                 rowList[r - 1] = Row(0, tr.start, tr.end, table, row, plain, merged, slots.size > before)
                             }
                         }

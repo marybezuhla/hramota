@@ -257,8 +257,10 @@ class DocxEditTest {
         val t = texts(saved)
         assertTrue(t.indexOf("Папір офісний А4") >= 0 && t.indexOf("Папір офісний А4") < t.indexOf(t.first { it.startsWith("Ручки") }))
         // Opened again: the same paragraphs; the grid read back the same
+        // Opened again: the same text (the cells merged down keep an empty paragraph each, not edited)
         val again = DocxEdit.open(ByteArrayInputStream(saved))
-        assertEquals(list.map { it.text }, again.paragraphs.map { it.text })
+        assertEquals(list.map { it.text }.filter { it.isNotBlank() }, again.paragraphs.map { it.text }.filter { it.isNotBlank() })
+        assertEquals(2, again.paragraphs.count { !it.editable && it.text.isEmpty() })
         val ap = again.paragraphs.first { it.text == "Папір офісний А4" }
         assertTrue(again.canTableOp(again.paragraphs, ap, ua.hramota.doc.docx.edit.TableOp.SPLIT))
         // Split back, the row under taken out: as many rows as at first
