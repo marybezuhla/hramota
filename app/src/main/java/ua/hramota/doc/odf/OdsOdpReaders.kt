@@ -51,9 +51,11 @@ object OdsReader {
             }
         }
         val sheets = ArrayList<ua.hramota.doc.sheet.Sheet>()
+        val comments = HashMap<Int, Map<Pair<Int, Int>, String>>()
         for (t in doc.all("table").take(SheetLimits.MAX_SHEETS)) {
             val name = t.attr("name") ?: "Sheet${sheets.size + 1}"
             val b = SheetBuilder(name, budget)
+            val notes = HashMap<Pair<Int, Int>, String>()
             b.defaultWidth = 64f * 0.75f * 1.06f; b.defaultHeight = 12.8f
             var col = 0
             fun cols(n: ONode) {
@@ -91,6 +93,12 @@ object OdsReader {
                                 val numeric = type in setOf("float", "percentage", "currency")
                                 val style = cell.attr("style-name") ?: r.attr("default-cell-style-name")
                                 val has = text.isNotEmpty() || type != null
+                                // A note on the cell (LibreOffice's comment): who wrote it and what it says
+                                cell.child("annotation")?.let { a ->
+                                    val who = a.child("creator")?.text?.trim().orEmpty()
+                                    val words = a.all("p").joinToString("\n") { it.text }.trim()
+                                    if (words.isNotEmpty() && notes.size < 5000) for (k in 0 until minOf(crep, 1)) notes[row to at] = (if (who.isNotEmpty()) "$who: " else "") + words.take(2000)
+                                }
                                 val shown = cell.name == "table-cell" && (has || styles.props(style, "table-cell")["background-color"]?.let { it != "transparent" } == true) && crep <= 1024
                                 val across = (cell.attr("number-columns-spanned")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_COLS)
                                 val down = (cell.attr("number-rows-spanned")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_ROWS)
@@ -118,10 +126,11 @@ object OdsReader {
             }
             rows(t)
             sheets += b.build(looks, false, emptyList(), name)
+            if (notes.isNotEmpty()) comments[sheets.size - 1] = notes
         }
         if (sheets.isEmpty()) throw IOException("No sheets")
         // Every sheet uses the one list of looks, filled as the sheets were read
-        return Workbook(sheets.map { it.shown(newStyles = looks) }, Inspection())
+        return Workbook(sheets.map { it.shown(newStyles = looks) }, Inspection(), comments = comments)
     }
 }
 

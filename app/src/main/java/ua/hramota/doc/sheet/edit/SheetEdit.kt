@@ -9,8 +9,8 @@ interface SheetSnapshot
 
 /**
  * A workbook opened for editing cells: an Excel workbook ([XlsxEdit]) or an OpenDocument
- * spreadsheet ([ua.hramota.doc.odf.OdsEdit]). The editor works the same on either; [full] says
- * whether looks, widths, rows and columns, sorting and notes can be changed too.
+ * spreadsheet ([ua.hramota.doc.odf.OdsEdit]). The editor works the same on either; [canLook],
+ * [canWidth], [canRows], [canSort] and [canNote] say what besides cells' content can be changed.
  */
 interface SheetEdit {
     /** One sheet of the file: its name and whether it is shown. */
@@ -18,8 +18,14 @@ interface SheetEdit {
 
     /** The file's sheets, in order. */
     val sheetNames: List<SheetName>
-    /** Looks, widths, rows and columns, sorting and notes can be changed (not only what cells hold). */
-    val full: Boolean get() = true
+    /** How cells look can be changed (bold, fill, number format, alignment). */
+    val canLook: Boolean get() = true
+    /** Columns' widths can be changed. */
+    val canWidth: Boolean get() = true
+    /** Rows and columns can be inserted and deleted. */
+    val canRows: Boolean get() = true
+    /** Cells can be sorted. */
+    val canSort: Boolean get() = true
     /** The file's extension, as saved. */
     val extension: String
 

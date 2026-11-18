@@ -39,18 +39,30 @@ class OdsEdit private constructor(
     private val digest: ByteArray,
     private val ns: Prefixes,
     private val sheets: List<OSheet>,
+    /** The content's own automatic styles, by name, as written (new ones are made from them). */
+    private val autoStyles: Map<String, Elem> = emptyMap(),
+    /** Where the content's automatic styles are (new ones go at their end); null when it has none. */
+    private val autoElem: Elem? = null,
+    private val bodyStart: Int = 0,
+    /** Every style name the document has (new names are not taken from them). */
+    private val taken: Set<String> = emptySet(),
 ) : SheetEdit {
-    class Prefixes(val office: String, val table: String, val text: String)
+    /** The prefixes the file gives the OpenDocument namespaces ([number], [dc] null when it has none). */
+    class Prefixes(val office: String, val table: String, val text: String, val style: String = "style", val fo: String = "fo", val number: String? = null, val dc: String? = null)
 
     /** A cell of the file: its type and value as written, its shown text, its formula (and as Excel writes it, if it can be). */
     private class OCell(val type: String?, val value: String?, val text: String, val formula: String?, val excel: String?, val currency: String?)
 
-    private class OSheet(val name: String, val table: Elem, val cells: HashMap<Long, OCell>, val locked: HashSet<Long>, val lockedAreas: List<IntArray>) {
+    private class OSheet(val name: String, val table: Elem, val cells: HashMap<Long, OCell>, val locked: HashSet<Long>, val lockedAreas: List<IntArray>,
+                         /** Columns' default cell styles: (first, last, style). */
+                         val columns: List<Triple<Int, Int, String?>> = emptyList()) {
         fun cell(row: Int, col: Int) = cells[key(row, col)]
+        fun columnStyle(col: Int): String? = columns.firstOrNull { col in it.first..it.second }?.third
     }
 
     override val sheetNames = sheets.map { SheetEdit.SheetName(it.name, true) }
-    override val full = false
+    override val canRows = false
+    override val canSort = false
     override val extension = "ods"
 
     private val inputs = HashMap<CellKey, Input>()
@@ -202,33 +214,165 @@ class OdsEdit private constructor(
         return out
     }
 
-    // --- Not changed here ---
+    // --- Looks, widths, notes ---
 
-    override val noteChanges: Map<CellKey, String> get() = emptyMap()
-    override fun setNote(cell: CellKey, text: String?) {}
-    override fun canNote(sheet: Int) = false
-    override val lookChanges: Map<CellKey, CellLook> get() = emptyMap()
-    override val widthChanges: Map<Pair<Int, Int>, Float> get() = emptyMap()
-    override fun setLook(cell: CellKey, look: CellLook?) = false
-    override fun look(cell: CellKey): CellLook? = null
-    override fun setWidth(sheet: Int, col: Int, chars: Float?) {}
+    private val looks = HashMap<CellKey, CellLook>()
+    private val widths = HashMap<Pair<Int, Int>, Float>()
+    private val notes = HashMap<CellKey, String>()
+
+    override val noteChanges: Map<CellKey, String> @Synchronized get() = HashMap(notes)
+    @Synchronized override fun setNote(cell: CellKey, text: String?) { if (text == null) notes.remove(cell) else notes[cell] = text.take(5000) }
+    override fun canNote(sheet: Int) = ns.dc != null && sheet in sheets.indices
+    override val lookChanges: Map<CellKey, CellLook> @Synchronized get() = HashMap(looks)
+    override val widthChanges: Map<Pair<Int, Int>, Float> @Synchronized get() = HashMap(widths)
+    @Synchronized override fun setLook(cell: CellKey, look: CellLook?): Boolean {
+        // A number format needs the file's number styles
+        if (look?.format != null && look.format !in DATA_STYLES) return false
+        if (look?.format != null && ns.number == null) return false
+        if (look == null || look.isEmpty) looks.remove(cell) else looks[cell] = look
+        return true
+    }
+    override fun look(cell: CellKey): CellLook? = synchronized(this) { looks[cell] }
+    @Synchronized override fun setWidth(sheet: Int, col: Int, chars: Float?) { if (chars == null) widths.remove(sheet to col) else widths[sheet to col] = chars.coerceIn(0.5f, 255f) }
     override val size: Long get() = xml.length.toLong()
 
-    private class Snap(val inputs: Map<CellKey, Input>) : SheetSnapshot
-    @Synchronized override fun snapshot(): SheetSnapshot = Snap(HashMap(inputs))
-    @Synchronized override fun restore(s: SheetSnapshot) { inputs.clear(); parsedInputs.clear(); for ((k, v) in (s as Snap).inputs) set(k, v) }
+    private class Snap(val inputs: Map<CellKey, Input>, val looks: Map<CellKey, CellLook>, val widths: Map<Pair<Int, Int>, Float>, val notes: Map<CellKey, String>) : SheetSnapshot
+    @Synchronized override fun snapshot(): SheetSnapshot = Snap(HashMap(inputs), HashMap(looks), HashMap(widths), HashMap(notes))
+    @Synchronized override fun restore(s: SheetSnapshot) {
+        s as Snap
+        inputs.clear(); parsedInputs.clear(); for ((k, v) in s.inputs) set(k, v)
+        looks.clear(); looks.putAll(s.looks); widths.clear(); widths.putAll(s.widths); notes.clear(); notes.putAll(s.notes)
+    }
+
+    /** Styles made for one save: cell styles by base and look, number styles by format, column styles by width. */
+    private inner class Made {
+        val defs = StringBuilder()
+        private val names = HashMap<String, String>()
+        private val used = HashSet<String>()
+        private fun fresh(prefix: String): String { var n = 1; while ("$prefix$n" in taken || "$prefix$n" in used) n++; return "$prefix$n".also { used += it } }
+
+        /** The number style for an Excel format code (one of [DATA_STYLES]); null for "General". */
+        fun dataStyle(code: String): String? {
+            val def = DATA_STYLES[code] ?: return null
+            return names.getOrPut("fmt:$code") {
+                val name = fresh("HrNf")
+                val n = ns.number!!
+                defs.append(def.replace("{n}", n).replace("{s}", ns.style).replace("{name}", name))
+                name
+            }
+        }
+
+        /** A cell style: [base] (a style's name, or null for the default) with [look] put on it. */
+        fun cellStyle(base: String?, look: CellLook): String = names.getOrPut("cell:$base:$look") {
+            val name = fresh("HrCe")
+            val st = ns.style; val fo = ns.fo
+            val data = look.format?.let { if (it == "General") "" else dataStyle(it) }
+            // The changes, by properties element
+            val text = LinkedHashMap<String, String>(); val cell = LinkedHashMap<String, String>(); val para = LinkedHashMap<String, String>()
+            look.bold?.let { b -> val v = if (b) "bold" else "normal"; text["$fo:font-weight"] = v; text["$st:font-weight-asian"] = v; text["$st:font-weight-complex"] = v }
+            look.italic?.let { i -> val v = if (i) "italic" else "normal"; text["$fo:font-style"] = v; text["$st:font-style-asian"] = v; text["$st:font-style-complex"] = v }
+            look.fill?.let { f -> cell["$fo:background-color"] = if (f == 0) "transparent" else "#%06x".format(f and 0xFFFFFF) }
+            look.align?.let { a ->
+                if (a == "general") cell["$st:text-align-source"] = "value-type"
+                else { cell["$st:text-align-source"] = "fix"; cell["$st:repeat-content"] = "false"; para["$fo:text-align"] = when (a) { "center" -> "center"; "right" -> "end"; else -> "start" } }
+            }
+            val auto = base?.let { autoStyles[it] }
+            if (auto != null) {
+                // An automatic style: copied, with the changes put in
+                var x = xml.substring(auto.start, auto.end)
+                x = setAttr(x, "$st:name", name)
+                if (data != null) x = if (data.isEmpty()) removeAttr(x, "$st:data-style-name") else setAttr(x, "$st:data-style-name", data)
+                x = withProps(x, "$st:table-cell-properties", cell)
+                x = withProps(x, "$st:paragraph-properties", para)
+                x = withProps(x, "$st:text-properties", text)
+                defs.append(x)
+            } else {
+                defs.append("<$st:style $st:name="$name" $st:family="table-cell" $st:parent-style-name="${XmlScan.escape(base ?: "Default")}"")
+                if (!data.isNullOrEmpty()) defs.append(" $st:data-style-name="$data"")
+                defs.append('>')
+                fun el(local: String, m: Map<String, String>) { if (m.isNotEmpty()) { defs.append("<$st:$local"); for ((k, v) in m) defs.append(' ').append(k).append("=\"").append(XmlScan.escape(v)).append('"'); defs.append("/>") } }
+                el("table-cell-properties", cell); el("paragraph-properties", para); el("text-properties", text)
+                defs.append("</$st:style>")
+            }
+            name
+        }
+
+        /** A column style of [base] with the width [chars] (characters, as Excel counts them). */
+        fun columnStyle(base: String?, chars: Float): String = names.getOrPut("col:$base:$chars") {
+            val name = fresh("HrCo")
+            val st = ns.style
+            val cm = "%.3fcm".format(java.util.Locale.ROOT, chars * 7 * 0.75 / 28.3465)
+            val auto = base?.let { autoStyles[it] }
+            if (auto != null) {
+                defs.append(withProps(setAttr(xml.substring(auto.start, auto.end), "$st:name", name), "$st:table-column-properties", mapOf("$st:column-width" to cm, "$st:use-optimal-column-width" to "false")))
+            } else defs.append("<$st:style $st:name="$name" $st:family="table-column"><$st:table-column-properties fo:break-before="auto" $st:column-width="$cm"/></$st:style>".replace("fo:", "${ns.fo}:"))
+            name
+        }
+    }
+
+    /** [x] (an element's XML) with attribute [name] set on its start tag. */
+    private fun setAttr(x: String, name: String, value: String): String {
+        val end = x.indexOf('>').let { if (x[it - 1] == '/') it - 1 else it }
+        val tag = x.substring(0, end)
+        val re = Regex("\\s${Regex.escape(name)}=(?:\"[^\"]*\"|'[^']*')")
+        val v = " $name=\"${XmlScan.escape(value)}\""
+        return (if (re.containsMatchIn(tag)) tag.replace(re) { v } else tag + v) + x.substring(end)
+    }
+
+    private fun removeAttr(x: String, name: String): String {
+        val end = x.indexOf('>')
+        return x.substring(0, end).replace(Regex("\\s${Regex.escape(name)}=(?:\"[^\"]*\"|'[^']*')"), "") + x.substring(end)
+    }
+
+    /** A style's XML with the attributes [props] set on its child [element] (added, in schema order, if it has none). */
+    private fun withProps(x: String, element: String, props: Map<String, String>): String {
+        if (props.isEmpty()) return x
+        val root = XmlScan.children(x, 0, x.length).first()
+        val kids = XmlScan.children(x, root)
+        kids.firstOrNull { it.name == element }?.let { k ->
+            var tag = x.substring(k.start, k.end)
+            for ((n, v) in props) tag = setAttr(tag, n, v)
+            return x.substring(0, k.start) + tag + x.substring(k.end)
+        }
+        val order = listOf("table-column-properties", "table-cell-properties", "paragraph-properties", "text-properties")
+        val rank = order.indexOf(element.substringAfter(':'))
+        val before = kids.firstOrNull { order.indexOf(it.local) > rank }
+        val add = "<$element" + props.entries.joinToString("") { " ${it.key}=\"${XmlScan.escape(it.value)}\"" } + "/>"
+        if (root.selfClosing) return x.substring(0, root.end - 2).trimEnd() + ">" + add + "</${root.name}>"
+        val at = before?.start ?: root.closeStart
+        return x.substring(0, at) + add + x.substring(at)
+    }
     override fun moveRows(sheet: Int, at: Int, n: Int) = XlsxEdit.RowRefusal.WORKBOOK
     override fun moveColumns(sheet: Int, at: Int, n: Int) = XlsxEdit.RowRefusal.WORKBOOK
 
     // --- Saving ---
 
+    /** A note's XML (by Hramota, with no date). */
+    private fun noteXml(text: String): String {
+        val o = ns.office; val t = ns.text
+        return "<$o:annotation><${ns.dc}:creator>$AUTHOR</${ns.dc}:creator>" + text.split('\n').joinToString("") { "<$t:p>${XmlScan.escape(it)}</$t:p>" } + "</$o:annotation>"
+    }
+
+    /** A cell kept as it is but for its style or note ([style] null: as it was; [note] null: as it was). */
+    private fun patched(orig: Elem?, style: String?, note: String?): String {
+        val tb = ns.table
+        if (orig == null) return "<$tb:table-cell" + (style?.let { " $tb:style-name=\"${XmlScan.escape(it)}\"" } ?: "") + if (note == null) "/>" else ">${noteXml(note)}</$tb:table-cell>"
+        var tag = repeated(xml.substring(orig.start, orig.openEnd), "$tb:number-columns-repeated", 1)
+        if (style != null) tag = setAttr(tag, "$tb:style-name", style)
+        if (note == null) return tag + xml.substring(orig.openEnd, orig.end)
+        val kids = if (orig.empty) emptyList() else XmlScan.children(xml, orig).filter { it.local != "annotation" }
+        val open = if (orig.selfClosing) tag.removeSuffix("/>").trimEnd() + ">" else tag
+        return open + noteXml(note) + kids.joinToString("") { xml.substring(it.start, it.end) } + "</${orig.name}>"
+    }
+
     /** One cell written anew, from the file's cell there (if any). */
-    private fun cellXml(orig: Elem?, input: Input?, raw: OCell?, value: Value): String {
+    private fun cellXml(orig: Elem?, input: Input?, raw: OCell?, value: Value, style: String? = null, note: String? = null): String {
         val o = ns.office; val tb = ns.table; val t = ns.text
         val formula = (input as? Input.Formula)?.let { toOdf(it.text) } ?: if (input == null) raw?.formula else null
         val attrs = LinkedHashMap<String, String>()
         orig?.attrs?.forEach { (k, v) -> if (k !in VALUE_ATTRS.map { it.replace("office:", "$o:").replace("table:", "$tb:") } && !k.startsWith("calcext:")) attrs[k] = v }
         attrs.remove("$tb:number-columns-repeated")
+        style?.let { attrs["$tb:style-name"] = it }
         if (formula != null) attrs["$tb:formula"] = formula
         var text: String? = null
         val number: Double? = (value as? Value.Num)?.v
@@ -248,7 +392,7 @@ class OdsEdit private constructor(
         val b = StringBuilder("<$tb:table-cell")
         for ((k, v) in attrs) b.append(' ').append(k).append("=\"").append(XmlScan.escape(v)).append('"')
         // What else the cell holds stays (a note, a picture); its text is written anew
-        val kept = orig?.takeIf { !it.empty }?.let { e -> XmlScan.children(xml, e).filter { it.local != "p" && it.local != "h" && it.local != "list" }.joinToString("") { xml.substring(it.start, it.end) } } ?: ""
+        val kept = (note?.let { noteXml(it) } ?: "") + (orig?.takeIf { !it.empty }?.let { e -> XmlScan.children(xml, e).filter { it.local != "p" && it.local != "h" && it.local != "list" && (note == null || it.local != "annotation") }.joinToString("") { xml.substring(it.start, it.end) } } ?: "")
         if (text == null && kept.isEmpty()) return b.append("/>").toString()
         b.append('>').append(kept)
         text?.split('\n')?.forEach { line -> b.append("<$t:p>").append(XmlScan.escape(line)).append("</$t:p>") }
@@ -268,10 +412,39 @@ class OdsEdit private constructor(
     private fun withRepeat(e: Elem, attr: String, n: Int): String = repeated(xml.substring(e.start, e.openEnd), attr, n) + xml.substring(e.openEnd, e.end)
 
     /** The table with [writes] (row to column to the new cell, made from the cell there) put in. */
-    private fun rewriteTable(t: Elem, writes: TreeMap<Int, TreeMap<Int, (Elem?) -> String>>): String {
+    private fun rewriteTable(t: Elem, writes: TreeMap<Int, TreeMap<Int, (Elem?) -> String>>, colStyles: TreeMap<Int, (String?) -> String> = TreeMap()): String {
         val tb = ns.table
         val b = StringBuilder()
         var row = 0
+        var column = 0
+        fun columns(from: Int, to: Int) {
+            var pos = from
+            for (c in XmlScan.children(xml, from, to)) {
+                b.append(xml, pos, c.start); pos = c.end
+                when (c.name) {
+                    "$tb:table-column" -> {
+                        val n = repeat(c, "$tb:number-columns-repeated")
+                        val hit = colStyles.subMap(column, column + n)
+                        if (hit.isEmpty()) { b.append(xml, c.start, c.end); column += n; continue }
+                        var cur = column
+                        for ((at, make) in hit) {
+                            if (at > cur) b.append(withRepeat(c, "$tb:number-columns-repeated", at - cur))
+                            val tag = repeated(xml.substring(c.start, c.openEnd), "$tb:number-columns-repeated", 1)
+                            b.append(setAttr(tag + xml.substring(c.openEnd, c.end), "$tb:style-name", make(c.attrs["$tb:style-name"])))
+                            cur = at + 1
+                        }
+                        if (cur < column + n) b.append(withRepeat(c, "$tb:number-columns-repeated", column + n - cur))
+                        column += n
+                    }
+                    "$tb:table-columns", "$tb:table-header-columns", "$tb:table-column-group" -> {
+                        if (c.empty) { b.append(xml, c.start, c.end); continue }
+                        b.append(xml, c.start, c.openEnd); columns(c.openEnd, c.closeStart); b.append(xml, c.closeStart, c.end)
+                    }
+                    else -> b.append(xml, c.start, c.end)
+                }
+            }
+            b.append(xml, pos, to)
+        }
         fun rewriteRow(r: Elem, cols: TreeMap<Int, (Elem?) -> String>) {
             b.append(repeated(xml.substring(r.start, r.openEnd).let { if (r.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }, "$tb:number-rows-repeated", 1))
             var col = 0
@@ -327,7 +500,15 @@ class OdsEdit private constructor(
             b.append(xml, pos, to)
         }
         b.append(xml, t.start, t.openEnd)
-        rows(t.openEnd, t.closeStart)
+        // Columns first (their widths), then the rows: the table's children in two passes over one stretch
+        val firstRow = XmlScan.children(xml, t).firstOrNull { it.name == "$tb:table-row" || it.name == "$tb:table-rows" || it.name == "$tb:table-header-rows" || it.name == "$tb:table-row-group" }?.start ?: t.closeStart
+        columns(t.openEnd, firstRow)
+        // Columns past the table's last
+        for ((at, make) in colStyles.tailMap(column)) {
+            if (at > column) b.append(if (at - column == 1) "<$tb:table-column/>" else "<$tb:table-column $tb:number-columns-repeated=\"${at - column}\"/>")
+            b.append("<$tb:table-column $tb:style-name=\"${make(null)}\"/>"); column = at + 1
+        }
+        rows(firstRow, t.closeStart)
         // Rows past the table's last: empty ones up to them
         for ((at, cols) in writes.tailMap(row)) {
             if (at > row) b.append("<$tb:table-row${if (at - row > 1) " $tb:number-rows-repeated=\"${at - row}\"" else ""}><$tb:table-cell/></$tb:table-row>")
@@ -346,19 +527,32 @@ class OdsEdit private constructor(
     /** content.xml with the changed cells, and the formulas whose values changed, written anew. */
     fun contentXml(): String {
         val values = recalc()
-        val inputs = synchronized(this) { HashMap(inputs) }
+        val inputs: Map<CellKey, Input> = synchronized(this) { HashMap(this.inputs) }
+        val looks: Map<CellKey, CellLook> = synchronized(this) { HashMap(this.looks) }
+        val notes: Map<CellKey, String> = synchronized(this) { HashMap(this.notes) }
+        val widths: Map<Pair<Int, Int>, Float> = synchronized(this) { HashMap(this.widths) }
+        val made = Made()
         val out = StringBuilder(xml.length + 4096)
-        var pos = 0
+        var pos = bodyStart
         for ((s, sh) in sheets.withIndex()) {
             val writes = TreeMap<Int, TreeMap<Int, (Elem?) -> String>>()
+            /** The style a cell gets: its own (or its column's) with the look put on it. */
+            fun styleOf(k: CellKey, e: Elem?): String? = looks[k]?.let { look -> made.cellStyle(e?.attrs?.get("${ns.table}:style-name") ?: sh.columnStyle(k.col), look) }
             for ((k, v) in values) {
                 if (k.sheet != s) continue
                 val input = inputs[k]
                 val raw = sh.cell(k.row, k.col)
                 // A formula of the file is written again only when its value changed
                 if (input == null) { if (raw == null || raw.excel == null || sameValue(rawValue(raw), v)) continue }
-                writes.getOrPut(k.row) { TreeMap() }[k.col] = { e -> cellXml(e, input, raw, v) }
+                writes.getOrPut(k.row) { TreeMap() }[k.col] = { e -> cellXml(e, input, raw, v, styleOf(k, e), notes[k]) }
             }
+            // Cells whose look or note alone changed: kept as they are but for that
+            for (k in looks.keys + notes.keys) {
+                if (k.sheet != s || writes[k.row]?.containsKey(k.col) == true) continue
+                writes.getOrPut(k.row) { TreeMap() }[k.col] = { e -> patched(e, styleOf(k, e), notes[k]) }
+            }
+            val colStyles = TreeMap<Int, (String?) -> String>()
+            for ((sc, w) in widths) if (sc.first == s) colStyles[sc.second] = { base -> made.columnStyle(base, w) }
             // Formulas Hramota cannot work out may depend on what changed: written without their old values, so LibreOffice works them out
             if (inputs.isNotEmpty()) for ((k, c) in sh.cells) {
                 if (c.formula == null) continue
@@ -368,13 +562,23 @@ class OdsEdit private constructor(
                 if (CellKey(s, row, col) in inputs) continue
                 writes.getOrPut(row) { TreeMap() }[col] = { e -> cellXml(e, null, c, Value.Empty) }
             }
-            if (writes.isEmpty()) continue
+            if (writes.isEmpty() && colStyles.isEmpty()) continue
             out.append(xml, pos, sh.table.start)
-            out.append(rewriteTable(sh.table, writes))
+            out.append(rewriteTable(sh.table, writes, colStyles))
             pos = sh.table.end
         }
         out.append(xml, pos, xml.length)
-        return out.toString()
+        // The styles made, at the end of the content's own automatic styles
+        val defs = made.defs.toString()
+        val head = StringBuilder()
+        val a = autoElem
+        when {
+            defs.isEmpty() -> head.append(xml, 0, bodyStart)
+            a == null -> head.append(xml, 0, bodyStart).append("<${ns.office}:automatic-styles>").append(defs).append("</${ns.office}:automatic-styles>")
+            a.selfClosing -> head.append(xml, 0, a.start).append("<${a.name}>").append(defs).append("</${a.name}>").append(xml, a.end, bodyStart)
+            else -> head.append(xml, 0, a.closeStart).append(defs).append(xml, a.closeStart, bodyStart)
+        }
+        return head.append(out).toString()
     }
 
     private fun sameValue(a: Value, b: Value): Boolean = when {
@@ -441,6 +645,23 @@ class OdsEdit private constructor(
         private const val OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
         private const val TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
         private const val TABLE = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+        private const val STYLE = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+        private const val FO = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+        private const val NUMBER = "urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0"
+        private const val DC = "http://purl.org/dc/elements/1.1/"
+        /** Who notes added here are by: the app, never the person's name. */
+        const val AUTHOR = "Hramota"
+
+        /** OpenDocument number styles for the formats the editor offers ({n}: number prefix, {s}: style prefix, {name}: the style's name). */
+        private val DATA_STYLES: Map<String, String> = mapOf(
+            "General" to "",
+            "0" to "<{n}:number-style {s}:name=\"{name}\"><{n}:number {n}:decimal-places=\"0\" {n}:min-decimal-places=\"0\" {n}:min-integer-digits=\"1\"/></{n}:number-style>",
+            "#,##0.00" to "<{n}:number-style {s}:name=\"{name}\"><{n}:number {n}:decimal-places=\"2\" {n}:min-decimal-places=\"2\" {n}:min-integer-digits=\"1\" {n}:grouping=\"true\"/></{n}:number-style>",
+            "0%" to "<{n}:percentage-style {s}:name=\"{name}\"><{n}:number {n}:decimal-places=\"0\" {n}:min-decimal-places=\"0\" {n}:min-integer-digits=\"1\"/><{n}:text>%</{n}:text></{n}:percentage-style>",
+            "#,##0.00\\ \"₴\"" to "<{n}:currency-style {s}:name=\"{name}\"><{n}:number {n}:decimal-places=\"2\" {n}:min-decimal-places=\"2\" {n}:min-integer-digits=\"1\" {n}:grouping=\"true\"/><{n}:text> </{n}:text><{n}:currency-symbol {n}:language=\"uk\" {n}:country=\"UA\">₴</{n}:currency-symbol></{n}:currency-style>",
+            "dd.mm.yyyy" to "<{n}:date-style {s}:name=\"{name}\"><{n}:day {n}:style=\"long\"/><{n}:text>.</{n}:text><{n}:month {n}:style=\"long\"/><{n}:text>.</{n}:text><{n}:year {n}:style=\"long\"/></{n}:date-style>",
+            "@" to "<{n}:text-style {s}:name=\"{name}\"><{n}:text-content/></{n}:text-style>",
+        )
 
         private val BASE = LocalDate.of(1899, 12, 30)
 
@@ -609,9 +830,16 @@ class OdsEdit private constructor(
             val xml = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
             val root = XmlScan.children(xml, 0, xml.length).firstOrNull { it.local == "document-content" } ?: throw IOException("No content")
             fun prefix(uri: String) = root.attrs.entries.firstOrNull { it.value == uri && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:") ?: throw IOException("Unusual namespaces")
-            val ns = Prefixes(prefix(OFFICE), prefix(TABLE), prefix(TEXT))
+            fun prefixOrNull(uri: String) = root.attrs.entries.firstOrNull { it.value == uri && it.key.startsWith("xmlns:") }?.key?.removePrefix("xmlns:")
+            val ns = Prefixes(prefix(OFFICE), prefix(TABLE), prefix(TEXT), prefixOrNull(STYLE) ?: "style", prefixOrNull(FO) ?: "fo", prefixOrNull(NUMBER), prefixOrNull(DC))
             val o = ns.office; val tb = ns.table; val t = ns.text
-            val body = XmlScan.children(xml, root).firstOrNull { it.name == "$o:body" } ?: throw IOException("No body")
+            val top = XmlScan.children(xml, root)
+            val body = top.firstOrNull { it.name == "$o:body" } ?: throw IOException("No body")
+            val autoElem = top.firstOrNull { it.name == "$o:automatic-styles" }
+            if (autoElem != null && autoElem.start > body.start) throw IOException("Unusual order")
+            val autoStyles = HashMap<String, Elem>()
+            val taken = HashSet<String>()
+            if (autoElem != null) for (st in XmlScan.children(xml, autoElem)) st.attrs.entries.firstOrNull { it.key.endsWith(":name") }?.value?.let { n -> taken += n; if (st.local == "style") autoStyles[n] = st }
             val sheetEl = XmlScan.children(xml, body).firstOrNull { it.name == "$o:spreadsheet" } ?: throw IOException("No spreadsheet")
             var total = 0
             val sheets = ArrayList<OSheet>()
@@ -621,6 +849,15 @@ class OdsEdit private constructor(
                 val locked = HashSet<Long>()
                 val areas = ArrayList<IntArray>()
                 var row = 0
+                val columns = ArrayList<Triple<Int, Int, String?>>()
+                var col0 = 0
+                fun cols(e: Elem) {
+                    for (c in XmlScan.children(xml, e)) when (c.name) {
+                        "$tb:table-column" -> { val n = (c.attrs["$tb:number-columns-repeated"]?.toIntOrNull() ?: 1).coerceIn(1, MAX_COLS); columns += Triple(col0, col0 + n - 1, c.attrs["$tb:default-cell-style-name"]); col0 += n }
+                        "$tb:table-columns", "$tb:table-header-columns", "$tb:table-column-group" -> cols(c)
+                    }
+                }
+                cols(table)
                 fun textOf(c: Elem): String = XmlScan.children(xml, c).filter { it.name == "$t:p" || it.name == "$t:h" }.joinToString("\n") { p ->
                     val sb = StringBuilder()
                     fun walk(e: Elem) {
@@ -676,10 +913,11 @@ class OdsEdit private constructor(
                     }
                 }
                 rows(table, 0)
-                sheets += OSheet(name, table, cells, locked, areas)
+                sheets += OSheet(name, table, cells, locked, areas, columns)
             }
             if (sheets.isEmpty()) throw IOException("No sheets")
-            return OdsEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, sheets)
+            // Names the document's other parts may use too (styles.xml is not read here): new ones get a prefix of their own
+            return OdsEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, sheets, autoStyles, autoElem, body.start, taken)
         }
 
         private fun readAll(input: InputStream, limit: Long): ByteArray {

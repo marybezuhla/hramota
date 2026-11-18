@@ -132,4 +132,32 @@ class OdsEditTest {
         assertEquals("Сімейний бюджет 2026", again.content(CellKey(0, 0, 0)))
         assertTrue(part(out.toByteArray(), "content.xml")!!.contains("table:formula=\"of:=SUM([.B4:.D4])\" office:value-type=\"float\" office:value=\"11700.5\""))
     }
+
+    @Test fun looksWidthsAndNotes() {
+        val bytes = javaClass.classLoader!!.getResource("odf/01-budget.ods")!!.readBytes()
+        val edit = OdsEdit.open(ByteArrayInputStream(bytes))
+        assertTrue(edit.canLook && edit.canWidth && edit.canNote(0))
+        assertTrue(edit.setLook(CellKey(0, 3, 1), ua.hramota.doc.sheet.edit.CellLook(bold = true, fill = 0xFFEB3B, format = "0", align = "center")))
+        edit.setNote(CellKey(0, 4, 0), "Перевірити суму")
+        edit.setWidth(0, 0, 30f)
+        edit.set(CellKey(0, 5, 1), edit.parse("7000", false)!!)
+        edit.setLook(CellKey(0, 5, 1), ua.hramota.doc.sheet.edit.CellLook(italic = true))
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes), out)
+        val saved = out.toByteArray()
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "ods-looks.ods").writeBytes(saved); java.io.File(it, "ods-looks.expect").writeText("4,2,6200\n6,2,7000\n6,5,11600\n") }
+        val c = part(saved, "content.xml")!!
+        assertTrue(c, Regex("<style:style style:name=\"HrCe1\"[^>]*>").containsMatchIn(c))
+        assertTrue(c, c.contains("fo:font-weight=\"bold\"") && c.contains("fo:background-color=\"#ffeb3b\""))
+        assertTrue(c, c.contains("<number:number-style style:name=\"HrNf1\">"))
+        assertTrue(c, Regex("<style:style style:name=\"HrCo1\"[^>]*><style:table-column-properties[^>]*style:column-width=\"").containsMatchIn(c))
+        assertTrue(c, c.contains("<dc:creator>Hramota</dc:creator><text:p>Перевірити суму</text:p>"))
+        val wb = OdsReader.read(ByteArrayInputStream(saved))
+        assertEquals("Hramota: Перевірити суму", wb.comments[0]!![4 to 0])
+        // Values as they were (the look alone changed), the one typed in place
+        val again = OdsEdit.open(ByteArrayInputStream(saved))
+        assertEquals("6200", again.content(CellKey(0, 3, 1)))
+        assertEquals("7000", again.content(CellKey(0, 5, 1)))
+        assertEquals("Квітень", again.content(CellKey(0, 6, 0)))
+    }
 }

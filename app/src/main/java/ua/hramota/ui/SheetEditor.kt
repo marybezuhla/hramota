@@ -609,19 +609,16 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                 editing = SheetEditing(
                     content = state::content, commit = state::commit, enabled = !saving && !state.busy,
                     draft = state::draft, leave = state::flush, discard = state::discard, version = state.version,
-                    rows = if (!state.edit.full) null else ({ sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } }),
-                    columns = if (!state.edit.full) null else ({ sheet, col, delete, right -> scope.launch { state.columns(sheet, col, delete, right) } }),
+                    rows = if (!state.edit.canRows) null else ({ sheet, row, delete, below -> scope.launch { state.rows(sheet, row, delete, below) } }),
+                    columns = if (!state.edit.canRows) null else ({ sheet, col, delete, right -> scope.launch { state.columns(sheet, col, delete, right) } }),
                     cellActions = { sheet, row, col ->
                         val ctx = context
-                        // Only what cells hold can be changed (an OpenDocument spreadsheet): the filter, on the screen only
-                        if (!state.edit.full) listOfNotNull(
-                            ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },
-                            if (state.filter != null) ctx.getString(R.string.sheet_filter_off) to { state.setFilter(sheet, row, col, null) } else null,
-                        ) else listOfNotNull(
-                            ctx.getString(R.string.sheet_format) to { formatting = Triple(sheet, row, col) },
-                            ctx.getString(R.string.sheet_width) to { sizing = Triple(sheet, row, col) },
-                            ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) },
-                            ctx.getString(R.string.sheet_sort_down) to { state.sort(sheet, row, col, descending = true, headings = true) },
+                        val e = state.edit
+                        listOfNotNull(
+                            if (e.canLook) ctx.getString(R.string.sheet_format) to { formatting = Triple(sheet, row, col) } else null,
+                            if (e.canWidth) ctx.getString(R.string.sheet_width) to { sizing = Triple(sheet, row, col) } else null,
+                            if (e.canSort) ctx.getString(R.string.sheet_sort_up) to { state.sort(sheet, row, col, descending = false, headings = true) } else null,
+                            if (e.canSort) ctx.getString(R.string.sheet_sort_down) to { state.sort(sheet, row, col, descending = true, headings = true) } else null,
                             ctx.getString(R.string.sheet_filter) to { filtering = Triple(sheet, row, col) },
                             if (!state.canNote(sheet)) null else ctx.getString(if (state.note(sheet, row, col) == null) R.string.cell_note_add else R.string.cell_note_change) to { noting = Triple(sheet, row, col) },
                             if (state.filter != null) ctx.getString(R.string.sheet_filter_off) to { state.setFilter(sheet, row, col, null) } else null,
