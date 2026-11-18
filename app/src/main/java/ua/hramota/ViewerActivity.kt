@@ -494,6 +494,8 @@ open class ViewerActivity : ComponentActivity() {
                                 if (format == Format.PPT && state is ViewerState.Paged) getString(R.string.save_as_pptx) to { convertAsk = "pptx"; Unit } else null,
                                 // PowerPoint: the slides' text
                                 if (format == Format.PPTX && state is ViewerState.Paged && !protectedDoc) getString(R.string.edit_open) to { startSlideEditing(uri); Unit } else null,
+                                // OpenDocument presentations: the slides' text, in the file itself
+                                if (format == Format.ODP && state is ViewerState.Paged) getString(R.string.edit_open) to { startSlideEditing(uri, odp = true); Unit } else null,
                                 // Word comments: read, answered with new ones, removed (in the editing view)
                                 (state as? ViewerState.Paged)?.inspection?.comments?.takeIf { format == Format.DOCX && it > 0 && !protectedDoc }?.let { n ->
                                     getString(R.string.comments_count, n) to { startEditing(uri, withComments = true); Unit }
@@ -878,14 +880,14 @@ open class ViewerActivity : ComponentActivity() {
     }
 
     /** Opens the PPTX for editing its text (off the main thread). */
-    private fun startSlideEditing(uri: android.net.Uri) {
+    private fun startSlideEditing(uri: android.net.Uri, odp: Boolean = false) {
         val held = androidx.lifecycle.ViewModelProvider(this)[EditHolder::class.java]
         val app = applicationContext
         if (held.opening) return
         held.opening = true
         held.scope.launch {
             val edit = try { withContext(Dispatchers.IO) {
-                try { app.contentResolver.openInputStream(uri)?.use { ua.hramota.doc.slides.edit.PptxEdit.open(it.buffered()) }?.let { ua.hramota.ui.SlideEditorState(it) } }
+                try { app.contentResolver.openInputStream(uri)?.use { val i = it.buffered(); if (odp) ua.hramota.doc.odf.OdpEdit.open(i) else ua.hramota.doc.slides.edit.PptxEdit.open(i) }?.let { ua.hramota.ui.SlideEditorState(it) } }
                 catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
             } } finally { held.opening = false }
             if (edit == null) android.widget.Toast.makeText(app, app.getString(R.string.edit_cannot_open), android.widget.Toast.LENGTH_LONG).show()

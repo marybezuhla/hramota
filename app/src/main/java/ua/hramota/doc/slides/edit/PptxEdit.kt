@@ -53,9 +53,9 @@ class PptxEdit private constructor(
     /** The prefix of DrawingML's namespace in each slide part ("a" almost always). */
     private val prefixes: MutableList<String>,
     private val boxList: ArrayList<TextBox>,
-    val paragraphs: List<SlidePara>,
+    override val paragraphs: List<SlidePara>,
     /** How many slides are shown (hidden ones are left out, as in the viewer). */
-    val slideCount: Int,
+    override val slideCount: Int,
     /** What adding, taking out and moving slides needs: the package's lists and links as opened. */
     private val pack: Pack,
     /** The slide each part belongs to (a slide's own part, or its speaker notes). */
@@ -66,9 +66,11 @@ class PptxEdit private constructor(
     private val notesMaster: String?,
     /** Slides that link to speaker notes (read here or not). */
     private val notesLinked: Set<Int>,
-) {
+) : SlideEdit {
+    override val extension = "pptx"
+    override fun readBack(input: InputStream): ua.hramota.doc.slides.Deck = ua.hramota.doc.slides.PptxReader.read(input, withMedia = false)
     /** Every text box, of the slides as opened and of those added since. */
-    val boxes: List<TextBox> get() = boxList
+    override val boxes: List<TextBox> get() = boxList
     private var nextKey = paragraphs.size.toLong() + 1
 
     /** A slide added while editing: its part (in [parts]) and the layout it follows. */
@@ -84,7 +86,7 @@ class PptxEdit private constructor(
      * (the slides as opened are 0 until [slideCount]) and its paragraphs. Nothing is written until saving.
      */
     @Synchronized
-    fun addSlide(after: Int?, lang: String): Pair<Int, List<SlidePara>> {
+    override fun addSlide(after: Int?, lang: String): Pair<Int, List<SlidePara>> {
         val layout = when {
             after != null && after >= slideCount -> added.firstOrNull { it.slide == after }?.layout
             else -> pack.layoutFor(after?.let { pack.shown[it].path })
@@ -113,7 +115,7 @@ class PptxEdit private constructor(
      * Whether a slide can be taken out: not while another slide links to it (a link to a slide that
      * is gone would make the file broken in PowerPoint).
      */
-    fun canRemove(slide: Int, order: Collection<Int> = (0 until slideCount).toList()): Boolean {
+    override fun canRemove(slide: Int, order: Collection<Int>): Boolean {
         if (slide >= slideCount) return true
         val from = pack.linkSources(pack.shown[slide].path) ?: return false
         if (from.isEmpty()) return true
@@ -133,7 +135,7 @@ class PptxEdit private constructor(
 
     /** Empty speaker notes for [slide] (one paragraph to type into), or null when the presentation has no notes master. */
     @Synchronized
-    fun addNotes(slide: Int, lang: String): List<SlidePara>? {
+    override fun addNotes(slide: Int, lang: String): List<SlidePara>? {
         // Added before (and undone): the same notes again
         newNotes.firstOrNull { it.slide == slide }?.let { nn -> return nn.paragraphs.map { p -> SlidePara(nextKey++, p.startTag, p.box, p.text, p.marks, p.pPr, p.end, p.editable, p.original, p.typing) } }
         // A slide linked to notes of its own (read or not) gets no second ones
@@ -171,10 +173,10 @@ class PptxEdit private constructor(
     @Synchronized fun addedComments(slide: Int): List<String> = comments[slide].orEmpty()
 
     /** Whether comments can be added to [slide]: not beside PowerPoint's newer comments. */
-    fun canComment(slide: Int): Boolean = slide >= slideCount || !pack.hasModernComments(pack.shown[slide].path)
+    override fun canComment(slide: Int): Boolean = slide >= slideCount || !pack.hasModernComments(pack.shown[slide].path)
 
     /** Sets the comments added here to [slide] (an empty list: none). Written when saving. */
-    @Synchronized fun setComments(slide: Int, list: List<String>) {
+    @Synchronized override fun setComments(slide: Int, list: List<String>) {
         if (list.isEmpty()) comments.remove(slide) else comments[slide] = list.map { it.take(MAX_COMMENT) }.take(200)
     }
 
@@ -225,7 +227,7 @@ class PptxEdit private constructor(
 
     /** A text box at [rect] (EMU) on [slide], one empty paragraph to type into; its paragraphs and its reference. */
     @Synchronized
-    fun addTextBox(slide: Int, rect: LongArray, lang: String): Pair<ShapeRef, List<SlidePara>> {
+    override fun addTextBox(slide: Int, rect: LongArray, lang: String): Pair<ShapeRef, List<SlidePara>> {
         val pi = partOf(slide)
         val l = XmlScan.escape(lang)
         val (id, start, end) = append(pi) { p, a, _, id ->
@@ -248,7 +250,7 @@ class PptxEdit private constructor(
 
     /** A picture ([bytes]: a PNG or JPEG file) at [rect] (EMU) on [slide]. */
     @Synchronized
-    fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): ShapeRef {
+    override fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): ShapeRef {
         val pi = partOf(slide)
         // (unique also against pictures added by Hramota before, already in the slide's links)
         val rel = "rIdH" + java.util.UUID.randomUUID().toString().replace("-", "").take(12)
@@ -264,7 +266,7 @@ class PptxEdit private constructor(
     }
 
     /** Whether an animation names the shape (it is not taken out: the animation would point at nothing). */
-    fun isAnimated(ref: ShapeRef): Boolean {
+    override fun isAnimated(ref: ShapeRef): Boolean {
         val xml = parts[partOf(ref.slide)].second
         return Regex("""\bspid\s*=\s*["']${Regex.escape(ref.id)}["']""").containsMatchIn(xml)
     }
@@ -326,26 +328,24 @@ class PptxEdit private constructor(
     }
 
     /** The look of a character as set on its run (what the slide's design adds is not counted). */
-    fun bold(m: RunStyle) = m.bold ?: flag(m.rPr, "b")
-    fun italic(m: RunStyle) = m.italic ?: flag(m.rPr, "i")
-    fun underline(m: RunStyle) = m.underline ?: attr(m.rPr, "u").let { it != null && it != "none" }
-    fun strike(m: RunStyle) = m.strike ?: attr(m.rPr, "strike").let { it != null && it != "noStrike" }
+    override fun bold(m: RunStyle) = m.bold ?: flag(m.rPr, "b")
+    override fun italic(m: RunStyle) = m.italic ?: flag(m.rPr, "i")
+    override fun underline(m: RunStyle) = m.underline ?: attr(m.rPr, "u").let { it != null && it != "none" }
+    override fun strike(m: RunStyle) = m.strike ?: attr(m.rPr, "strike").let { it != null && it != "noStrike" }
 
     private fun attr(rPr: String, name: String): String? = if (rPr.isEmpty()) null else XmlScan.children(rPr, 0, rPr.length).firstOrNull()?.attrs?.get(name)
     private fun flag(rPr: String, name: String) = attr(rPr, name).let { it == "1" || it == "true" }
 
-    fun restyle(m: RunStyle, bold: Boolean? = null, italic: Boolean? = null, underline: Boolean? = null, strike: Boolean? = null) =
-        m.copy(bold = bold ?: m.bold, italic = italic ?: m.italic, underline = underline ?: m.underline, strike = strike ?: m.strike)
 
-    fun canJoin(a: SlidePara, b: SlidePara) = a.box == b.box && a.editable && b.editable && !boxes[a.box].fixed
+    override fun canJoin(a: SlidePara, b: SlidePara) = a.box == b.box && a.editable && b.editable && !boxes[a.box].fixed
 
     /** False where an animation counts the paragraphs: Enter does not split them. */
-    fun canSplit(p: SlidePara) = p.editable && !boxes[p.box].fixed
+    override fun canSplit(p: SlidePara) = p.editable && !boxes[p.box].fixed
 
-    fun join(a: SlidePara, b: SlidePara) = a.changed(text = a.text + b.text, marks = a.marks + b.marks)
+    override fun join(a: SlidePara, b: SlidePara) = a.changed(text = a.text + b.text, marks = a.marks + b.marks)
 
     /** Splits at [at]; the new paragraph has the same properties (level, bullet, alignment). */
-    fun split(p: SlidePara, at: Int): Pair<SlidePara, SlidePara> {
+    override fun split(p: SlidePara, at: Int): Pair<SlidePara, SlidePara> {
         val first = p.changed(text = p.text.substring(0, at), marks = p.marks.subList(0, at).toList())
         val style = p.marks.getOrNull(at - 1) ?: p.marks.getOrNull(at) ?: p.typing
         val second = SlidePara(nextKey++, p.startTag, p.box, p.text.substring(at), p.marks.subList(at, p.text.length).toList(), p.pPr, p.end, true, null, style)
@@ -398,7 +398,7 @@ class PptxEdit private constructor(
      * as opened that is not in it is taken out, with what only it used: its notes, comments, pictures).
      */
     @Synchronized
-    fun save(list: List<SlidePara>, order: List<Int>, source: InputStream, out: OutputStream, shapes: Shapes = Shapes()) {
+    override fun save(list: List<SlidePara>, order: List<Int>, source: InputStream, out: OutputStream, shapes: Shapes) {
         if (order.isEmpty() || order.toSet().size != order.size || order.any { it !in 0 until slideCount + added.size }) throw IOException("Bad slide order")
         val changed = HashMap<String, String>()
         val byBox = list.groupBy { it.box }

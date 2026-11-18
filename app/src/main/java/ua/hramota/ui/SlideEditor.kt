@@ -80,7 +80,7 @@ import java.io.OutputStream
 private const val MARK = '​'
 
 /** A presentation's text being edited: paragraphs of every text box, and what was done, to undo and redo. */
-class SlideEditorState(val edit: PptxEdit) : Replaceable {
+class SlideEditorState(val edit: ua.hramota.doc.slides.edit.SlideEdit) : Replaceable {
     var paras by mutableStateOf(edit.paragraphs)
         private set
     /** The slides in the order they will be saved (numbers as [PptxEdit] gives them). */
@@ -226,7 +226,7 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
         try {
             val out = java.io.ByteArrayOutputStream()
             source()?.use { edit.save(list, o, it, out, sh) } ?: return@withContext null
-            ua.hramota.doc.slides.PptxReader.read(out.toByteArray().inputStream())
+            edit.readBack(out.toByteArray().inputStream())
         } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
     }
 
@@ -347,14 +347,14 @@ class SlideEditorState(val edit: PptxEdit) : Replaceable {
         val slides = order
         val sh = shapes
         return object : EditSaving.Maker {
-            override val ext = "pptx"
+            override val ext = edit.extension
             override fun write(source: InputStream, out: OutputStream) = edit.save(list, slides, source, out, sh)
-            override fun check(made: InputStream) { ua.hramota.doc.slides.PptxReader.read(made, withMedia = false) }
+            override fun check(made: InputStream) { edit.readBack(made) }
         }
     }
 }
 
-private class SlideFormatting(private val p: SlidePara, private val edit: PptxEdit) : VisualTransformation {
+private class SlideFormatting(private val p: SlidePara, private val edit: ua.hramota.doc.slides.edit.SlideEdit) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val b = AnnotatedString.Builder(text.text)
         val n = minOf(p.marks.size, text.length - 1)
@@ -467,9 +467,9 @@ fun SlideEditorScreen(
                         empty = bySlide[slide].isNullOrEmpty(),
                         onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },
                         onRemove = { state.removeSlide(slide) },
-                        onAddAfter = { scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } },
-                        onPlace = if (source != null && !saving) ({ placing = slide }) else null,
-                        onNotes = if (!saving && !state.hasNotes(slide)) ({ scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }; Unit }) else null,
+                        onAddAfter = if (state.edit.canAddSlides) ({ scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } }) else null,
+                        onPlace = if (source != null && !saving && state.edit.canPlace) ({ placing = slide }) else null,
+                        onNotes = if (!saving && state.edit.canNotes && !state.hasNotes(slide)) ({ scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }; Unit }) else null,
                         onComment = if (!saving && state.edit.canComment(slide)) ({ commenting = slide }) else null,
                         comments = state.comments[slide].orEmpty(),
                         onRemoveComment = { i -> state.removeComment(slide, i) },
@@ -488,7 +488,7 @@ fun SlideEditorScreen(
                     }
                 }
             }
-            item(key = "add") {
+            if (state.edit.canAddSlides) item(key = "add") {
                 androidx.compose.material3.OutlinedButton(
                     onClick = { scope.launch { if (!state.addSlide(null, lang)) noLayout = true } }, enabled = !saving,
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
@@ -525,7 +525,7 @@ fun SlideEditorScreen(
 private fun SlideHeading(
     number: Int, first: Boolean, last: Boolean, enabled: Boolean, canRemove: Boolean, linked: Boolean,
     picture: (suspend (Int) -> ImageBitmap?)?, slide: Int, aspect: Float, empty: Boolean,
-    onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onAddAfter: () -> Unit,
+    onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onAddAfter: (() -> Unit)?,
     onPlace: (() -> Unit)? = null, onNotes: (() -> Unit)? = null,
     onComment: (() -> Unit)? = null, comments: List<String> = emptyList(), onRemoveComment: (Int) -> Unit = {},
 ) {
@@ -541,7 +541,7 @@ private fun SlideHeading(
                     onPlace?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_place)) }, onClick = { menu = false; go() }) }
                     onNotes?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_notes)) }, onClick = { menu = false; go() }) }
                     onComment?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.cell_note_add)) }, onClick = { menu = false; go() }) }
-                    androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; onAddAfter() })
+                    onAddAfter?.let { go -> androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.slide_add_after)) }, onClick = { menu = false; go() }) }
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text(stringResource(if (linked) R.string.slide_remove_linked else R.string.slide_remove)) },
                         enabled = canRemove, onClick = { menu = false; onRemove() },

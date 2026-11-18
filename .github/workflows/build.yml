@@ -141,7 +141,7 @@ jobs:
           python3 - <<'PY'
           import glob, zipfile, xml.dom.minidom, sys
           bad = 0
-          for f in glob.glob("app/build/edited/*.docx") + glob.glob("app/build/edited/*.xlsx") + glob.glob("app/build/edited/*.pptx") + glob.glob("app/build/edited/*.odt") + glob.glob("app/build/edited/*.ods"):
+          for f in glob.glob("app/build/edited/*.docx") + glob.glob("app/build/edited/*.xlsx") + glob.glob("app/build/edited/*.pptx") + glob.glob("app/build/edited/*.odt") + glob.glob("app/build/edited/*.ods") + glob.glob("app/build/edited/*.odp"):
               z = zipfile.ZipFile(f)
               for n in z.namelist():
                   if n.endswith(".xml") or n.endswith(".rels"):
@@ -151,7 +151,7 @@ jobs:
           PY
           dpkg -s libreoffice-calc-nogui libreoffice-impress-nogui > /dev/null 2>&1 || { sudo apt-get -o DPkg::Lock::Timeout=600 update -qq; sudo apt-get -o DPkg::Lock::Timeout=600 install -y -qq --no-install-recommends libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui poppler-utils > /dev/null; }
           mkdir -p edited-pdf log/edited
-          soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods > /dev/null
+          soffice --headless --convert-to pdf --outdir edited-pdf app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods app/build/edited/*.odp > /dev/null
           # OpenDocument spreadsheets: what LibreOffice shows in cells the test names (row,column,value; counted from 1; shown as in the US, 11,700.50)
           mkdir -p edited-csv
           for f in app/build/edited/*.ods; do
@@ -171,7 +171,7 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
           done
-          for f in app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods; do
+          for f in app/build/edited/*.docx app/build/edited/*.xlsx app/build/edited/*.pptx app/build/edited/*.odt app/build/edited/*.ods app/build/edited/*.odp; do
             b="$(basename "$f")"; pdf="edited-pdf/${b%.*}.pdf"
             test -s "$pdf" || { echo "LibreOffice could not open $f"; exit 1; }
             pdftoppm -r 60 -png -f 1 -l 1 "$pdf" "log/edited/${b%.*}" || true
