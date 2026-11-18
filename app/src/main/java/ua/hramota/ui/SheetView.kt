@@ -149,7 +149,7 @@ fun WorkbookDocument(
         // A tablet: the ribbon and the formula bar above the sheet, as in Excel on a computer
         if (editing != null && wide) {
             editing.ribbon?.invoke(index, selected)
-            selected?.let { (r, c) -> EditBar(editing, index, r, c, top = true, onDone = { next -> selected = next }, onClose = { selected = null }) }
+            selected?.let { (r, c) -> EditBar(editing, index, r, c, top = true, notSummed = { rr, cc -> shownAsNotSummed(sheet, rr, cc) }, onDone = { next -> selected = next }, onClose = { selected = null }) }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             SheetGrid(sheet, state, hits, current, selected, room = editing != null, comments = workbook.comments[index].orEmpty()) { selected = it }
@@ -163,7 +163,7 @@ fun WorkbookDocument(
         if (editing != null && !wide) {
             selected?.let { (r, c) ->
                 editing.formatBar?.invoke(index, r, c)
-                EditBar(editing, index, r, c, top = false, onDone = { next -> selected = next }, onClose = { selected = null })
+                EditBar(editing, index, r, c, top = false, notSummed = { rr, cc -> shownAsNotSummed(sheet, rr, cc) }, onDone = { next -> selected = next }, onClose = { selected = null })
             }
         } else if (editing == null) selected?.let { (r, c) ->
             val row = sheet.row(r)
@@ -555,8 +555,19 @@ private fun countAbove(sheet: Sheet, row: Int, col: Int): Int {
 private fun isNumberAt(sheet: Sheet, row: Int, col: Int): Boolean {
     val r = sheet.row(row) ?: return false
     val k = r.find(col)
-    return k >= 0 && sheet.isNumber(r, k) && r.numbers[k].isFinite()
+    // A date, a time or a share shown as such is not a sum's (Excel's AutoSum would add a date's day count)
+    return k >= 0 && sheet.isNumber(r, k) && r.numbers[k].isFinite() && !NOT_SUMMED.containsMatchIn(sheet.text(r, k))
 }
+
+/** A date, a time or a share, as the cell is shown: not added up. */
+internal fun shownAsNotSummed(sheet: Sheet, row: Int, col: Int): Boolean {
+    val r = sheet.row(row) ?: return false
+    val k = r.find(col)
+    return k >= 0 && NOT_SUMMED.containsMatchIn(sheet.text(r, k))
+}
+
+/** What a date, a time or a percentage looks like when shown. */
+private val NOT_SUMMED = Regex("%|\\d[./]\\d{1,2}[./]\\d|\\d:\\d\\d")
 
 /**
  * The run of numbers in the chosen cell's column (no gap above or below it): their sum, average and
@@ -581,20 +592,20 @@ internal fun shownNumber(v: Double): String = java.text.NumberFormat.getNumberIn
  * The sum for the chosen cell, as Excel's AutoSum makes it: the numbers right above it (or, with
  * none there, on its left). Null when there are none.
  */
-internal fun autoSum(content: (Int, Int) -> String, row: Int, col: Int): String? {
-    fun numeric(t: String) = t.isNotBlank() && (t.startsWith("=") || t.replace(" ", "").replace('\u00A0', ' ').replace(" ", "").replace(',', '.').toDoubleOrNull() != null)
+internal fun autoSum(content: (Int, Int) -> String, row: Int, col: Int, notSummed: (Int, Int) -> Boolean = { _, _ -> false }): String? {
+    fun numeric(t: String) = t.isNotBlank() && !NOT_SUMMED.containsMatchIn(t) && (t.startsWith("=") || t.replace(" ", "").replace('\u00A0', ' ').replace(" ", "").replace(',', '.').toDoubleOrNull() != null)
     var top = row
-    while (top > 0 && numeric(content(top - 1, col))) top--
+    while (top > 0 && numeric(content(top - 1, col)) && !notSummed(top - 1, col)) top--
     if (top < row) return "=SUM(${columnName(col)}${top + 1}:${columnName(col)}$row)"
     var left = col
-    while (left > 0 && numeric(content(row, left - 1))) left--
+    while (left > 0 && numeric(content(row, left - 1)) && !notSummed(row, left - 1)) left--
     if (left < col) return "=SUM(${columnName(left)}${row + 1}:${columnName(col - 1)}${row + 1})"
     return null
 }
 
 /** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */
 @Composable
-private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: Boolean, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
+private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: Boolean, notSummed: (Int, Int) -> Boolean = { _, _ -> false }, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
     val ref = "${columnName(col)}${row + 1}"
     // Read again when the workbook changed or rows stopped moving (a field opened meanwhile was empty)
     var value by androidx.compose.runtime.saveable.rememberSaveable(sheet, row, col, editing.version, editing.enabled, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
@@ -616,7 +627,7 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: 
             Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 10.dp))
             // On a phone, inside the field: AutoSum (the sum of the numbers above put in; ✓ puts it in the
             // cell) before it, the keyboard's switch after it
-            val sum = if (top) null else autoSum({ r, c -> editing.content(sheet, r, c) }, row, col)
+            val sum = if (top) null else autoSum({ r, c -> editing.content(sheet, r, c) }, row, col, notSummed)
             val sumLabel = stringResource(R.string.autosum)
             val keysLabel = stringResource(if (digits) R.string.keys_letters else R.string.keys_numbers)
             androidx.compose.material3.OutlinedTextField(

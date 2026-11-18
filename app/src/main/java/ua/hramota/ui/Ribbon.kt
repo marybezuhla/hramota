@@ -69,7 +69,7 @@ fun Ribbon(tabs: List<RibbonTab>, key: String) {
                 for ((i, t) in tabs.withIndex()) {
                     val on = i == tab.coerceIn(0, tabs.size - 1)
                     Box(
-                        Modifier.heightIn(min = 40.dp)
+                        Modifier.heightIn(min = 48.dp)
                             .selectable(on, role = Role.Tab) { tab = i }
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center,

@@ -111,12 +111,15 @@ class PersonasTest {
                 val key = "$name@${n.boundsInRoot.left.toInt()}"
                 if (!seen.add(key)) continue
                 if (name.isBlank()) note("$who · $what · NO NAME: a button at ${n.boundsInRoot} (${w.toInt()}×${h.toInt()} dp)")
-                else if (w < 47.5f || h < 47.5f) note("$who · $what · SMALL: «$name» ${w.toInt()}×${h.toInt()} dp")
+                // (Material's buttons drawn 40 dp take touches 48 dp round; smaller is too small for a finger)
+                else if (n.config.contains(SemanticsActions.OnClick) && n.config.getOrNull(SemanticsProperties.EditableText) == null && (w < 39.5f || h < 39.5f))
+                    note("$who · $what · SMALL: «$name» ${w.toInt()}×${h.toInt()} dp")
             }
         }
         private fun label(n: SemanticsNode): String {
             val c = n.config
-            val parts = (c.getOrNull(SemanticsProperties.ContentDescription).orEmpty() + c.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text })
+            val parts = (c.getOrNull(SemanticsProperties.ContentDescription).orEmpty() + c.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } +
+                listOfNotNull(c.getOrNull(SemanticsProperties.EditableText)?.text?.takeIf { it.isNotBlank() }))
             return parts.joinToString(" ").ifBlank { c.getOrNull(SemanticsActions.OnClick)?.label ?: "" }
         }
     }
@@ -138,12 +141,13 @@ class PersonasTest {
         var saved = false
         session("halyna", { DocxEditorScreen("Лист.docx", state, saving = false, onSave = { saved = true }, onClose = {}) }) {
             shot("opened")
-            // She taps a paragraph and adds a word at its end
+            // She chooses all of a paragraph and types it anew (as the keyboard's "select all" does)
             val p = state.paras.first { it.editable && it.text.startsWith("Перший") }
             state.focused = p.key
             compose.onAllNodes(hasSetTextAction() and hasText(p.text, substring = true)).onFirst().performTextReplacement(p.text + " терміново")
             shot("typed")
-            assertTrue(state.paras.any { it.text.endsWith(" терміново") })
+            assertTrue("Typed over, the paragraph was joined to the one before", state.paras.any { it.text == p.text + " терміново" })
+            assertTrue(state.paras.any { it.text == "Списки" })
             // Bold, from the row under her thumb
             compose.onAllNodes(hasContentDescription("Жирний", substring = true)).onFirst().performClick()
             shot("bold")
@@ -172,7 +176,8 @@ class PersonasTest {
             // The ribbon's AutoSum under them
             compose.onAllNodesWithText("Автосума").onFirst().performClick()
             shot("sum")
-            note("oksana · sum · the cell under the column holds «${edit.content(ua.hramota.doc.sheet.edit.CellKey(0, 15, 1))}»")
+            // Only the numbers she typed: not the date nor the share above them
+            assertEquals("=SUM(B13:B15)", edit.content(ua.hramota.doc.sheet.edit.CellKey(0, 15, 1)))
         }
     }
 

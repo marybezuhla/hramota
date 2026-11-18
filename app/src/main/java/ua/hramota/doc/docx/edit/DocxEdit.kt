@@ -64,7 +64,9 @@ class EditPara(
 /** What the editor shows for a paragraph besides its text. */
 class Shown(val kind: Kind, val marker: String?, val list: ListKind?, val inTable: Boolean, val base: Look, val rowStart: Boolean = false, val cellStart: Boolean = false,
             /** Comments whose range is open where the paragraph begins (they began in an earlier one). */
-            val openComments: Set<String> = emptySet())
+            val openComments: Set<String> = emptySet(),
+            /** In a table: the cell's first column and how many it spans, of the table's [columns] (0: not known). */
+            val col: Int = 0, val cols: Int = 1, val columns: Int = 0)
 
 /**
  * A DOCX opened for editing. Only the paragraphs the person changes are written anew; everything else
@@ -166,7 +168,9 @@ class DocxEdit private constructor(
             val cellStart = slot.row != 0 && slot.container != prevContainer
             val rowStart = slot.row != 0 && slot.row != prevRow
             prevContainer = slot.container; prevRow = slot.row
-            Shown(kindOf(style), marker, listKind, slot.row != 0, Look(rp.bold ?: false, rp.italic ?: false, rp.underline ?: false, rp.strike ?: false), rowStart, cellStart, openHere)
+            val place = if (slot.row != 0) placeOf(slot) else null
+            Shown(kindOf(style), marker, listKind, slot.row != 0, Look(rp.bold ?: false, rp.italic ?: false, rp.underline ?: false, rp.strike ?: false), rowStart, cellStart, openHere,
+                place?.get(0) ?: 0, place?.get(1) ?: 1, if (place != null) gridWidths[rows[slot.row - 1].table]?.size ?: 0 else 0)
         }
     }
 
@@ -629,6 +633,28 @@ class DocxEdit private constructor(
         }
         if (below) after.getOrPut(r) { ArrayList() }.add(0, id) else before.getOrPut(r) { ArrayList() }.add(id)
         return out
+    }
+
+    /** Each cell's first column and span, by its paragraphs' container (worked out a row at a time). */
+    private val places = HashMap<Int, IntArray>()
+
+    /** Where a table paragraph's cell stands in its row (first column, columns spanned). */
+    private fun placeOf(slot: Slot): IntArray? {
+        places[slot.container]?.let { return it }
+        val row = rows.getOrNull(slot.row - 1) ?: return null
+        val x = texts[row.src]
+        val tr = XmlScan.children(x, row.start, row.end).firstOrNull() ?: return null
+        var col = 0
+        val kids = XmlScan.children(x, tr)
+        kids.firstOrNull { it.local == "trPr" }?.let { pr -> XmlScan.children(x, pr).firstOrNull { it.local == "gridBefore" }?.let { g -> col = g.attrs.entries.firstOrNull { it.key.endsWith(":val") }?.value?.toIntOrNull() ?: 0 } }
+        val inRow = slots.filter { it.src == row.src && it.start >= row.start && it.end <= row.end }
+        for (tc in kids) if (tc.local == "tc") {
+            val span = XmlScan.children(x, tc).firstOrNull { it.local == "tcPr" }?.let { pr -> XmlScan.children(x, pr).firstOrNull { it.local == "gridSpan" } }
+                ?.attrs?.entries?.firstOrNull { it.key.endsWith(":val") }?.value?.toIntOrNull()?.coerceIn(1, 1000) ?: 1
+            inRow.firstOrNull { it.start >= tc.start && it.end <= tc.end }?.let { places[it.container] = intArrayOf(col, span) }
+            col += span
+        }
+        return places[slot.container]
     }
 
     // --- Tables as grids: cells merged and split, rows added and taken out ---

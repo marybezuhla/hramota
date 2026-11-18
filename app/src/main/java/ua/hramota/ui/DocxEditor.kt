@@ -525,7 +525,7 @@ fun DocxEditorScreen(
                     val p = state.paras.getOrNull(b.first) ?: return@items
                     val shown = state.shown.getOrNull(b.first) ?: return@items
                     Column { EditParagraph(state, b.first, p, shown, readOnly = saving, onLocked = { locked = true }) }
-                } else TableRow(b.cells) { i ->
+                } else TableRow(b.cells, b.cells.map { state.shown.getOrNull(it.first) }) { i ->
                     val p = state.paras.getOrNull(i); val shown = state.shown.getOrNull(i)
                     if (p != null && shown != null) EditParagraph(state, i, p, shown, readOnly = saving, onLocked = { locked = true }, grid = true)
                 }
@@ -592,14 +592,34 @@ private fun blocksOf(shown: List<Shown>): List<Block> {
     return out
 }
 
-/** A table's row: its cells side by side with lines between, each cell's paragraphs one under another. */
+/**
+ * A table's row: its cells side by side with lines between, each cell's paragraphs one under another;
+ * each as wide as the columns it spans (a place a cell above covers left empty), when they are known.
+ */
 @Composable
-private fun TableRow(cells: List<IntRange>, paragraph: @Composable (Int) -> Unit) {
+private fun TableRow(cells: List<IntRange>, places: List<Shown?>, paragraph: @Composable (Int) -> Unit) {
     val line = MaterialTheme.colorScheme.outlineVariant
+    val columns = places.firstOrNull()?.columns ?: 0
+    val known = columns > 0 && places.all { it != null && it.col + it.cols <= columns } &&
+        places.zipWithNext().all { (a, b) -> a!!.col + a.cols <= b!!.col }
     Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).border(androidx.compose.ui.unit.Dp.Hairline, line)) {
+        var at = 0
         for ((n, c) in cells.withIndex()) {
-            if (n > 0) androidx.compose.material3.VerticalDivider(color = line)
-            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp, vertical = 2.dp)) { for (i in c) paragraph(i) }
+            val place = places[n]
+            if (known && place!!.col > at) {
+                // Under a cell merged down from the row above
+                if (at > 0) androidx.compose.material3.VerticalDivider(color = line)
+                androidx.compose.foundation.layout.Spacer(Modifier.weight((place.col - at).toFloat()).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLow))
+                at = place.col
+            }
+            if (at > 0 || n > 0) androidx.compose.material3.VerticalDivider(color = line)
+            val weight = if (known) place!!.cols.toFloat() else 1f
+            Column(Modifier.weight(weight).fillMaxHeight().padding(horizontal = 6.dp, vertical = 2.dp)) { for (i in c) paragraph(i) }
+            if (known) at = place!!.col + place.cols
+        }
+        if (known && at < columns) {
+            androidx.compose.material3.VerticalDivider(color = line)
+            androidx.compose.foundation.layout.Spacer(Modifier.weight((columns - at).toFloat()).fillMaxHeight())
         }
     }
 }
@@ -668,17 +688,24 @@ private fun EditParagraph(state: EditorState, i: Int, p: EditPara, shown: Shown,
                     var suf = 0
                     while (suf < before.length - pre && suf < text.length - pre && before[before.length - 1 - suf] == text[text.length - 1 - suf]) suf++
                     val removed = before.length - pre - suf
-                    if (removed > 0) {
-                        // The mark was deleted: Backspace at the start joins this paragraph to the one before
+                    if (removed == 1 && text.length == before.length - 1) {
+                        // Only the mark was deleted: Backspace at the start joins this paragraph to the one before
                         // Joined: this field goes away. Refused: nothing changed, the mark is simply kept
                         if (state.joinWithPrevious(p.key)) stale[0] = true else value = TextFieldValue(ZW + p.text, TextRange(1))
                         return@BasicTextField
                     }
-                    // Typed before the mark: the mark goes back to the very start
-                    val inserted = text.length - before.length
-                    text = ZW + text.substring(0, inserted) + text.substring(inserted + 1)
-                    fun shift(x: Int) = if (x <= inserted) x + 1 else x
-                    sel = TextRange(shift(sel.start), shift(sel.end))
+                    if (removed > 0) {
+                        // Text chosen from the very start (all of it, say) typed over or cleared: the new text
+                        // stands, the mark goes back before it (nothing is joined)
+                        text = ZW + text
+                        sel = TextRange(sel.start + 1, sel.end + 1)
+                    } else {
+                        // Typed before the mark: the mark goes back to the very start
+                        val inserted = text.length - before.length
+                        text = ZW + text.substring(0, inserted) + text.substring(inserted + 1)
+                        fun shift(x: Int) = if (x <= inserted) x + 1 else x
+                        sel = TextRange(shift(sel.start), shift(sel.end))
+                    }
                 }
                 val plain = text.substring(1)
                 sel = TextRange(sel.start.coerceIn(1, text.length), sel.end.coerceIn(1, text.length))

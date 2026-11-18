@@ -712,14 +712,22 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
                 while (pre < before.length && pre < text.length && before[pre] == text[pre]) pre++
                 var suf = 0
                 while (suf < before.length - pre && suf < text.length - pre && before[before.length - 1 - suf] == text[text.length - 1 - suf]) suf++
-                if (before.length - pre - suf > 0) {
+                val removed = before.length - pre - suf
+                if (removed == 1 && text.length == before.length - 1) {
+                    // Only the mark: Backspace at the start joins this paragraph to the one before
                     if (state.joinWithPrevious(p.key)) stale[0] = true else value = TextFieldValue(MARK + p.text, TextRange(1))
                     return@BasicTextField
                 }
-                val inserted = text.length - before.length
-                text = MARK + text.substring(0, inserted) + text.substring(inserted + 1)
-                fun shift(x: Int) = if (x <= inserted) x + 1 else x
-                sel = TextRange(shift(sel.start), shift(sel.end))
+                if (removed > 0) {
+                    // Text chosen from the very start typed over or cleared: it stands, nothing is joined
+                    text = MARK + text
+                    sel = TextRange(sel.start + 1, sel.end + 1)
+                } else {
+                    val inserted = text.length - before.length
+                    text = MARK + text.substring(0, inserted) + text.substring(inserted + 1)
+                    fun shift(x: Int) = if (x <= inserted) x + 1 else x
+                    sel = TextRange(shift(sel.start), shift(sel.end))
+                }
             }
             val plain = text.substring(1)
             sel = TextRange(sel.start.coerceIn(1, text.length), sel.end.coerceIn(1, text.length))

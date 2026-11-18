@@ -634,7 +634,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                                 sortDown = if (e.canSort && cell != null) ({ state.sort(sheet, row, col, descending = true, headings = true) }) else null,
                                 filter = if (cell != null) ({ filtering = Triple(sheet, row, col) }) else null,
                                 note = if (cell != null && state.canNote(sheet)) ({ noting = Triple(sheet, row, col) }) else null,
-                                autoSum = cell?.let { autoSum({ r, c -> state.content(sheet, r, c) }, row, col) }?.let { f -> { state.commit(sheet, row, col, f); Unit } },
+                                autoSum = cell?.let { autoSum({ r, c -> state.content(sheet, r, c) }, row, col, { r, c -> state.workbook.sheets.getOrNull(sheet)?.let { shownAsNotSummed(it, r, c) } ?: false }) }?.let { f -> { state.commit(sheet, row, col, f); Unit } },
                                 find = { find.open = true },
                             ),
                         )

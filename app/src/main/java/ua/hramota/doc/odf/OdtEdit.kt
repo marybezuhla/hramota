@@ -211,7 +211,9 @@ class OdtEdit private constructor(
             }
             prevSlot = p.slot
             val ps = styles.props(styleOf(p.startTag), "paragraph")
-            Shown(kind(p), marker, listKind, slot.row != 0, Look(on(ps, "bold") ?: false, on(ps, "italic") ?: false, on(ps, "underline") ?: false, on(ps, "strike") ?: false), rowStart, cellStart, openHere)
+            val place = if (slot.row != 0) placeOf(slot) else null
+            Shown(kind(p), marker, listKind, slot.row != 0, Look(on(ps, "bold") ?: false, on(ps, "italic") ?: false, on(ps, "underline") ?: false, on(ps, "strike") ?: false), rowStart, cellStart, openHere,
+                place?.get(0) ?: 0, place?.get(1) ?: 1, if (place != null) tableColumns[rows[slot.row - 1].table] ?: 0 else 0)
         }
     }
 
@@ -283,6 +285,32 @@ class OdtEdit private constructor(
     /** What a cell holds as a value (a number, a date, a formula): an empty one has none. */
     private val values = Regex("\\s[\\w.-]+:(?:value-type|value|date-value|time-value|boolean-value|string-value|formula|currency)=(?:\"[^\"]*\"|'[^']*')")
 
+    /** Each cell's first column and span, by its paragraphs' container (worked out a row at a time). */
+    private val places = HashMap<Int, IntArray>()
+
+    /** Where a table paragraph's cell stands in its row (first column, columns spanned). */
+    private fun placeOf(slot: Slot): IntArray? {
+        places[slot.container]?.let { return it }
+        val row = rows.getOrNull(slot.row - 1) ?: return null
+        val x = texts[row.src]
+        val tr = XmlScan.children(x, row.start, row.end).firstOrNull() ?: return null
+        val tb = ns.table
+        var col = 0
+        val inRow = slots.filter { it.src == row.src && it.start >= row.start && it.end <= row.end }
+        for (c in XmlScan.children(x, tr)) {
+            val repeat = c.attrs["$tb:number-columns-repeated"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
+            when (c.name) {
+                "$tb:covered-table-cell" -> col += repeat
+                "$tb:table-cell" -> {
+                    val span = c.attrs["$tb:number-columns-spanned"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
+                    inRow.firstOrNull { it.start >= c.start && it.end <= c.end }?.let { places[it.container] = intArrayOf(col, span) }
+                    col += repeat
+                }
+            }
+        }
+        return places[slot.container]
+    }
+
     // --- Tables as grids: cells merged and split, rows added and taken out ---
 
     /** A cell's look: its start tag (no spans, no value), its first paragraph's start tag. */
@@ -303,7 +331,6 @@ class OdtEdit private constructor(
         for (i in range) { val x = slots[list[i].slot].row; if (order.lastOrNull() != x) { if (x in order) return null; order += x } }
         val cells = ArrayList<TableGrid.Cell<CellLook>>()
         val looks = ArrayList<String>()
-        val taken = HashSet<Long>()
         val columns = tableColumns[table] ?: return null
         for ((i, id) in order.withIndex()) {
             val row = rows[id - 1]
@@ -328,12 +355,10 @@ class OdtEdit private constructor(
                         val look = CellLook(start, pStart, firstP?.name ?: "$t:p")
                         val cs = c.attrs["$tb:number-columns-spanned"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
                         val rs = c.attrs["$tb:number-rows-spanned"]?.toIntOrNull()?.coerceIn(1, 10_000) ?: 1
+                        // (the places a cell spans are written out after it as covered cells)
                         for (k in 0 until repeat) {
-                            // (a place covered by a cell above: this one stands after it)
-                            while (taken.contains(i.toLong() shl 20 or col.toLong())) col++
                             cells += TableGrid.Cell(i, col, rs, cs, look, if (k == 0) mine else ArrayList())
-                            for (dr in 0 until rs) for (dc in 0 until cs) taken += (i + dr).toLong() shl 20 or (col + dc).toLong()
-                            col += cs
+                            col++
                         }
                     }
                     else -> return null
