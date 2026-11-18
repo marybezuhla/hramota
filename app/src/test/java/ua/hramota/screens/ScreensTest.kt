@@ -369,7 +369,7 @@ class ScreensTest {
     @Test fun slideEditorTablet() = shot("16-tablet-pptx") { ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", androidx.compose.runtime.remember { deck("slides/01-project.pptx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(qualifiers = "uk-w800dp-h1280dp-mdpi")
     @Test fun editorTabletTall() = shot("16-tablet-docx-portrait") { ua.hramota.ui.DocxEditorScreen("Таблиці.docx", androidx.compose.runtime.remember { editor("04-tables.docx") }, saving = false, onSave = {}, onClose = {}) }
-    @Config(qualifiers = "uk-w1200dp-h800dp-mdpi-night")
+    @Config(qualifiers = "uk-w1200dp-h800dp-night-mdpi")
     @Test fun slideEditorTabletDark() = shot("16-tablet-pptx-dark") { ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", androidx.compose.runtime.remember { deck("slides/01-project.pptx") }, saving = false, onSave = {}, onClose = {}) }
     @Test fun odtEditorScreen() = shot("17-edit-odt") { ua.hramota.ui.DocxEditorScreen("Списки.odt", androidx.compose.runtime.remember { odtEditor() }, saving = false, onSave = {}, onClose = {}) }
     @Test fun odsEditorScreen() = shot("17-edit-ods") { ua.hramota.ui.SheetEditorScreen("Бюджет.ods", androidx.compose.runtime.remember { odsEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 2) }
