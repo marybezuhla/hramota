@@ -365,8 +365,14 @@ class ScreensTest {
     @Test fun editorTablet() = shot("16-tablet-docx") { ua.hramota.ui.DocxEditorScreen("Списки.docx", androidx.compose.runtime.remember { editor("03-lists.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(qualifiers = "uk-w1200dp-h800dp-mdpi")
     @Test fun sheetEditorTablet() = shot("16-tablet-xlsx") { ua.hramota.ui.SheetEditorScreen("Сімейний бюджет.xlsx", androidx.compose.runtime.remember { sheetEditor() }, saving = false, onSave = {}, onClose = {}, startCell = 3 to 4) }
+    /** Slides' pictures as the app draws them (from the presentation's own renderer). */
+    private fun slidePicture(name: String): suspend (Int, Int) -> androidx.compose.ui.graphics.ImageBitmap? {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val pages = ua.hramota.doc.slides.SlidePages(ua.hramota.doc.slides.PptxReader.read(res(name).inputStream()), Fonts(app.assets))
+        return { slide, w -> pages.draw(slide, w)?.asImageBitmap() }
+    }
     @Config(qualifiers = "uk-w1200dp-h800dp-mdpi")
-    @Test fun slideEditorTablet() = shot("16-tablet-pptx") { ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", androidx.compose.runtime.remember { deck("slides/01-project.pptx") }, saving = false, onSave = {}, onClose = {}) }
+    @Test fun slideEditorTablet() = shot("16-tablet-pptx", settle = 20) { ua.hramota.ui.SlideEditorScreen("Презентація проєкту.pptx", androidx.compose.runtime.remember { deck("slides/01-project.pptx") }, saving = false, onSave = {}, onClose = {}, thumbnail = androidx.compose.runtime.remember { slidePicture("slides/01-project.pptx") }) }
     @Config(qualifiers = "uk-w800dp-h1280dp-mdpi")
     @Test fun editorTabletTall() = shot("16-tablet-docx-portrait") { ua.hramota.ui.DocxEditorScreen("Таблиці.docx", androidx.compose.runtime.remember { editor("04-tables.docx") }, saving = false, onSave = {}, onClose = {}) }
     @Config(qualifiers = "uk-w1200dp-h800dp-night-mdpi")

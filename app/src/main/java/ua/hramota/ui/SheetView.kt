@@ -28,6 +28,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -157,7 +158,7 @@ fun WorkbookDocument(
         if (editing != null) selected?.let { (r, c) -> columnStats(sheet, r, c) }?.let { (sum, avg, count) ->
             val (r, c) = selected!!
             val top = r - countAbove(sheet, r, c); val bottom = top + count - 1
-            StatusBar(stringResource(R.string.status_stats, "${columnName(c)}${top + 1}:${columnName(c)}${bottom + 1}", shownNumber(sum), shownNumber(avg), count))
+            StatusBar(stringResource(if (wide) R.string.status_stats else R.string.status_stats_short, "${columnName(c)}${top + 1}:${columnName(c)}${bottom + 1}", shownNumber(sum), shownNumber(avg), count))
         }
         if (editing != null && !wide) {
             selected?.let { (r, c) ->
@@ -611,13 +612,11 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: 
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp, modifier = if (top) Modifier else Modifier.imePadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 10.dp))
-            // AutoSum: the sum of the numbers above put in the field (✓ puts it in the cell)
-            if (!top) autoSum({ r, c -> editing.content(sheet, r, c) }, row, col)?.let { f ->
-                val l = stringResource(R.string.autosum)
-                TextButton(onClick = { value = androidx.compose.ui.text.input.TextFieldValue(f, androidx.compose.ui.text.TextRange(f.length)); editing.draft?.invoke(sheet, row, col, f); refused = false }, enabled = editing.enabled, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text("Σ", style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = l })
-                }
-            }
+            // On a phone, inside the field: AutoSum (the sum of the numbers above put in; ✓ puts it in the
+            // cell) before it, the keyboard's switch after it
+            val sum = if (top) null else autoSum({ r, c -> editing.content(sheet, r, c) }, row, col)
+            val sumLabel = stringResource(R.string.autosum)
+            val keysLabel = stringResource(if (digits) R.string.keys_letters else R.string.keys_numbers)
             androidx.compose.material3.OutlinedTextField(
                 value = value,
                 onValueChange = { if (it.text != value.text) editing.draft?.invoke(sheet, row, col, it.text); value = it; refused = false },
@@ -625,6 +624,14 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: 
                 enabled = editing.enabled,
                 isError = refused,
                 placeholder = { Text(stringResource(R.string.sheet_edit_hint), maxLines = 1) },
+                leadingIcon = sum?.let { f -> {
+                    IconButton(onClick = { value = androidx.compose.ui.text.input.TextFieldValue(f, androidx.compose.ui.text.TextRange(f.length)); editing.draft?.invoke(sheet, row, col, f); refused = false }, enabled = editing.enabled) {
+                        Text("Σ", style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = sumLabel })
+                    }
+                } },
+                trailingIcon = if (top) null else ({
+                    IconButton(onClick = { digits = !digits }) { Text(if (digits) "абв" else "123", style = MaterialTheme.typography.labelMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = keysLabel }) }
+                }),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                     keyboardType = if (digits) androidx.compose.ui.text.input.KeyboardType.Decimal else androidx.compose.ui.text.input.KeyboardType.Text,
                     imeAction = androidx.compose.ui.text.input.ImeAction.Next,
@@ -632,10 +639,6 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: 
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onNext = { if (put()) onDone(row + 1 to col) }),
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
-            if (!top) {
-                val l = stringResource(if (digits) R.string.keys_letters else R.string.keys_numbers)
-                TextButton(onClick = { digits = !digits }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text(if (digits) "абв" else "123", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
-            }
             // ✓ puts it in and goes to the cell below, for typing a column on the go (as Enter does)
             TextButton(onClick = { if (put()) onDone(row + 1 to col) }, enabled = editing.enabled) { val l = stringResource(R.string.cell_put); Text("✓", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
             editing.rows?.let { rows ->
@@ -674,10 +677,15 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: 
                                 go()
                             })
                         }
+                        // On a phone closing the cell is here too (room for the field)
+                        if (!top) {
+                            androidx.compose.material3.HorizontalDivider()
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.cell_close)) }, onClick = { menu = false; editing.discard?.invoke(); onClose() })
+                        }
                     }
                 }
             }
-            TextButton(onClick = { editing.discard?.invoke(); onClose() }) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
+            if (top || editing.rows == null) TextButton(onClick = { editing.discard?.invoke(); onClose() }) { val l = stringResource(R.string.cell_close); Text("✕", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
         }
     }
 }

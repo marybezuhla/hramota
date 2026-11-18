@@ -257,7 +257,7 @@ internal fun SheetRibbon(now: CellStyle?, enabled: Boolean, canLook: Boolean, ca
                 act("Σ", R.string.autosum, a.autoSum)
                 act("А↓", R.string.sort_up_short, a.sortUp)
                 act("Я↓", R.string.sort_down_short, a.sortDown)
-                act("⏷", R.string.filter_short, a.filter)
+                act("▽", R.string.filter_short, a.filter)
             }
         },
         RibbonTab(stringResource(R.string.ribbon_insert)) {
@@ -279,7 +279,7 @@ internal fun SheetRibbon(now: CellStyle?, enabled: Boolean, canLook: Boolean, ca
             RibbonGroup(stringResource(R.string.group_sort)) {
                 act("А↓", R.string.sort_up_short, a.sortUp)
                 act("Я↓", R.string.sort_down_short, a.sortDown)
-                act("⏷", R.string.filter_short, a.filter)
+                act("▽", R.string.filter_short, a.filter)
             }
             RibbonGroup(stringResource(R.string.group_find)) {
                 RibbonButton("⌕", stringResource(R.string.find_short), enabled, onClick = a.find)

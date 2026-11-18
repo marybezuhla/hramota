@@ -579,7 +579,8 @@ fun SlideEditorScreen(
                     }
                 }
             }
-            if (state.edit.canAddSlides) item(key = "add") {
+            // (On a tablet a slide is added from the ribbon)
+            if (state.edit.canAddSlides && !wide) item(key = "add") {
                 androidx.compose.material3.OutlinedButton(
                     onClick = { scope.launch { if (!state.addSlide(null, lang)) noLayout = true } }, enabled = !saving,
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),

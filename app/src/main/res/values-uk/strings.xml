@@ -850,4 +850,5 @@
     <string name="strike">Закреслений</string>
     <string name="bullets_short">Маркери</string>
     <string name="numbers_short">Нумерація</string>
+    <string name="status_stats_short">%1$s: Σ %2$s · сер. %3$s · %4$d</string>
 </resources>

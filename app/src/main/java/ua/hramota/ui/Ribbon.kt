@@ -124,7 +124,7 @@ fun RibbonButton(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(glyph, style = MaterialTheme.typography.titleMedium.merge(style), color = tint, maxLines = 1, modifier = Modifier.clearAndSetSemantics { })
-        Text(label, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 96.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 128.dp))
     }
 }
 
