@@ -410,25 +410,85 @@ fun SlideEditorScreen(
     val find = remember { FindState() }
     var replacedCount by remember { mutableStateOf<Int?>(null) }
     BackHandler { if (find.open) find.open = false else if (state.dirty) askClose = true else onClose() }
-    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
-    // The text tools: under the text on a phone, under the title on a tablet; all seen at once
+    val wide = isWide()
+    val order = state.order
+    val lang = remember { java.util.Locale.getDefault().stripExtensions().toLanguageTag() }
+    var noLayout by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // On a tablet one slide is shown at a time, as in a presentation program: this one (its place in the order)
+    var current by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    val cur = current.coerceIn(0, (order.size - 1).coerceAtLeast(0))
+    // The slide being written in (else the one shown)
+    val focusedSlide = state.paras.getOrNull(state.indexOf(state.focused))?.let(state::slideOf) ?: order.getOrNull(if (wide) cur else 0)
+    val bold = { state.toggle(SlideEditorState.Mark.BOLD) }
+    val italic = { state.toggle(SlideEditorState.Mark.ITALIC) }
+    val underline = { state.toggle(SlideEditorState.Mark.UNDERLINE) }
+    /** The slide's speaker notes: brought into view, or added when it has none. */
+    fun notes(slide: Int) {
+        val key = state.paras.firstOrNull { p -> state.edit.boxes[p.box].let { it.slide == slide && it.kind == "notes" } }?.key
+        if (key != null) state.moveTo = key to 0
+        else if (state.edit.canNotes) scope.launch { if (!state.addNotes(slide, lang)) noNotes = true }
+    }
+    // The text tools on a phone: under the text, undo first, all seen at once
     val tools: @Composable () -> Unit = {
-        val i = state.indexOf(state.focused)
-        val active = !saving && i >= 0 && state.paras.getOrNull(i)?.editable == true
-        Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().then(if (wide) Modifier else Modifier.imePadding())) {
-            Column(if (wide) Modifier else Modifier.navigationBarsPadding()) {
-                if (!wide) HorizontalDivider()
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (wide) Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally) else Arrangement.SpaceEvenly,
-                ) {
-                    Tool("B", stringResource(R.string.edit_bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold), toggles = true) { state.toggle(SlideEditorState.Mark.BOLD) }
-                    Tool("I", stringResource(R.string.edit_italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic), toggles = true) { state.toggle(SlideEditorState.Mark.ITALIC) }
-                    Tool("U", stringResource(R.string.edit_underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline), toggles = true) { state.toggle(SlideEditorState.Mark.UNDERLINE) }
-                    Tool("S", stringResource(R.string.edit_strike), active, active && state.has(SlideEditorState.Mark.STRIKE), TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(SlideEditorState.Mark.STRIKE) }
+        val k = state.indexOf(state.focused)
+        val active = !saving && k >= 0 && state.paras.getOrNull(k)?.editable == true
+        Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().imePadding()) {
+            Column(Modifier.navigationBarsPadding()) {
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+                    UndoTool(!saving && state.canUndo) { state.undo() }
+                    Tool("B", stringResource(R.string.edit_bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold), toggles = true, onClick = bold)
+                    Tool("I", stringResource(R.string.edit_italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic), toggles = true, onClick = italic)
+                    Tool("U", stringResource(R.string.edit_underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline), toggles = true, onClick = underline)
+                    val s = focusedSlide
+                    Tool("📝", stringResource(R.string.notes_short), !saving && s != null && (state.hasNotes(s) || state.edit.canNotes)) { s?.let { notes(it) } }
+                    Box {
+                        var more by remember { mutableStateOf(false) }
+                        Tool("⋯", stringResource(R.string.edit_more_tools), active) { more = true }
+                        androidx.compose.material3.DropdownMenu(more, onDismissRequest = { more = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.strike), textDecoration = TextDecoration.LineThrough) }, leadingIcon = { if (state.has(SlideEditorState.Mark.STRIKE)) Text("✓") }, onClick = { more = false; state.toggle(SlideEditorState.Mark.STRIKE) })
+                        }
+                    }
                 }
             }
         }
+    }
+    // The ribbon on a tablet: Home, Insert, View
+    val ribbon: @Composable () -> Unit = {
+        val k = state.indexOf(state.focused)
+        val active = !saving && k >= 0 && state.paras.getOrNull(k)?.editable == true
+        val slide = order.getOrNull(cur)
+        Ribbon(listOf(
+            RibbonTab(stringResource(R.string.ribbon_home)) {
+                RibbonGroup(stringResource(R.string.group_slides)) {
+                    RibbonButton("＋", stringResource(R.string.slide_new_short), !saving && state.edit.canAddSlides && slide != null) { scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } }
+                    RibbonButton("✕", stringResource(R.string.slide_remove_short), !saving && slide != null && state.canRemove(slide)) { slide?.let { state.removeSlide(it) } }
+                    RibbonButton("↑", stringResource(R.string.slide_up), !saving && slide != null && cur > 0) { slide?.let { state.moveSlide(it, -1); current = cur - 1 } }
+                    RibbonButton("↓", stringResource(R.string.slide_down), !saving && slide != null && cur < order.size - 1) { slide?.let { state.moveSlide(it, 1); current = cur + 1 } }
+                }
+                RibbonGroup(stringResource(R.string.group_font)) {
+                    RibbonButton("B", stringResource(R.string.bold), active, active && state.has(SlideEditorState.Mark.BOLD), TextStyle(fontWeight = FontWeight.Bold), toggles = true, onClick = bold)
+                    RibbonButton("I", stringResource(R.string.italic), active, active && state.has(SlideEditorState.Mark.ITALIC), TextStyle(fontStyle = FontStyle.Italic), toggles = true, onClick = italic)
+                    RibbonButton("U", stringResource(R.string.underline), active, active && state.has(SlideEditorState.Mark.UNDERLINE), TextStyle(textDecoration = TextDecoration.Underline), toggles = true, onClick = underline)
+                    RibbonButton("S", stringResource(R.string.strike), active, active && state.has(SlideEditorState.Mark.STRIKE), TextStyle(textDecoration = TextDecoration.LineThrough), toggles = true) { state.toggle(SlideEditorState.Mark.STRIKE) }
+                }
+            },
+            RibbonTab(stringResource(R.string.ribbon_insert)) {
+                RibbonGroup(stringResource(R.string.group_slides)) {
+                    RibbonButton("▣", stringResource(R.string.slide_place_short), !saving && slide != null && source != null && state.edit.canPlace) { placing = slide }
+                }
+                RibbonGroup(stringResource(R.string.group_notes)) {
+                    RibbonButton("📝", stringResource(R.string.notes_short), !saving && slide != null && (state.hasNotes(slide) || state.edit.canNotes)) { slide?.let { notes(it) } }
+                    RibbonButton("💬", stringResource(R.string.comment_short), !saving && slide != null && state.edit.canComment(slide)) { commenting = slide }
+                }
+            },
+            RibbonTab(stringResource(R.string.ribbon_view)) {
+                RibbonGroup(stringResource(R.string.group_find)) {
+                    RibbonButton("⌕", stringResource(R.string.find_short), !saving) { find.open = true }
+                }
+            },
+        ), key = "slides")
     }
     Scaffold(
         topBar = {
@@ -442,25 +502,27 @@ fun SlideEditorScreen(
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
             )
-            if (wide) tools()
+            if (wide) ribbon()
             if (find.open) FindBar(find, state, state.paras, enabled = !saving) { n -> if (n != 1) replacedCount = n }
           }
         },
-        bottomBar = { if (!wide) tools() },
+        bottomBar = { if (!wide) tools() else StatusBar(stringResource(R.string.status_slide, cur + 1, order.size)) },
+        modifier = Modifier.editorKeys(EditorKeys(
+            undo = { if (!saving && state.canUndo) state.undo() }, redo = { if (!saving && state.canRedo) state.redo() },
+            save = { if (state.dirty && !saving) onSave() }, find = { find.open = true },
+            bold = { if (!saving) bold() }, italic = { if (!saving) italic() }, underline = { if (!saving) underline() },
+        )),
     ) { padding ->
         val list = state.paras
-        val order = state.order
-        val lang = remember { java.util.Locale.getDefault().stripExtensions().toLanguageTag() }
-        var noLayout by remember { mutableStateOf(false) }
-        val scope = androidx.compose.runtime.rememberCoroutineScope()
         // Each slide in order: its heading (number, picture, what can be done with it), then its text boxes
         val bySlide = remember(list) { list.groupBy(state::slideOf) }
         val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-        // A place found (or a new slide's text) is brought into view
+        // A place found (or a new slide's text) is brought into view (on a tablet, its slide shown)
         LaunchedEffect(state.moveTo) {
             val key = state.moveTo?.first ?: return@LaunchedEffect
             var at = 0
-            for (slide in order) {
+            for ((n, slide) in order.withIndex()) {
+                if (wide) { val k = bySlide[slide].orEmpty().indexOfFirst { it.key == key }; if (k < 0) continue; current = n; listState.scrollToItem(1 + k); return@LaunchedEffect }
                 at++ // the slide's heading
                 val ps = bySlide[slide].orEmpty()
                 val k = ps.indexOfFirst { it.key == key }
@@ -468,24 +530,18 @@ fun SlideEditorScreen(
                 at += ps.size
             }
         }
-        // Where each slide's heading is in the list (to go to it from the rail)
-        val headings = remember(order, bySlide) {
-            var at = 0
-            order.map { slide -> at.also { at += 1 + bySlide[slide].orEmpty().size } }
-        }
         Row(Modifier.fillMaxSize().padding(padding)) {
           if (wide) {
             // A tablet: the slides as small pictures down the left, as in a presentation program
-            val current by remember(headings) { androidx.compose.runtime.derivedStateOf { headings.indexOfLast { it <= listState.firstVisibleItemIndex }.coerceAtLeast(0) } }
             LazyColumn(
                 Modifier.width(176.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainer),
                 contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 itemsIndexed(order, key = { _, slide -> "rail-$slide" }) { n, slide ->
                     SlideRailItem(
-                        number = n + 1, selected = n == current, aspect = aspect,
+                        number = n + 1, selected = n == cur, aspect = aspect,
                         picture = thumbnail?.takeIf { slide < state.edit.slideCount }?.let { t -> val f: suspend (Int) -> ImageBitmap? = { w -> t(slide, w) }; f }, slide = slide,
-                        onClick = { scope.launch { listState.animateScrollToItem(headings.getOrElse(n) { 0 }) } },
+                        onClick = { current = n; scope.launch { listState.scrollToItem(0) } },
                     )
                 }
             }
@@ -494,12 +550,13 @@ fun SlideEditorScreen(
           Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(Modifier.fillMaxHeight().widthIn(max = 820.dp).fillMaxWidth(), state = listState, contentPadding = PaddingValues(horizontal = if (wide) 32.dp else 16.dp, vertical = 12.dp)) {
             for ((n, slide) in order.withIndex()) {
+                if (wide && n != cur) continue
                 item(key = "slide-$slide") {
                     SlideHeading(
                         number = n + 1, first = n == 0, last = n == order.size - 1, enabled = !saving, canRemove = state.canRemove(slide), linked = !state.edit.canRemove(slide, state.order),
                         picture = thumbnail?.takeIf { slide < state.edit.slideCount }?.let { t -> val f: suspend (Int) -> ImageBitmap? = { w -> t(slide, w) }; f }, slide = slide, aspect = aspect,
                         empty = bySlide[slide].isNullOrEmpty(),
-                        onUp = { state.moveSlide(slide, -1) }, onDown = { state.moveSlide(slide, 1) },
+                        onUp = { state.moveSlide(slide, -1); if (wide) current = n - 1 }, onDown = { state.moveSlide(slide, 1); if (wide) current = n + 1 },
                         onRemove = { state.removeSlide(slide) },
                         onAddAfter = if (state.edit.canAddSlides) ({ scope.launch { if (!state.addSlide(slide, lang)) noLayout = true } }) else null,
                         onPlace = if (source != null && !saving && state.edit.canPlace) ({ placing = slide }) else null,

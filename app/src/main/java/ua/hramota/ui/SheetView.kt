@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -142,16 +143,28 @@ fun WorkbookDocument(
     // Another sheet opens at its top left (an edited one stays where it is)
     var shown by remember { mutableStateOf(index) }
     if (shown != index) { shown = index; state.x = 0f; state.y = 0f }
+    val wide = isWide()
     Column(Modifier.fillMaxSize()) {
+        // A tablet: the ribbon and the formula bar above the sheet, as in Excel on a computer
+        if (editing != null && wide) {
+            editing.ribbon?.invoke(index, selected)
+            selected?.let { (r, c) -> EditBar(editing, index, r, c, top = true, onDone = { next -> selected = next }, onClose = { selected = null }) }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             SheetGrid(sheet, state, hits, current, selected, room = editing != null, comments = workbook.comments[index].orEmpty()) { selected = it }
         }
-        if (editing != null) {
+        // The numbers around the chosen one, added up (as Excel's status bar shows them)
+        if (editing != null) selected?.let { (r, c) -> columnStats(sheet, r, c) }?.let { (sum, avg, count) ->
+            val (r, c) = selected!!
+            val top = r - countAbove(sheet, r, c); val bottom = top + count - 1
+            StatusBar(stringResource(R.string.status_stats, "${columnName(c)}${top + 1}:${columnName(c)}${bottom + 1}", shownNumber(sum), shownNumber(avg), count))
+        }
+        if (editing != null && !wide) {
             selected?.let { (r, c) ->
                 editing.formatBar?.invoke(index, r, c)
-                EditBar(editing, index, r, c, onDone = { next -> selected = next }, onClose = { selected = null })
+                EditBar(editing, index, r, c, top = false, onDone = { next -> selected = next }, onClose = { selected = null })
             }
-        } else selected?.let { (r, c) ->
+        } else if (editing == null) selected?.let { (r, c) ->
             val row = sheet.row(r)
             val k = row?.find(c) ?: -1
             val text = if (row != null && k >= 0) sheet.text(row, k) else ""
@@ -525,11 +538,60 @@ class SheetEditing(
     val cellActions: ((sheet: Int, row: Int, col: Int) -> List<Pair<String, () -> Unit>>)? = null,
     /** Quick tools for the chosen cell's look, shown above its field. */
     val formatBar: (@Composable (sheet: Int, row: Int, col: Int) -> Unit)? = null,
+    /** A tablet's ribbon above the sheet (the chosen cell, if any). */
+    val ribbon: (@Composable (sheet: Int, cell: Pair<Int, Int>?) -> Unit)? = null,
 )
+
+/** How many numbers run on above [row] in column [col] without a gap. */
+private fun countAbove(sheet: Sheet, row: Int, col: Int): Int {
+    var n = 0
+    while (row - n - 1 >= 0 && isNumberAt(sheet, row - n - 1, col)) n++
+    return n
+}
+
+private fun isNumberAt(sheet: Sheet, row: Int, col: Int): Boolean {
+    val r = sheet.row(row) ?: return false
+    val k = r.find(col)
+    return k >= 0 && sheet.isNumber(r, k) && r.numbers[k].isFinite()
+}
+
+/**
+ * The run of numbers in the chosen cell's column (no gap above or below it): their sum, average and
+ * count; null when the cell holds no number or is alone.
+ */
+internal fun columnStats(sheet: Sheet, row: Int, col: Int): Triple<Double, Double, Int>? {
+    if (!isNumberAt(sheet, row, col)) return null
+    val top = row - countAbove(sheet, row, col)
+    var bottom = row
+    while (bottom - top < 100_000 && isNumberAt(sheet, bottom + 1, col)) bottom++
+    if (bottom == top) return null
+    var sum = 0.0
+    for (r in top..bottom) sheet.row(r)?.let { x -> sum += x.numbers[x.find(col)] }
+    val n = bottom - top + 1
+    return Triple(sum, sum / n, n)
+}
+
+/** A number for the status line, the way the phone writes numbers (two places at most). */
+internal fun shownNumber(v: Double): String = java.text.NumberFormat.getNumberInstance().apply { maximumFractionDigits = 2 }.format(v)
+
+/**
+ * The sum for the chosen cell, as Excel's AutoSum makes it: the numbers right above it (or, with
+ * none there, on its left). Null when there are none.
+ */
+internal fun autoSum(content: (Int, Int) -> String, row: Int, col: Int): String? {
+    fun numeric(t: String) = t.isNotBlank() && (t.startsWith("=") || t.replace(" ", "").replace('\u00A0', ' ').replace(" ", "").replace(',', '.').toDoubleOrNull() != null)
+    var top = row
+    while (top > 0 && numeric(content(top - 1, col))) top--
+    if (top < row) return "=SUM(${columnName(col)}${top + 1}:${columnName(col)}$row)"
+    var left = col
+    while (left > 0 && numeric(content(row, left - 1))) left--
+    if (left < col) return "=SUM(${columnName(left)}${row + 1}:${columnName(col - 1)}${row + 1})"
+    return null
+}
 
 /** The chosen cell's content to edit: Enter puts it in and goes to the cell below. */
 @Composable
-private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
+private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, top: Boolean, onDone: (Pair<Int, Int>?) -> Unit, onClose: () -> Unit) {
     val ref = "${columnName(col)}${row + 1}"
     // Read again when the workbook changed or rows stopped moving (a field opened meanwhile was empty)
     var value by androidx.compose.runtime.saveable.rememberSaveable(sheet, row, col, editing.version, editing.enabled, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(editing.content(sheet, row, col))) }
@@ -541,9 +603,21 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
         refused = !ok
         return ok
     }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp, modifier = Modifier.imePadding()) {
+    // Numbers are typed on a number keyboard: chosen for a number (or an empty cell under one), switched by a tap
+    fun looksNumeric(t: String) = t.replace(" ", "").replace('\u00A0', ' ').replace(" ", "").replace(',', '.').toDoubleOrNull() != null
+    var digits by androidx.compose.runtime.saveable.rememberSaveable(sheet, row, col) {
+        mutableStateOf(editing.content(sheet, row, col).let { looksNumeric(it) || it.isEmpty() && row > 0 && looksNumeric(editing.content(sheet, row - 1, col)) })
+    }
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp, modifier = if (top) Modifier else Modifier.imePadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(ref, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 10.dp))
+            // AutoSum: the sum of the numbers above put in the field (✓ puts it in the cell)
+            if (!top) autoSum({ r, c -> editing.content(sheet, r, c) }, row, col)?.let { f ->
+                val l = stringResource(R.string.autosum)
+                TextButton(onClick = { value = androidx.compose.ui.text.input.TextFieldValue(f, androidx.compose.ui.text.TextRange(f.length)); editing.draft?.invoke(sheet, row, col, f); refused = false }, enabled = editing.enabled, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text("Σ", style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics { contentDescription = l })
+                }
+            }
             androidx.compose.material3.OutlinedTextField(
                 value = value,
                 onValueChange = { if (it.text != value.text) editing.draft?.invoke(sheet, row, col, it.text); value = it; refused = false },
@@ -551,11 +625,19 @@ private fun EditBar(editing: SheetEditing, sheet: Int, row: Int, col: Int, onDon
                 enabled = editing.enabled,
                 isError = refused,
                 placeholder = { Text(stringResource(R.string.sheet_edit_hint), maxLines = 1) },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Next),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = if (digits) androidx.compose.ui.text.input.KeyboardType.Decimal else androidx.compose.ui.text.input.KeyboardType.Text,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Next,
+                ),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onNext = { if (put()) onDone(row + 1 to col) }),
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
-            TextButton(onClick = { if (put()) onDone(row to col) }, enabled = editing.enabled) { val l = stringResource(R.string.cell_put); Text("✓", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
+            if (!top) {
+                val l = stringResource(if (digits) R.string.keys_letters else R.string.keys_numbers)
+                TextButton(onClick = { digits = !digits }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text(if (digits) "абв" else "123", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
+            }
+            // ✓ puts it in and goes to the cell below, for typing a column on the go (as Enter does)
+            TextButton(onClick = { if (put()) onDone(row + 1 to col) }, enabled = editing.enabled) { val l = stringResource(R.string.cell_put); Text("✓", modifier = Modifier.clearAndSetSemantics { contentDescription = l }) }
             editing.rows?.let { rows ->
                 var menu by remember { mutableStateOf(false) }
                 Box {

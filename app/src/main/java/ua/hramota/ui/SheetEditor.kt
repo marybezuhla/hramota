@@ -574,7 +574,12 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
         }
     }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val wide = isWide()
     Scaffold(
+        modifier = Modifier.editorKeys(EditorKeys(
+            undo = { if (state.canUndo && !saving && !state.busy) state.undo() }, redo = { if (state.canRedo && !saving && !state.busy) state.redo() },
+            save = { if ((state.dirty || state.typing) && !saving && !state.busy) save() }, find = { find.open = true },
+        )),
         topBar = {
           androidx.compose.foundation.layout.Column {
             TopAppBar(
@@ -613,6 +618,27 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                         CellFormatBar(state.currentLook(sheet, row, col), enabled = !saving && !state.busy, canLook = state.edit.canLook, canWidth = state.edit.canWidth,
                             onLook = { look -> state.look(sheet, row, col, look) }, onWidth = { sizing = Triple(sheet, row, col) })
                     },
+                    ribbon = if (!wide) null else ({ sheet, cell ->
+                        val e = state.edit
+                        val on = !saving && !state.busy
+                        val (row, col) = cell ?: (-1 to -1)
+                        fun rows(delete: Boolean, below: Boolean): (() -> Unit)? = if (!e.canRows || cell == null) null else ({ scope.launch { state.rows(sheet, row, delete, below) }; Unit })
+                        fun cols(delete: Boolean, right: Boolean): (() -> Unit)? = if (!e.canRows || cell == null) null else ({ scope.launch { state.columns(sheet, col, delete, right) }; Unit })
+                        SheetRibbon(
+                            cell?.let { state.currentLook(sheet, row, col) }, enabled = on, canLook = e.canLook, canWidth = e.canWidth,
+                            onLook = { look -> state.look(sheet, row, col, look) }, onWidth = { sizing = Triple(sheet, row, col) },
+                            SheetActions(
+                                rowAbove = rows(false, false), rowBelow = rows(false, true), rowDelete = rows(true, false),
+                                colLeft = cols(false, false), colRight = cols(false, true), colDelete = cols(true, false),
+                                sortUp = if (e.canSort && cell != null) ({ state.sort(sheet, row, col, descending = false, headings = true) }) else null,
+                                sortDown = if (e.canSort && cell != null) ({ state.sort(sheet, row, col, descending = true, headings = true) }) else null,
+                                filter = if (cell != null) ({ filtering = Triple(sheet, row, col) }) else null,
+                                note = if (cell != null && state.canNote(sheet)) ({ noting = Triple(sheet, row, col) }) else null,
+                                autoSum = cell?.let { autoSum({ r, c -> state.content(sheet, r, c) }, row, col) }?.let { f -> { state.commit(sheet, row, col, f); Unit } },
+                                find = { find.open = true },
+                            ),
+                        )
+                    }),
                     cellActions = { sheet, row, col ->
                         val ctx = context
                         val e = state.edit

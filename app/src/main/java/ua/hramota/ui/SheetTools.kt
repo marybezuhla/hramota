@@ -197,3 +197,93 @@ internal fun CellFormatBar(now: CellStyle, enabled: Boolean, canLook: Boolean, c
         }
     }
 }
+
+/** What a spreadsheet's ribbon can do besides a cell's look; null where this file cannot. */
+internal class SheetActions(
+    val rowAbove: (() -> Unit)?, val rowBelow: (() -> Unit)?, val rowDelete: (() -> Unit)?,
+    val colLeft: (() -> Unit)?, val colRight: (() -> Unit)?, val colDelete: (() -> Unit)?,
+    val sortUp: (() -> Unit)?, val sortDown: (() -> Unit)?, val filter: (() -> Unit)?,
+    val note: (() -> Unit)?, val autoSum: (() -> Unit)?, val find: () -> Unit,
+)
+
+/** A spreadsheet's ribbon on a tablet, as Excel's: Home, Insert, Data. [now]: the chosen cell's look (null: none chosen). */
+@Composable
+internal fun SheetRibbon(now: CellStyle?, enabled: Boolean, canLook: Boolean, canWidth: Boolean, onLook: (CellLook) -> Unit, onWidth: () -> Unit, a: SheetActions) {
+    val cell = enabled && now != null
+    val look = now ?: CellStyle.DEFAULT
+    @Composable fun act(glyph: String, label: Int, go: (() -> Unit)?) = RibbonButton(glyph, stringResource(label), cell && go != null) { go?.invoke() }
+    Ribbon(listOf(
+        RibbonTab(stringResource(R.string.ribbon_home)) {
+            RibbonGroup(stringResource(R.string.group_font)) {
+                RibbonButton("B", stringResource(R.string.bold), cell && canLook, look.bold, androidx.compose.ui.text.TextStyle(fontWeight = FontWeight.Bold), toggles = true) { onLook(CellLook(bold = !look.bold)) }
+                RibbonButton("I", stringResource(R.string.italic), cell && canLook, look.italic, androidx.compose.ui.text.TextStyle(fontStyle = FontStyle.Italic), toggles = true) { onLook(CellLook(italic = !look.italic)) }
+                var fills by remember { mutableStateOf(false) }
+                Box {
+                    RibbonButton("◧", stringResource(R.string.fill_short), cell && canLook, look.fill != null && look.fill != 0) { fills = true }
+                    androidx.compose.material3.DropdownMenu(fills, onDismissRequest = { fills = false }) {
+                        Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (c in FILLS) Box(
+                                Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).background(if (c == 0) Color.White else Color(c))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+                                    .clickable { fills = false; onLook(CellLook(fill = c)) },
+                                contentAlignment = Alignment.Center,
+                            ) { if (c == 0) Text("∅", color = Color.Gray) }
+                        }
+                    }
+                }
+            }
+            RibbonGroup(stringResource(R.string.group_align)) {
+                val side = look.align ?: "general"
+                for ((s, glyph, label) in listOf(Triple("left", "⇤", R.string.align_left), Triple("center", "↔", R.string.align_center), Triple("right", "⇥", R.string.align_right)))
+                    RibbonButton(glyph, stringResource(label), cell && canLook, side == s, toggles = true) { onLook(CellLook(align = if (side == s) "general" else s)) }
+            }
+            RibbonGroup(stringResource(R.string.group_number)) {
+                var formats by remember { mutableStateOf(false) }
+                Box {
+                    val current = FORMATS.firstOrNull { it.first == (look.format) }?.second ?: R.string.fmt_general
+                    RibbonButton("123", stringResource(current), cell && canLook) { formats = true }
+                    androidx.compose.material3.DropdownMenu(formats, onDismissRequest = { formats = false }) {
+                        for ((code, label) in FORMATS)
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(label), fontWeight = if (code == (look.format)) FontWeight.Bold else null) }, onClick = { formats = false; onLook(CellLook(format = code)) })
+                    }
+                }
+            }
+            RibbonGroup(stringResource(R.string.group_cells)) {
+                act("↥", R.string.rows_insert_short, a.rowAbove)
+                act("✕", R.string.rows_delete_short, a.rowDelete)
+                RibbonButton("|↔|", stringResource(R.string.width_short), cell && canWidth) { onWidth() }
+            }
+            RibbonGroup(stringResource(R.string.group_sort)) {
+                act("Σ", R.string.autosum, a.autoSum)
+                act("А↓", R.string.sort_up_short, a.sortUp)
+                act("Я↓", R.string.sort_down_short, a.sortDown)
+                act("⏷", R.string.filter_short, a.filter)
+            }
+        },
+        RibbonTab(stringResource(R.string.ribbon_insert)) {
+            RibbonGroup(stringResource(R.string.group_rows)) {
+                act("↥", R.string.rows_insert_short, a.rowAbove)
+                act("↧", R.string.rows_insert_below_short, a.rowBelow)
+                act("✕", R.string.rows_delete_short, a.rowDelete)
+            }
+            RibbonGroup(stringResource(R.string.group_columns)) {
+                act("↤", R.string.cols_insert_short, a.colLeft)
+                act("↦", R.string.cols_insert_right_short, a.colRight)
+                act("✕", R.string.cols_delete_short, a.colDelete)
+            }
+            RibbonGroup(stringResource(R.string.group_comments)) {
+                act("💬", R.string.note_short, a.note)
+            }
+        },
+        RibbonTab(stringResource(R.string.ribbon_data)) {
+            RibbonGroup(stringResource(R.string.group_sort)) {
+                act("А↓", R.string.sort_up_short, a.sortUp)
+                act("Я↓", R.string.sort_down_short, a.sortDown)
+                act("⏷", R.string.filter_short, a.filter)
+            }
+            RibbonGroup(stringResource(R.string.group_find)) {
+                RibbonButton("⌕", stringResource(R.string.find_short), enabled, onClick = a.find)
+            }
+        },
+    ), key = "sheet")
+}
