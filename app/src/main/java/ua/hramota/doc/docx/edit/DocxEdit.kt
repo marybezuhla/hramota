@@ -74,7 +74,10 @@ class DocxEdit private constructor(
     private val xml: String,
     private val digest: ByteArray,
     private val w: String,
-    private val slots: List<Slot>,
+    private val slots: MutableList<Slot>,
+    /** The tables' rows, by number less one (a slot's [Slot.row]). */
+    private val rows: MutableList<Row>,
+    private var containers: Int,
     private val partDigests: Map<String, ByteArray>,
     private var stylesXml: String?,
     private var numberingXml: String?,
@@ -87,8 +90,24 @@ class DocxEdit private constructor(
     override val extension = "docx"
     override fun readBack(input: InputStream): ua.hramota.doc.docx.DocxDocument = ua.hramota.doc.docx.DocxReader.read(input)
 
-    /** Where a paragraph is in the file; [row] is the table row it is in (0 outside tables). */
-    private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0)
+    /**
+     * Where a paragraph is: in the file ([src] 0) or in a row added here; [row] is the table row it is
+     * in (0 outside tables).
+     */
+    private class Slot(val start: Int, val end: Int, val container: Int, val row: Int = 0, val src: Int = 0)
+
+    /**
+     * A table's row: where it is ([src], [start], [end]), its table, the row it is inside (a table in
+     * a cell; 0 if none), whether a row like it can be made here ([plain]: only cells, no cells merged
+     * down), whether it holds paragraphs.
+     */
+    private class Row(val src: Int, val start: Int, val end: Int, val table: Int, val parent: Int, val plain: Boolean, val merged: Boolean, val hasSlots: Boolean)
+
+    /** The texts written from: the document first, then rows added here. */
+    private val texts = arrayListOf(xml)
+    /** Rows added, by the row they were added after (newest first) or before (oldest first). */
+    private val after = HashMap<Int, MutableList<Int>>()
+    private val before = HashMap<Int, MutableList<Int>>()
 
     private var nextKey = paragraphs.size.toLong() + 1
     override fun newKey(): Long = nextKey++
@@ -195,7 +214,7 @@ class DocxEdit private constructor(
             if (b.slot != a.slot + 1) return false
             val sa = slots[a.slot]; val sb = slots[b.slot]
             if (sa.container != sb.container) return false
-            if ((sa.end until sb.start).any { !xml[it].isWhitespace() }) return false
+            if (sa.src != sb.src || (sa.end until sb.start).any { !texts[sa.src][it].isWhitespace() }) return false
         }
         return SECT !in a.pPr && SECT !in b.pPr
     }
@@ -530,18 +549,123 @@ class DocxEdit private constructor(
 
     // --- Saving ---
 
-    /** The document part with every changed paragraph written anew and the rest as it was. */
-    fun documentXml(list: List<EditPara>): String {
-        val b = StringBuilder(xml.length + 4096)
-        var pos = 0
-        var i = 0
-        for ((k, slot) in slots.withIndex()) {
-            b.append(xml, pos, slot.start)
-            while (i < list.size && list[i].slot == k) { write(list[i], b); i++ }
-            pos = slot.end
+    // --- Table rows ---
+
+    /** Whether [row] is [r] or inside it. */
+    private fun within(row: Int, r: Int): Boolean { var x = row; var guard = 0; while (x != 0 && guard++ < 100) { if (x == r) return true; x = rows[x - 1].parent }; return false }
+
+    /** Where in [list] the paragraphs of [p]'s table row are; null outside tables. */
+    override fun rowRange(list: List<EditPara>, p: EditPara): IntRange? {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: return null
+        val first = list.indexOfFirst { within(slots[it.slot].row, r) }
+        if (first < 0) return null
+        var last = first
+        while (last + 1 < list.size && within(slots[list[last + 1].slot].row, r)) last++
+        return first..last
+    }
+
+    /** A row like [p]'s can be added: its cells are plain (none merged down, nothing but cells in it). */
+    override fun canAddRow(p: EditPara): Boolean = slots[p.slot].row.takeIf { it != 0 }?.let { rows[it - 1].plain && !rows[it - 1].merged } ?: false
+
+    /** [p]'s row can be taken out: others of its table stay, none of its cells merged down, no comment in it. */
+    override fun canDeleteRow(list: List<EditPara>, p: EditPara): Boolean {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: return false
+        val row = rows[r - 1]
+        if (row.merged) return false
+        val range = rowRange(list, p) ?: return false
+        if (range.any { list[it].anchors.isNotEmpty() }) return false
+        // Another row of the same table (not inside this one) keeps a paragraph
+        return list.withIndex().any { (i, q) -> i !in range && slots[q.slot].row.let { x -> x != 0 && !within(x, r) && sameTable(x, row.table) } }
+    }
+
+    private fun sameTable(row: Int, table: Int): Boolean { var x = row; var guard = 0; while (x != 0 && guard++ < 100) { if (rows[x - 1].table == table) return true; x = rows[x - 1].parent }; return false }
+
+    private val noIds = Regex("\\s[\\w.-]+:(?:paraId|textId)=(?:\"[^\"]*\"|'[^']*')")
+
+    /**
+     * A row like [p]'s, empty, added below (or above) it: the same cells (widths, borders, shading),
+     * each with one paragraph as its first had. Returns its paragraphs, to be put in the list after
+     * (before) the row's.
+     */
+    @Synchronized
+    override fun addRow(p: EditPara, below: Boolean): List<EditPara> {
+        val r = slots[p.slot].row.takeIf { it != 0 } ?: throw IOException("Not in a table")
+        val row = rows[r - 1]
+        if (!row.plain || row.merged) throw IOException("Unusual row")
+        val x = texts[row.src]
+        val tr = XmlScan.children(x, row.start, row.end).firstOrNull() ?: throw IOException("No row")
+        fun open(e: Elem) = x.substring(e.start, e.openEnd).let { if (e.selfClosing) it.removeSuffix("/>").trimEnd() + ">" else it }.replace(noIds, "")
+        val b = StringBuilder(open(tr))
+        for (c in XmlScan.children(x, tr)) when (c.local) {
+            "tblPrEx" -> b.append(x, c.start, c.end)
+            // A heading row repeated on each page: the new one is not
+            "trPr" -> b.append(x.substring(c.start, c.end).replace(Regex("<$w:tblHeader\\b[^>]*/>|<$w:tblHeader\\b[^>]*>.*?</$w:tblHeader>"), ""))
+            "tc" -> {
+                b.append(open(c))
+                val kids = XmlScan.children(x, c)
+                kids.firstOrNull { it.local == "tcPr" }?.let { b.append(x, it.start, it.end) }
+                val first = kids.firstOrNull { it.local == "p" }
+                val pPr = first?.let { f -> XmlScan.children(x, f).firstOrNull { it.local == "pPr" } }?.let { x.substring(it.start, it.end) } ?: ""
+                b.append("<$w:p>").append(pPr.replace(Regex("<$w:sectPr\\b.*?</$w:sectPr>", RegexOption.DOT_MATCHES_ALL), "")).append("</$w:p>")
+                b.append("</").append(c.name).append('>')
+            }
         }
-        b.append(xml, pos, xml.length)
-        if (i != list.size) throw IOException("Paragraphs out of order")
+        b.append("</").append(tr.name).append('>')
+        val src = texts.size
+        val t = b.toString()
+        texts += t
+        val made = XmlScan.children(t, 0, t.length).first()
+        val id = rows.size + 1
+        rows += Row(src, made.start, made.end, row.table, row.parent, plain = true, merged = false, hasSlots = true)
+        val out = ArrayList<EditPara>()
+        val interned = HashMap<String, RunStyle>()
+        for (tc in XmlScan.children(t, made)) if (tc.local == "tc") {
+            val container = ++containers
+            for (e in XmlScan.children(t, tc)) if (e.local == "p") {
+                slots += Slot(e.start, e.end, container, id, src)
+                val q = paragraph(t, w, e, slots.size - 1, interned)
+                out += EditPara(newKey(), q.slot, q.text, q.marks, q.pPr, q.startTag, q.head, q.tail, q.editable, q.original, q.typing, q.anchors)
+            }
+        }
+        if (below) after.getOrPut(r) { ArrayList() }.add(0, id) else before.getOrPut(r) { ArrayList() }.add(id)
+        return out
+    }
+
+    // --- Saving ---
+
+    /** The document part with every changed paragraph written anew, rows added and taken out, and the rest as it was. */
+    @Synchronized
+    fun documentXml(list: List<EditPara>): String {
+        val bySlot = list.groupBy { it.slot }
+        // Rows with a paragraph still in the list (and the rows they are in)
+        val alive = HashSet<Int>()
+        for (p in list) { var r = slots[p.slot].row; var guard = 0; while (r != 0 && guard++ < 100 && alive.add(r)) r = rows[r - 1].parent }
+        val slotsBySrc = slots.indices.groupBy { slots[it].src }
+        val rowsBySrc = rows.indices.groupBy { rows[it].src }
+        val b = StringBuilder(xml.length + 4096)
+        class Event(val start: Int, val end: Int, val order: Int, val go: () -> Unit)
+        fun rewrite(src: Int, from: Int, to: Int, depth: Int) {
+            if (depth > 200) throw IOException("Too deep")
+            val x = texts[src]
+            val events = ArrayList<Event>()
+            for (k in slotsBySrc[src].orEmpty()) { val s = slots[k]; if (s.start >= from && s.end <= to) events += Event(s.start, s.end, 2) { bySlot[k]?.forEach { write(it, b) } } }
+            for (i in rowsBySrc[src].orEmpty()) {
+                val row = rows[i]; val id = i + 1
+                if (row.start < from || row.end > to) continue
+                before[id]?.let { l -> events += Event(row.start, row.start, 1) { for (n in l) rows[n - 1].let { rewrite(it.src, it.start, it.end, depth + 1) } } }
+                if (id !in alive && row.hasSlots) events += Event(row.start, row.end, 2) {}
+                after[id]?.let { l -> events += Event(row.end, row.end, 0) { for (n in l) rows[n - 1].let { rewrite(it.src, it.start, it.end, depth + 1) } } }
+            }
+            // At one place: what follows a row first, then what goes before the next, then the next itself
+            events.sortWith(compareBy<Event>({ it.start }, { if (it.end == it.start) 0 else 1 }, { it.order }))
+            var pos = from
+            for (e in events) {
+                if (e.start < pos) continue // inside a row taken out
+                b.append(x, pos, e.start); e.go(); pos = maxOf(pos, e.end)
+            }
+            b.append(x, pos, to)
+        }
+        rewrite(0, 0, xml.length, 0)
         return b.toString()
     }
 
@@ -715,19 +839,32 @@ class DocxEdit private constructor(
                 return XmlScan.children(xml, pr).any { it.local in setOf("dataBinding", "showingPlcHdr", "text", "date", "comboBox", "dropDownList", "picture", "docPartObj", "citation", "bibliography", "equation") ||
                     (it.local == "lock" && it.attrs.entries.any { a -> a.key.endsWith("val") && (a.value == "contentLocked" || a.value == "sdtContentLocked") }) }
             }
+            val rowList = ArrayList<Row>()
+            var tables = 0
             fun collect(elems: List<Elem>, container: Int, row: Int, locked: Boolean = false) {
                 for (e in elems) {
                     if (!e.name.startsWith("$w:")) continue
                     when (e.local) {
                         "p" -> { slots += Slot(e.start, e.end, container, row); paras += paragraph(xml, w, e, slots.size - 1, interned).let { if (locked && it.editable) EditPara(it.key, it.slot, it.text, it.marks, it.pPr, it.startTag, it.head, it.tail, false, it.original, it.typing, it.anchors) else it } }
-                        "tbl" -> for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") { val r = ++rows; for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers, r, locked) }
+                        "tbl" -> {
+                            val table = ++tables
+                            val merged = xml.indexOf("vMerge", e.start).let { it in e.start until e.end }
+                            for (tr in XmlScan.children(xml, e)) if (tr.name == "$w:tr") {
+                                val r = ++rows
+                                rowList += Row(0, tr.start, tr.end, table, row, false, merged, false)
+                                val plain = !locked && XmlScan.children(xml, tr).all { it.local in setOf("trPr", "tblPrEx", "tc") }
+                                val before = slots.size
+                                for (tc in XmlScan.children(xml, tr)) if (tc.name == "$w:tc") collect(XmlScan.children(xml, tc), ++containers, r, locked)
+                                rowList[r - 1] = Row(0, tr.start, tr.end, table, row, plain, merged, slots.size > before)
+                            }
+                        }
                         "sdt", "customXml" -> XmlScan.children(xml, e).firstOrNull { it.local == "sdtContent" }?.let { collect(XmlScan.children(xml, it), ++containers, row, locked || lockedControl(e)) }
                             ?: if (e.local == "customXml") collect(XmlScan.children(xml, e), ++containers, row, locked) else Unit
                     }
                 }
             }
             collect(XmlScan.children(xml, body), 0, 0)
-            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, digests, styles, numbering, rels, types, paras,
+            return DocxEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), w, slots, rowList, containers, digests, styles, numbering, rels, types, paras,
                 commentParts["word/comments.xml"], commentParts)
         }
 

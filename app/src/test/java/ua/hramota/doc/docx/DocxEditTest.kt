@@ -184,4 +184,46 @@ class DocxEditTest {
         assertEquals("t & A", XmlScan.unescape(s.substring(kids[0].openEnd, kids[0].closeStart)))
         assertEquals("1 > 2", a.attrs["x"])
     }
+
+    @Test fun tableRowsAddedAndTakenOut() {
+        val name = "04-tables.docx"
+        val edit = DocxEdit.open(ByteArrayInputStream(bytes(name)))
+        val list = edit.paragraphs.toMutableList()
+        // The row of "Степлер настільний": a row below it, typed into; the row of "Ручки…" taken out
+        val stapler = list.first { it.text == "Степлер настільний" }
+        assertTrue(edit.canAddRow(stapler))
+        val range = edit.rowRange(list, stapler)!!
+        assertEquals(4, range.count())
+        val made = edit.addRow(stapler, below = true)
+        assertEquals(4, made.size)
+        assertTrue(made.all { it.text.isEmpty() && it.editable })
+        list.addAll(range.last + 1, made)
+        list[range.last + 2] = made[1].changed(text = "Скоби", marks = List(5) { made[1].typing })
+        val above = edit.addRow(list.first { it.text == "Степлер настільний" }, below = false)
+        list.addAll(edit.rowRange(list, list.first { it.text == "Степлер настільний" })!!.first, above)
+        val pens = list.first { it.text.startsWith("Ручки") }
+        assertTrue(edit.canDeleteRow(list, pens))
+        val pr = edit.rowRange(list, pens)!!
+        list.subList(pr.first, pr.last + 1).clear()
+        // Shown as table rows: each new row begins one
+        val shown = edit.shown(list)
+        assertTrue(shown[list.indexOf(made[0])].rowStart)
+        val saved = save(name, edit, list, "rows")
+        val t = texts(saved)
+        assertTrue(t.toString(), t.none { it.startsWith("Ручки") })
+        assertTrue(t.toString(), t.contains("Скоби"))
+        assertTrue(t.indexOf("Степлер настільний") < t.indexOf("Скоби"))
+        val doc = String(part(saved, "word/document.xml")!!, Charsets.UTF_8)
+        // The first table: rows as before (5), one taken out, two added
+        val first = doc.substring(doc.indexOf("<w:tbl>"), doc.indexOf("</w:tbl>"))
+        assertEquals(6, Regex("<w:tr[ >]").findAll(first).count())
+        // Opened again: the same text, every row editable
+        val again = DocxEdit.open(ByteArrayInputStream(saved))
+        assertEquals(list.map { it.text }, again.paragraphs.map { it.text })
+        // The last row of a table is not taken out
+        val one = DocxEdit.open(ByteArrayInputStream(bytes(name)))
+        val l2 = one.paragraphs.toMutableList()
+        val total = l2.first { it.text == "Разом" }
+        assertTrue(one.canDeleteRow(l2, total))
+    }
 }

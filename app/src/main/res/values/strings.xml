@@ -837,4 +837,5 @@
     <string name="bullets_short">Bullets</string>
     <string name="numbers_short">Numbering</string>
     <string name="status_stats_short">%1$s: Σ %2$s · avg %3$s · %4$d</string>
+    <string name="group_table">Table</string>
 </resources>

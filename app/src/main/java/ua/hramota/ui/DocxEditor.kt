@@ -181,6 +181,36 @@ class EditorState(val edit: TextEdit) : Replaceable {
         return true
     }
 
+    /** Whether the cursor is in a table row that can be added to ([below] either way) or taken out. */
+    fun canAddRow(): Boolean = paras.getOrNull(indexOf(focused))?.let { edit.canAddRow(it) } ?: false
+    fun canDeleteRow(): Boolean = paras.getOrNull(indexOf(focused))?.let { edit.canDeleteRow(paras, it) } ?: false
+
+    /** An empty row like the cursor's, below or above it; the cursor goes to its first cell. */
+    fun addRow(below: Boolean): Boolean {
+        val i = indexOf(focused); val p = paras.getOrNull(i) ?: return false
+        if (!edit.canAddRow(p)) return false
+        val range = edit.rowRange(paras, p) ?: return false
+        val made = try { edit.addRow(p, below) } catch (e: java.io.IOException) { return false }
+        if (made.isEmpty()) return false
+        val list = paras.toMutableList()
+        list.addAll(if (below) range.last + 1 else range.first, made)
+        commit(list, structure = true)
+        moveTo = made.first().key to 0
+        return true
+    }
+
+    /** Takes out the cursor's table row; the cursor goes to the row after it (or before). */
+    fun deleteRow(): Boolean {
+        val i = indexOf(focused); val p = paras.getOrNull(i) ?: return false
+        if (!edit.canDeleteRow(paras, p)) return false
+        val range = edit.rowRange(paras, p) ?: return false
+        val list = paras.toMutableList()
+        list.subList(range.first, range.last + 1).clear()
+        commit(list, structure = true)
+        (list.getOrNull(range.first) ?: list.getOrNull(range.first - 1))?.takeIf { it.editable }?.let { moveTo = it.key to 0 }
+        return true
+    }
+
     /** Removes a comment; false if part of it is in a paragraph that cannot be changed here. */
     fun removeComment(id: String): Boolean {
         val list = edit.uncomment(paras, id) ?: return false
@@ -680,6 +710,13 @@ private fun EditToolbar(state: EditorState, enabled: Boolean, onComment: () -> U
                         DropdownMenuItem(text = { Text(stringResource(R.string.numbers_short)) }, leadingIcon = { Text(if (shown?.list == ListKind.NUMBER) "✓" else "1.") }, enabled = state.edit.canList, onClick = { more = false; state.toggleList(ListKind.NUMBER) })
                         DropdownMenuItem(text = { Text(stringResource(R.string.strike), textDecoration = TextDecoration.LineThrough) }, leadingIcon = { if (look.strike) Text("✓") }, onClick = { more = false; state.toggle(EditorState.Mark.STRIKE) })
                         DropdownMenuItem(text = { Text(stringResource(R.string.comment_add)) }, leadingIcon = { Text("💬") }, enabled = state.edit.canComment, onClick = { more = false; onComment() })
+                        // In a table: its rows
+                        if (shown?.inTable == true) {
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_short)) }, leadingIcon = { Text("↥") }, enabled = state.canAddRow(), onClick = { more = false; state.addRow(below = false) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.rows_insert_below_short)) }, leadingIcon = { Text("↧") }, enabled = state.canAddRow(), onClick = { more = false; state.addRow(below = true) })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.rows_delete_short)) }, leadingIcon = { Text("✕") }, enabled = state.canDeleteRow(), onClick = { more = false; state.deleteRow() })
+                        }
                     }
                 }
             }
@@ -713,6 +750,11 @@ private fun WordRibbon(state: EditorState, enabled: Boolean, find: FindState, on
             }
         },
         RibbonTab(stringResource(R.string.ribbon_insert)) {
+            RibbonGroup(stringResource(R.string.group_table)) {
+                RibbonButton("↥", stringResource(R.string.rows_insert_short), enabled && state.canAddRow()) { state.addRow(below = false) }
+                RibbonButton("↧", stringResource(R.string.rows_insert_below_short), enabled && state.canAddRow()) { state.addRow(below = true) }
+                RibbonButton("✕", stringResource(R.string.rows_delete_short), enabled && state.canDeleteRow()) { state.deleteRow() }
+            }
             RibbonGroup(stringResource(R.string.group_comments)) {
                 RibbonButton("💬", stringResource(R.string.comment_short), active && state.edit.canComment, onClick = onComment)
             }

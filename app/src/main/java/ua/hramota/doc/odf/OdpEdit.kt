@@ -32,6 +32,7 @@ class OdpEdit private constructor(
     /** The presentation and SVG namespaces' prefixes as the file declares them (null: not declared, notes are not added). */
     private val pres: String?,
     private val svg: String?,
+    private val xlink: String?,
     filePages: List<Elem>,
     private val styles: OdfPackage.Styles,
     private val autoText: Map<String, OdtEdit.AutoStyle>,
@@ -47,8 +48,16 @@ class OdpEdit private constructor(
     /** A slide: where it is written ([src], [elem]), and what was put into it here ([splices]). */
     private class Page(val src: Int, val elem: Elem, val splices: MutableList<Splice> = ArrayList())
 
-    /** In a page's text, [start] to [end] written instead as text [src] (speaker notes added). */
-    private class Splice(val start: Int, val end: Int, val src: Int)
+    /**
+     * In a page's text, [start] to [end] written instead as text [src]: speaker notes added, or a
+     * shape added ([shape]: its id; shapes go before notes at one place, [order]).
+     */
+    private class Splice(val start: Int, val end: Int, val src: Int, val shape: String? = null, val order: Int = 1)
+
+    /** A shape added here: a text box (its paragraphs decide whether it stays) or a picture (with its file). */
+    private class Added(val id: String, val page: Int, val src: Int, val picture: Pic?)
+    private class Pic(val bytes: ByteArray, val path: String, val type: String)
+    private val added = ArrayList<Added>()
 
     /** The texts slides are written from: the file's content first, then slides and notes made here. */
     private val texts = arrayListOf(xml)
@@ -72,7 +81,7 @@ class OdpEdit private constructor(
     override val boxes: List<TextBox> get() = boxList
     override val slideCount get() = pages.size
     override val extension = "odp"
-    override val canPlace = false
+    override val canPlace get() = svg != null
     override val canNotes get() = pres != null && svg != null
 
     // --- Reading text boxes (the file's, and those made here) ---
@@ -91,31 +100,108 @@ class OdpEdit private constructor(
         }
     }
 
-    private fun shape(src: Int, page: Int, c: Elem, depth: Int, notes: Boolean, out: MutableList<SlidePara>) {
+    private fun shape(src: Int, page: Int, c: Elem, depth: Int, notes: Boolean, out: MutableList<SlidePara>, top: String? = null, kindOf: String? = null) {
         if (depth > 20) return
         val x = texts[src]; val t = ns.text; val p = pres ?: "presentation"
         when (c.name) {
             "$draw:frame" -> {
                 val tb = XmlScan.children(x, c).firstOrNull { it.name == "$draw:text-box" } ?: return
-                val kind = when (c.attrs["$p:class"]) { "title" -> "title"; "subtitle" -> "subtitle"; "notes" -> "notes"; else -> if (notes) "notes" else "body" }
-                boxList += TextBox(page, kind, 0, 0, 0)
+                val kind = kindOf ?: when (c.attrs["$p:class"]) { "title" -> "title"; "subtitle" -> "subtitle"; "notes" -> "notes"; else -> if (notes) "notes" else "body" }
+                boxList += TextBox(page, kind, 0, 0, 0, shape = top)
                 paragraphsIn(src, page, tb, boxList.size - 1, null, ++containers, depth + 1, -1, out)
             }
             "$draw:custom-shape", "$draw:rect", "$draw:ellipse" -> if (XmlScan.children(x, c).any { it.name == "$t:p" || it.name == "$t:list" }) {
-                boxList += TextBox(page, "body", 0, 0, 0)
+                boxList += TextBox(page, "body", 0, 0, 0, shape = top)
                 paragraphsIn(src, page, c, boxList.size - 1, null, ++containers, depth + 1, -1, out)
             }
-            "$draw:g" -> for (k in XmlScan.children(x, c)) shape(src, page, k, depth + 1, notes, out)
+            "$draw:g" -> for (k in XmlScan.children(x, c)) shape(src, page, k, depth + 1, notes, out, top)
             "$p:notes" -> for (k in XmlScan.children(x, c)) shape(src, page, k, depth + 1, true, out)
         }
     }
 
+    /** A page's own shapes, numbered as the reader numbers them (their ids on the slide). */
+    private fun shapesOf(x: String, page: Elem): List<Elem> =
+        if (page.empty) emptyList() else XmlScan.children(x, page).filter { it.name.startsWith("$draw:") && it.local in OdpReader.SHAPES }
+
     /** The paragraphs of a slide's (or its notes') shapes; a text box with no paragraph is left out (nothing to edit). */
     private fun collect(src: Int, page: Int, e: Elem): List<SlidePara> {
         val out = ArrayList<SlidePara>()
-        for (c in XmlScan.children(texts[src], e)) shape(src, page, c, 0, false, out)
+        val own = shapesOf(texts[src], e).withIndex().associate { (i, el) -> el.start to i.toString() }
+        for (c in XmlScan.children(texts[src], e)) shape(src, page, c, 0, false, out, own[c.start])
         return out
     }
+
+    // --- Shapes placed, added, taken out ---
+
+    private var addedCount = 0
+    /** Where a shape is added on [pg]: after the page's last shape (before its animations and notes). */
+    private fun addPlace(pg: Page): Int {
+        val x = texts[pg.src]
+        if (pg.elem.selfClosing) throw IOException("Empty slide")
+        val kids = XmlScan.children(x, pg.elem)
+        return shapesOf(x, pg.elem).lastOrNull()?.end ?: kids.firstOrNull { it.local == "forms" }?.end ?: pg.elem.openEnd
+    }
+
+    private fun cm(emu: Long) = String.format(java.util.Locale.ROOT, "%.3fcm", emu / 360000.0)
+    private fun place(rect: LongArray) = "$svg:width=\"${cm(rect[2])}\" $svg:height=\"${cm(rect[3])}\" $svg:x=\"${cm(rect[0])}\" $svg:y=\"${cm(rect[1])}\""
+
+    /** A shape's start tag at a new place and size. */
+    private fun placedTag(tag: String, rect: LongArray): String {
+        val s = svg ?: return tag
+        val bare = tag.replace(Regex("\\s${Regex.escape(s)}:(?:x|y|width|height)=(?:\"[^\"]*\"|'[^']*')"), "")
+        val end = if (bare.endsWith("/>")) bare.length - 2 else bare.length - 1
+        return bare.substring(0, end).trimEnd() + " " + place(rect) + bare.substring(end)
+    }
+
+    /** The graphic style of shapes added here: no line, no fill, text from the top (made once, when written). */
+    private val graphicStyle by lazy { var n = 1; while ("HrGr$n" in styles.named) n++; "HrGr$n" }
+
+    private fun addShape(slide: Int, snippet: String, picture: Pic?): Pair<String, Int> {
+        val pg = pages.getOrNull(slide) ?: throw IOException("No such slide")
+        val at = addPlace(pg)
+        val id = "a${++addedCount}"
+        val src = texts.size
+        texts += snippet
+        pg.splices += Splice(at, at, src, id, 0)
+        added += Added(id, slide, src, picture)
+        return id to src
+    }
+
+    @Synchronized
+    override fun addTextBox(slide: Int, rect: LongArray, lang: String): Pair<PptxEdit.ShapeRef, List<SlidePara>> {
+        if (svg == null) throw IOException("No SVG namespace")
+        val t = ns.text
+        val (id, src) = addShape(slide, "<$draw:frame $draw:style-name=\"$graphicStyle\" $draw:layer=\"layout\" ${place(rect)}><$draw:text-box><$t:p></$t:p></$draw:text-box></$draw:frame>", null)
+        val root = XmlScan.children(texts[src], 0, texts[src].length).first()
+        val out = ArrayList<SlidePara>()
+        shape(src, slide, root, 0, false, out, id, "text")
+        return PptxEdit.ShapeRef(slide, id) to out
+    }
+
+    /** A picture ([bytes]: a PNG or JPEG file) at [rect] (EMU) on [slide]. */
+    @Synchronized
+    override fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): PptxEdit.ShapeRef {
+        val l = xlink ?: throw IOException("No link namespace")
+        if (svg == null) throw IOException("No SVG namespace")
+        val path = "Pictures/hramota-" + java.util.UUID.randomUUID().toString().replace("-", "").take(16) + if (png) ".png" else ".jpg"
+        val (id, _) = addShape(slide, "<$draw:frame $draw:style-name=\"$graphicStyle\" $draw:layer=\"layout\" ${place(rect)}><$draw:image $l:href=\"$path\" $l:type=\"simple\" $l:show=\"embed\" $l:actuate=\"onLoad\"/></$draw:frame>",
+            Pic(bytes, path, if (png) "image/png" else "image/jpeg"))
+        return PptxEdit.ShapeRef(slide, id)
+    }
+
+    /** Whether an animation names the shape (it is not taken out: the animation would point at nothing). */
+    override fun isAnimated(ref: PptxEdit.ShapeRef): Boolean {
+        val pg = pages.getOrNull(ref.slide) ?: return false
+        val x = texts[pg.src]
+        val e = ref.id.toIntOrNull()?.let { shapesOf(x, pg.elem).getOrNull(it) } ?: return false
+        val ids = e.attrs.entries.filter { it.key == "xml:id" || it.key == "$draw:id" }.map { it.value }
+        val page = x.substring(pg.elem.start, pg.elem.end)
+        return ids.any { id -> Regex("""targetElement\s*=\s*["']${Regex.escape(id)}["']""").containsMatchIn(page) }
+    }
+
+    /** The ids of the shapes written on each slide, in order (the last time the file was written), to tell them when read back. */
+    @Volatile private var lastIds: List<List<String>> = emptyList()
+
 
     // --- Slides and notes added ---
 
@@ -221,9 +307,6 @@ class OdpEdit private constructor(
     override fun canRemove(slide: Int, order: Collection<Int>) = order.size > 1
     override fun canComment(slide: Int) = false
     override fun setComments(slide: Int, list: List<String>) {}
-    override fun addTextBox(slide: Int, rect: LongArray, lang: String): Pair<PptxEdit.ShapeRef, List<SlidePara>> = throw IOException("Not here")
-    override fun addPicture(slide: Int, bytes: ByteArray, png: Boolean, rect: LongArray): PptxEdit.ShapeRef = throw IOException("Not here")
-    override fun isAnimated(ref: PptxEdit.ShapeRef) = false
 
     // --- How text looks ---
 
@@ -341,9 +424,13 @@ class OdpEdit private constructor(
 
     /** content.xml with the slides in [order] and their changed paragraphs written anew. */
     @Synchronized
-    fun contentXml(list: List<SlidePara>, order: List<Int>): String {
+    fun contentXml(list: List<SlidePara>, order: List<Int>, shapes: PptxEdit.Shapes = PptxEdit.Shapes()): String {
         val made = Made()
         val bySlot = list.groupBy { slot(it) }
+        val boxesUsed = list.mapTo(HashSet()) { it.box }
+        fun kept(a: Added) = PptxEdit.ShapeRef(a.page, a.id) !in shapes.removed &&
+            if (a.picture != null) PptxEdit.ShapeRef(a.page, a.id) in shapes.pictures else boxList.withIndex().any { (i, b) -> b.slide == a.page && b.shape == a.id && i in boxesUsed }
+        val keptAdded = added.filter { kept(it) }.mapTo(HashSet()) { it.id }
         val bySlide = HashMap<Int, MutableList<Int>>()
         for ((k, s) in slots.withIndex()) bySlide.getOrPut(s.page) { ArrayList() } += k
         // [src] from [from] to [to], its paragraphs (on page [i]) written as they now are, what was put in written in its place
@@ -352,16 +439,40 @@ class OdpEdit private constructor(
             val events = ArrayList<Triple<Int, Int, () -> Unit>>()
             for (k in bySlide[i].orEmpty()) { val s = slots[k]; if (s.src == src && s.start >= from && s.end <= to) events += Triple(s.start, s.end) { bySlot[k]?.forEach { write(it, b, made) } } }
             val pg = pages[i]
-            if (pg.src == src) for (sp in pg.splices) if (sp.start >= from && sp.end <= to) events += Triple(sp.start, sp.end) { rewrite(sp.src, 0, texts[sp.src].length, i, b) }
-            events.sortWith(compareBy({ it.first }, { it.second }))
+            if (pg.src == src) {
+                for (sp in pg.splices) if (sp.start >= from && sp.end <= to) {
+                    if (sp.shape != null && sp.shape !in keptAdded) continue
+                    events += Triple(sp.start, sp.end) { rewrite(sp.src, 0, texts[sp.src].length, i, b) }
+                }
+                // The page's own shapes moved or taken out
+                if (from <= pg.elem.start && to >= pg.elem.end) for ((n, e) in shapesOf(x, pg.elem).withIndex()) {
+                    val ref = PptxEdit.ShapeRef(i, n.toString())
+                    when {
+                        ref in shapes.removed -> events += Triple(e.start, e.end) {}
+                        ref in shapes.placed -> events += Triple(e.start, e.openEnd) { b.append(placedTag(x.substring(e.start, e.openEnd), shapes.placed.getValue(ref))) }
+                    }
+                }
+            } else added.firstOrNull { it.src == src }?.let { a ->
+                // A shape added here, moved
+                shapes.placed[PptxEdit.ShapeRef(a.page, a.id)]?.let { r -> val e = XmlScan.children(x, 0, x.length).first(); events += Triple(e.start, e.openEnd) { b.append(placedTag(x.substring(e.start, e.openEnd), r)) } }
+            }
+            // (shapes before notes where both are put at one place; a shape taken out takes its text with it)
+            events.sortWith(compareBy<Triple<Int, Int, () -> Unit>>({ it.first }, { if (it.second == it.first) 0 else 1 }))
             var pos = from
-            for ((start, end, w) in events) { if (start < pos) throw IOException("Overlapping changes"); b.append(x, pos, start); w(); pos = end }
+            for ((start, end, w) in events) { if (start < pos) continue; b.append(x, pos, start); w(); pos = maxOf(pos, end) }
             b.append(x, pos, to)
         }
         val body = StringBuilder(xml.length - bodyStart + 4096)
         body.append(xml, bodyStart, fileStart)
         for (i in order) { val pg = pages.getOrNull(i) ?: throw IOException("No such slide"); rewrite(pg.src, pg.elem.start, pg.elem.end, i, body) }
         body.append(xml, fileEnd, xml.length)
+        // The shapes as written on each slide (the reader numbers them so)
+        lastIds = order.map { i ->
+            val pg = pages[i]
+            shapesOf(texts[pg.src], pg.elem).indices.map { it.toString() }.filter { PptxEdit.ShapeRef(i, it) !in shapes.removed } +
+                added.filter { it.page == i && it.id in keptAdded }.map { it.id }
+        }
+        if (keptAdded.isNotEmpty()) made.defs.append("<${ns.style}:style ${ns.style}:name=\"$graphicStyle\" ${ns.style}:family=\"graphic\"><${ns.style}:graphic-properties $draw:stroke=\"none\" $draw:fill=\"none\" $draw:auto-grow-height=\"true\" $draw:textarea-vertical-align=\"top\"/></${ns.style}:style>")
         val defs = made.defs.toString()
         val b = StringBuilder(xml.length + 4096)
         val a = autoStyles
@@ -375,8 +486,9 @@ class OdpEdit private constructor(
     }
 
     override fun save(list: List<SlidePara>, order: List<Int>, source: InputStream, out: OutputStream, shapes: PptxEdit.Shapes) {
-        if (shapes.placed.isNotEmpty() || shapes.removed.isNotEmpty() || shapes.pictures.isNotEmpty()) throw IOException("Shapes are not changed here")
-        val content = contentXml(list, order).toByteArray(Charsets.UTF_8)
+        val content = contentXml(list, order, shapes).toByteArray(Charsets.UTF_8)
+        // Pictures added that stay: their files, and the package's list of them
+        val pics = synchronized(this) { added.filter { it.picture != null && PptxEdit.ShapeRef(it.page, it.id) in shapes.pictures && PptxEdit.ShapeRef(it.page, it.id) !in shapes.removed }.map { it.picture!! } }
         val written = HashSet<String>()
         var total = 0L
         ZipInputStream(source).use { zip ->
@@ -392,6 +504,17 @@ class OdpEdit private constructor(
                         val b = readAll(zip, 1024)
                         z.putNextEntry(ZipEntry(name).apply { method = ZipEntry.STORED; size = b.size.toLong(); compressedSize = b.size.toLong(); crc = CRC32().apply { update(b) }.value })
                         z.write(b)
+                    }
+                    "META-INF/manifest.xml" -> {
+                        var m = String(readAll(zip, MAX_SMALL), Charsets.UTF_8)
+                        if (pics.isNotEmpty()) {
+                            val root = XmlScan.children(m, 0, m.length).firstOrNull { it.local == "manifest" } ?: throw IOException("Unusual manifest")
+                            val mp = root.name.substringBefore(':', "").let { if (it.isEmpty() || it == root.name) "" else "$it:" }
+                            val entries = pics.joinToString("") { "<${mp}file-entry ${mp}full-path=\"${it.path}\" ${mp}media-type=\"${it.type}\"/>" }
+                            m = m.substring(0, root.closeStart) + entries + m.substring(root.closeStart)
+                        }
+                        z.putNextEntry(ZipEntry(name).apply { e.time.takeIf { it > 0 }?.let { time = it } })
+                        z.write(m.toByteArray(Charsets.UTF_8))
                     }
                     CONTENT -> {
                         val was = readAll(zip, MAX_CONTENT)
@@ -413,11 +536,24 @@ class OdpEdit private constructor(
                 z.closeEntry()
             }
             if (CONTENT !in written) throw IOException("No content")
+            for (p in pics) {
+                if (!written.add(p.path)) continue
+                z.putNextEntry(ZipEntry(p.path)); z.write(p.bytes); z.closeEntry()
+            }
             z.finish(); z.flush()
         }
     }
 
-    override fun readBack(input: InputStream): Deck = OdpReader.read(input)
+    /** A presentation read back; just after it was written here, its shapes carry the ids they have here. */
+    override fun readBack(input: InputStream): Deck {
+        val deck = OdpReader.read(input)
+        val ids = lastIds
+        if (ids.size != deck.slides.size) return deck
+        return Deck(deck.width, deck.height, deck.slides.mapIndexed { j, sl ->
+            val names = ids[j]
+            ua.hramota.doc.slides.Slide(sl.background, sl.shapes, sl.frames.mapNotNull { f -> f.id.toIntOrNull()?.let { names.getOrNull(it) }?.let { f.copy(id = it) } })
+        }, deck.media, deck.inspection)
+    }
 
     companion object {
         const val CONTENT = "content.xml"
@@ -432,6 +568,7 @@ class OdpEdit private constructor(
         private const val DRAW = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
         private const val PRESENTATION = "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
         private const val SVG = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+        private const val XLINK = "http://www.w3.org/1999/xlink"
         /** Frames a new slide keeps (empty): the layout's title and text. */
         private val PLACEHOLDERS = setOf("title", "subtitle", "outline", "text")
 
@@ -482,7 +619,7 @@ class OdpEdit private constructor(
             // Pages must stand together (nothing between them is lost when they are put in another order)
             for (k in 1 until pages.size) if ((pages[k - 1].end until pages[k].start).any { !xml[it].isWhitespace() }) throw IOException("Unusual slides")
 
-            return OdpEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, draw, prefixOrNull(PRESENTATION), prefixOrNull(SVG), pages, styles, autoText, auto, body.start)
+            return OdpEdit(xml, MessageDigest.getInstance("SHA-256").digest(bytes), ns, draw, prefixOrNull(PRESENTATION), prefixOrNull(SVG), prefixOrNull(XLINK), pages, styles, autoText, auto, body.start)
         }
 
         private fun readParagraph(xml: String, ns: OdtEdit.Prefixes, e: Elem, key: Long, box: Int, interned: HashMap<String, RunStyle>): SlidePara {

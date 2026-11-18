@@ -7,6 +7,7 @@ import ua.hramota.doc.sheet.SheetBuilder
 import ua.hramota.doc.sheet.SheetLimits
 import ua.hramota.doc.sheet.Workbook
 import ua.hramota.doc.slides.Deck
+import ua.hramota.doc.slides.Frame
 import ua.hramota.doc.slides.Slide
 import ua.hramota.doc.slides.SlidePara
 import ua.hramota.doc.slides.SlideRun
@@ -158,7 +159,7 @@ object OdpReader {
                 ?: masters[p.attr("master-page-name")]?.let { m -> styles.props(m.attr("style-name"), "drawing-page").let { color(it["fill-color"]).takeIf { _ -> it["fill"] == "solid" } } }
                 ?: 0xFFFFFFFF.toInt()
             for (e in p.elements) shape(e, styles, pkg, media, shapes, 0)
-            slides += Slide(bg, shapes.take(Deck.MAX_SHAPES))
+            slides += Slide(bg, shapes.take(Deck.MAX_SHAPES), frames(p))
         }
         if (slides.isEmpty()) throw IOException("No slides")
         return Deck(width, height, slides, media, Inspection())
@@ -214,6 +215,33 @@ object OdpReader {
             }
             "g" -> for (c in e.elements) shape(c, styles, pkg, media, out, depth + 1)
         }
+    }
+
+    /** Shapes standing on a page by themselves (numbered in this order: a shape's id on its slide). */
+    val SHAPES = setOf("frame", "custom-shape", "rect", "ellipse", "circle", "line", "polyline", "polygon", "regular-polygon", "path", "connector", "measure", "caption", "g", "control")
+
+    /**
+     * Where each of the page's own shapes is, by its number among them (shapes placed by position
+     * and size: not lines, groups, or turned ones), for moving and sizing them.
+     */
+    private fun frames(p: ONode): List<Frame> {
+        val out = ArrayList<Frame>()
+        var n = 0
+        for (e in p.elements) {
+            if (e.name !in SHAPES) continue
+            val id = (n++).toString()
+            if (e.name == "g" || e.attr("transform") != null) continue
+            val x = length(e.attr("x")) ?: continue; val y = length(e.attr("y")) ?: continue
+            val w = length(e.attr("width"))?.takeIf { it > 0 } ?: continue; val h = length(e.attr("height"))?.takeIf { it > 0 } ?: continue
+            val kind = when {
+                e.name == "frame" && e.child("image") != null && e.child("text-box") == null -> "picture"
+                e.name == "frame" && e.child("table") != null -> "table"
+                e.name == "frame" -> "text"
+                else -> "shape"
+            }
+            out += Frame(id, kind, x, y, w, h)
+        }
+        return out.take(Deck.MAX_SHAPES)
     }
 
     private fun anchor(g: Map<String, String>) = when (g["textarea-vertical-align"]) { "middle" -> "center"; "bottom" -> "bottom"; else -> "top" }

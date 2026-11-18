@@ -89,4 +89,37 @@ class OdpEditTest {
         // Notes undone and added again: the same place
         assertEquals(1, edit.addNotes(0, "uk")!!.size)
     }
+
+    @Test fun shapesArePlacedAddedAndTakenOut() {
+        val edit = OdpEdit.open(ByteArrayInputStream(bytes))
+        assertTrue(edit.canPlace)
+        val n = edit.slideCount
+        // The first slide: title (0), subtitle (1); the second: title, list (1)
+        val first = edit.readBack(ByteArrayInputStream(bytes)).slides[1].frames
+        assertTrue(first.toString(), first.any { it.id == "1" && it.kind == "text" })
+        val ref = ua.hramota.doc.slides.edit.PptxEdit.ShapeRef(1, "1")
+        val (box, paras) = edit.addTextBox(0, longArrayOf(360000, 360000, 3600000, 720000), "uk")
+        val list = edit.paragraphs.toMutableList()
+        list += paras[0].changed(text = "Новий напис", marks = List(11) { paras[0].typing })
+        val png = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+        val pic = edit.addPicture(0, png, true, longArrayOf(7200000, 3600000, 1800000, 1800000))
+        // The subtitle taken out, with its text
+        val subtitle = ua.hramota.doc.slides.edit.PptxEdit.ShapeRef(0, "1")
+        list.removeAll { edit.boxes[it.box].let { b -> b.slide == 0 && b.shape == "1" } }
+        val shapes = ua.hramota.doc.slides.edit.PptxEdit.Shapes(placed = mapOf(ref to longArrayOf(720000, 1440000, 7200000, 3600000)), removed = setOf(subtitle), pictures = setOf(pic))
+        val out = ByteArrayOutputStream()
+        edit.save(list, (0 until n).toList(), ByteArrayInputStream(bytes), out, shapes)
+        val saved = out.toByteArray()
+        java.io.File("build/edited").apply { mkdirs() }.let { java.io.File(it, "odp-shapes.odp").writeBytes(saved); java.io.File(it, "odp-shapes.pages").writeText("$n") }
+        val deck = edit.readBack(ByteArrayInputStream(saved))
+        assertEquals(listOf("0", box.id, pic.id), deck.slides[0].frames.map { it.id })
+        val moved = deck.slides[1].frames.first { it.id == "1" }
+        assertEquals(56.69f, moved.x, 0.1f); assertEquals(113.39f, moved.y, 0.1f); assertEquals(566.9f, moved.w, 0.5f)
+        assertTrue(deck.media.keys.any { it.startsWith("Pictures/hramota-") })
+        val again = OdpEdit.open(ByteArrayInputStream(saved))
+        assertTrue(again.paragraphs.any { it.text == "Новий напис" })
+        assertTrue(again.paragraphs.none { it.text.startsWith("Підсумки кварталу") })
+        val manifest = ZipInputStream(ByteArrayInputStream(saved)).use { z -> var m = ""; while (true) { val e = z.nextEntry ?: break; if (e.name == "META-INF/manifest.xml") m = String(z.readBytes(), Charsets.UTF_8) }; m }
+        assertTrue(manifest, manifest.contains("Pictures/hramota-") && manifest.contains("image/png"))
+    }
 }

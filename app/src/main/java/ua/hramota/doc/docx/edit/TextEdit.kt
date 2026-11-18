@@ -36,6 +36,15 @@ interface TextEdit {
     fun restyle(m: RunStyle, bold: Boolean? = null, italic: Boolean? = null, underline: Boolean? = null, strike: Boolean? = null) =
         m.copy(bold = bold ?: m.bold, italic = italic ?: m.italic, underline = underline ?: m.underline, strike = strike ?: m.strike)
 
+    /** Where in [list] the paragraphs of [p]'s table row are; null outside tables. */
+    fun rowRange(list: List<EditPara>, p: EditPara): IntRange? = null
+    /** A row like [p]'s can be added to its table. */
+    fun canAddRow(p: EditPara): Boolean = false
+    /** [p]'s table row can be taken out (its paragraphs left out of the list). */
+    fun canDeleteRow(list: List<EditPara>, p: EditPara): Boolean = false
+    /** An empty row like [p]'s, below or above it; its paragraphs, for the list next to the row's. */
+    fun addRow(p: EditPara, below: Boolean): List<EditPara> = throw java.io.IOException("Rows are not added here")
+
     fun comments(): List<Comment>
     fun comment(p: EditPara, from: Int, to: Int, author: String, text: String): EditPara
     fun uncomment(list: List<EditPara>, id: String): List<EditPara>?
