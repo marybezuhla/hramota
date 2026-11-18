@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -103,6 +104,7 @@ class InkState {
 @Composable
 fun InkCanvas(state: InkState, modifier: Modifier = Modifier, background: DrawScope.() -> Unit = {}) {
     val density = LocalDensity.current.density
+    val dark = inkOnDark()
     Box(modifier.pointerInput(state) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -143,27 +145,39 @@ fun InkCanvas(state: InkState, modifier: Modifier = Modifier, background: DrawSc
         // Three layers: the page's lines; the strokes written, kept as a picture (only a new stroke is
         // drawn onto it, so thousands of them cost nothing while writing); the stroke being written
         Canvas(Modifier.matchParentSize()) { background() }
-        val cache = remember(state) { InkPicture() }
+        val cache = remember(state, dark) { InkPicture(dark) }
         Spacer(Modifier.matchParentSize().drawWithCache {
             val list = state.strokes.toList()
             val image = cache.update(list, size, density, layoutDirection)
-            onDrawBehind { if (image != null) drawImage(image) else for (s in list) drawStroke(s, density) }
+            onDrawBehind { if (image != null) drawImage(image) else for (s in list) drawStroke(s, density, dark) }
         })
         Canvas(Modifier.matchParentSize()) {
             @Suppress("UNUSED_EXPRESSION") state.drawing
-            state.live?.let { if (state.tool != InkTool.ERASER) drawStroke(Stroke(it.toList(), state.color, if (state.tool == InkTool.MARKER) state.width * 5 else state.width, state.tool, state.liveStylus), density) }
+            state.live?.let { if (state.tool != InkTool.ERASER) drawStroke(Stroke(it.toList(), state.color, if (state.tool == InkTool.MARKER) state.width * 5 else state.width, state.tool, state.liveStylus), density, dark) }
         }
     }
 }
 
 private const val FINGER = 0.5f
 
+/** The page is dark (a dark theme): dark ink is shown light on it (the strokes keep their own colour). */
+@Composable
+fun inkOnDark(): Boolean = androidx.compose.material3.MaterialTheme.colorScheme.surface.luminance() < 0.35f
+
+/** A stroke's colour as shown: dark ink (the usual pen, black) light on a dark page, so it can be seen. */
+fun inkColor(argb: Int, dark: Boolean): Color {
+    val c = Color(argb)
+    return if (dark && c.luminance() < 0.2f) DARK_PAGE_INK else c
+}
+
+private val DARK_PAGE_INK = Color(0xFFDCE6F5)
+
 /**
  * The strokes written, drawn once into a picture as big as the page: a stroke added is drawn onto
  * it alone; anything else (undo, erasing, another page's strokes, a new size) draws them all again.
  * Null for a page too big to keep so (its strokes are drawn as they are then).
  */
-private class InkPicture {
+private class InkPicture(private val dark: Boolean) {
     private var image: ImageBitmap? = null
     private var drawn: List<Stroke> = emptyList()
     private val scope = CanvasDrawScope()
@@ -178,7 +192,7 @@ private class InkPicture {
         val canvas = androidx.compose.ui.graphics.Canvas(img)
         scope.draw(Density(density), dir, canvas, size) {
             if (from == 0) drawRect(Color.Transparent, blendMode = BlendMode.Clear)
-            for (i in from until list.size) drawStroke(list[i], density)
+            for (i in from until list.size) drawStroke(list[i], density, dark)
         }
         image = img; drawn = list
         return img
@@ -188,10 +202,10 @@ private class InkPicture {
 }
 
 /** Draws a stroke: as one path for a finger or a marker, piece by piece (width by pressure) for a stylus pen. */
-fun DrawScope.drawStroke(s: Stroke, density: Float) {
+fun DrawScope.drawStroke(s: Stroke, density: Float, dark: Boolean = false) {
     val pts = s.points
     if (pts.isEmpty()) return
-    val color = if (s.tool == InkTool.MARKER) Color(s.color).copy(alpha = 0.35f) else Color(s.color)
+    val color = inkColor(s.color, dark).let { if (s.tool == InkTool.MARKER) it.copy(alpha = 0.35f) else it }
     val base = s.width * density
     if (pts.size == 1) { drawCircle(color, base / 2, Offset(pts[0].x * density, pts[0].y * density)); return }
     if (!s.stylus || s.tool == InkTool.MARKER) {

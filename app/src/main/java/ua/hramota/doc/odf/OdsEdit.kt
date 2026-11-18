@@ -504,21 +504,23 @@ class OdsEdit private constructor(
         var count = 0
         var done = n < 0
         fun item(e: Elem, b: StringBuilder) {
-            var rn = repeat(e, attr)
+            val orig = repeat(e, attr)
             check(e, count)
-            if (n > 0 && e.start == trim?.start) rn -= n
+            // The one shortened: as many fewer as are put in, wherever in it they go
+            val rn = if (n > 0 && e.start == trim?.start) orig - n else orig
             if (n > 0) {
-                if (!done && at >= count && at < count + rn) {
-                    if (at > count) b.append(again(x, e, attr, at - count))
+                if (!done && at >= count && at < count + orig) {
+                    val before = minOf(at - count, rn)
+                    if (before > 0) b.append(again(x, e, attr, before))
                     b.append(fresh(e)); done = true
-                    b.append(again(x, e, attr, count + rn - at))
+                    if (rn - before > 0) b.append(again(x, e, attr, rn - before))
                 } else b.append(again(x, e, attr, rn))
             } else {
                 val end = at - n
                 val kept = if (at >= count + rn || end <= count) rn else (at - count).coerceAtLeast(0) + (count + rn - end).coerceAtLeast(0)
                 if (kept > 0) b.append(again(x, e, attr, kept))
             }
-            count += rn
+            count += orig
         }
     }
 

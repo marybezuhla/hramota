@@ -232,4 +232,19 @@ class OdsEditTest {
         edit.save(ByteArrayInputStream(bytes), out)
         assertTrue(OdsReader.read(ByteArrayInputStream(out.toByteArray())).sheets[0].let { sh -> sh.row(3)!!.let { r -> sh.style(r, r.find(1)).bold } })
     }
+
+    @Test fun rowsInsertedAtTheSheetsEnd() {
+        val bytes = javaClass.classLoader!!.getResource("odf/01-budget.ods")!!.readBytes()
+        val edit = OdsEdit.open(ByteArrayInputStream(bytes))
+        // Far down, among the empty rows LibreOffice fills its sheet with: the sheet stays as long
+        assertNull(edit.moveRows(0, 1_048_570, 3))
+        edit.set(CellKey(0, 1_048_570, 0), edit.parse("Унизу", false)!!)
+        val out = ByteArrayOutputStream()
+        edit.save(ByteArrayInputStream(bytes), out)
+        val c = part(out.toByteArray(), "content.xml")!!
+        val rows = Regex("<table:table table:name=\"Бюджет\".*?</table:table>", RegexOption.DOT_MATCHES_ALL).find(c)!!.value
+        val count = Regex("<table:table-row\\b([^>]*)>").findAll(rows).sumOf { m -> Regex("number-rows-repeated=\"(\\d+)\"").find(m.groupValues[1])?.groupValues?.get(1)?.toInt() ?: 1 }
+        assertEquals(1_048_576, count)
+        assertEquals("Унизу", OdsEdit.open(ByteArrayInputStream(out.toByteArray())).content(CellKey(0, 1_048_570, 0)))
+    }
 }

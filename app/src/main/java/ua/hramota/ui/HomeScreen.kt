@@ -104,9 +104,9 @@ fun HomeScreen(
                 val on = tab == i
                 Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = if (on) FontWeight.SemiBold else null, maxLines = 1, softWrap = false,
                     color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 6.dp).clip(RoundedCornerShape(10.dp))
+                    modifier = Modifier.padding(end = 2.dp).clip(RoundedCornerShape(10.dp))
                         .background(if (on) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 14.dp, vertical = 12.dp))
+                        .selectable(on, role = androidx.compose.ui.semantics.Role.Tab) { tab = i }.padding(horizontal = 10.dp, vertical = 12.dp))
             }
           }
             if (tab == 1 && shelf.isNotEmpty()) TextButton(onClick = { searching = !searching }) { Text(if (searching) "✕" else "🔍", color = MaterialTheme.colorScheme.onSurfaceVariant) }

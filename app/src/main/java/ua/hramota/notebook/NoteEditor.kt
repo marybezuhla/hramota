@@ -269,7 +269,7 @@ private fun InkBlock(state: NoteState, b: NBlock.Ink) {
                 .then(if (!state.pen) Modifier.clickable { state.chosen = if (chosen) null else b.id } else Modifier),
         ) {
             if (state.pen) InkCanvas(ink, Modifier.fillMaxSize()) { paper(paperKind, density, line) }
-            else Canvas(Modifier.fillMaxSize()) { paper(paperKind, density, line); for (s in b.strokes) drawStroke(s, density) }
+            else { val dark = ua.hramota.ink.inkOnDark(); Canvas(Modifier.fillMaxSize()) { paper(paperKind, density, line); for (s in b.strokes) drawStroke(s, density, dark) } }
         }
         if (chosen || state.pen) Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { state.grow(b.id, 240f) }) { Text(stringResource(R.string.note_more_paper)) }
