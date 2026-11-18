@@ -10,6 +10,9 @@ import java.io.OutputStream
  * OpenDocument one ([ua.hramota.doc.odf.OdpEdit]). The editor works the same on either;
  * [canAddSlides], [canPlace], [canNotes] and [canComment] say what besides text can be changed.
  */
+/** A paragraph's list level in its pPr (made once). */
+private val LEVEL = Regex("\\blvl=\"(\\d)\"")
+
 interface SlideEdit {
     val paragraphs: List<SlidePara>
     /** How many slides are shown. */
@@ -40,6 +43,9 @@ interface SlideEdit {
     fun strike(m: RunStyle): Boolean
     fun restyle(m: RunStyle, bold: Boolean? = null, italic: Boolean? = null, underline: Boolean? = null, strike: Boolean? = null) =
         m.copy(bold = bold ?: m.bold, italic = italic ?: m.italic, underline = underline ?: m.underline, strike = strike ?: m.strike)
+
+    /** How deep in a list the paragraph is (0: the first level), to show it further in. */
+    fun level(p: SlidePara): Int = LEVEL.find(p.pPr)?.groupValues?.get(1)?.toInt() ?: 0
 
     fun canJoin(a: SlidePara, b: SlidePara): Boolean
     fun canSplit(p: SlidePara): Boolean

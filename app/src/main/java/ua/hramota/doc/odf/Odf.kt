@@ -61,18 +61,20 @@ class OdfPackage private constructor(val parts: Map<String, ByteArray>, val medi
         /** The styles of a document from its content and styles parts (as trees). */
         fun stylesOf(content: ONode, styles: ONode?): Styles {
             val named = HashMap<String, ONode>(); val defaults = HashMap<String, ONode>(); val lists = HashMap<String, ONode>()
+            val numbers = HashMap<String, ONode>()
             fun take(container: ONode?) {
                 container ?: return
                 for (s in container.elements) when (s.name) {
                     "style" -> s.attr("name")?.let { named[it] = s }
                     "default-style" -> s.attr("family")?.let { defaults[it] = s }
                     "list-style" -> s.attr("name")?.let { lists[it] = s }
+                    "number-style", "percentage-style", "currency-style" -> s.attr("name")?.let { numbers[it] = s }
                 }
             }
             val st = styles?.child("document-styles")
             take(st?.child("styles")); take(st?.child("automatic-styles"))
             take(content.child("document-content")?.child("automatic-styles"))
-            return Styles(named, defaults, lists)
+            return Styles(named, defaults, lists, numbers)
         }
 
         fun tree(bytes: ByteArray): ONode {
@@ -104,7 +106,37 @@ class OdfPackage private constructor(val parts: Map<String, ByteArray>, val medi
     /** Every style by name (automatic ones of the content over named ones), and defaults by family. */
     val styleMap: Styles by lazy { stylesOf(content, styles) }
 
-    class Styles(val named: Map<String, ONode>, val defaults: Map<String, ONode>, val lists: Map<String, ONode>) {
+    class Styles(val named: Map<String, ONode>, val defaults: Map<String, ONode>, val lists: Map<String, ONode>, val numbers: Map<String, ONode> = emptyMap()) {
+        /**
+         * The number format of a cell style as a spreadsheet format code ("#,##0.00", "0.0%"), so the
+         * number is shown the way this phone writes numbers, not as the file's language wrote it.
+         * Null when the style has none, or one not worked out here (the file's own text is shown then).
+         */
+        fun numberCode(name: String?): String? {
+            var n = name; var guard = 0; var data: String? = null
+            while (n != null && guard++ < 30) { val s = named[n] ?: break; data = s.attr("data-style-name"); if (data != null) break; n = s.attr("parent-style-name") }
+            val def = numbers[data ?: return null] ?: return null
+            val code = StringBuilder()
+            var number = false
+            for (c in def.elements) when (c.name) {
+                "number" -> {
+                    if (number) return null
+                    number = true
+                    val places = (c.attr("decimal-places")?.toIntOrNull() ?: 0).coerceIn(0, 15)
+                    val min = (c.attr("min-integer-digits")?.toIntOrNull() ?: 1).coerceIn(0, 15)
+                    val whole = if (min == 0) "#" else "0".repeat(min)
+                    // Grouped: thousands set apart ("#,##0"), as many digits always shown as the style asks
+                    code.append(if (c.attr("grouping") == "true") whole.padStart(4, '#').let { it.dropLast(3) + "," + it.takeLast(3) } else whole)
+                    if (places > 0) code.append('.').append("0".repeat(places))
+                }
+                "text" -> { val t = c.text; if (t == "%") code.append('%') else if (t.isNotEmpty()) code.append('"').append(t.replace("\"", "")).append('"') }
+                "currency-symbol" -> { val t = c.text; if (t.isNotEmpty()) code.append('"').append(t.replace("\"", "")).append('"') }
+                "map", "text-properties" -> {}
+                else -> return null
+            }
+            return if (number) code.toString() else null
+        }
+
         /** The properties a style gives (its parents' first, then its own), from all its *-properties elements. */
         fun props(name: String?, family: String): Map<String, String> {
             val out = HashMap<String, String>()

@@ -437,8 +437,7 @@ fun SlideEditorScreen(
                 title = { Text(name.substringBeforeLast('.', name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = { if (state.dirty) askClose = true else onClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.edit_close)) } },
                 actions = {
-                    Tool("↶", stringResource(R.string.edit_undo), enabled = !saving && state.canUndo) { state.undo() }
-                    Tool("↷", stringResource(R.string.edit_redo), enabled = !saving && state.canRedo) { state.redo() }
+                    UndoRedo(!saving && state.canUndo, !saving && state.canRedo, { state.undo() }, { state.redo() })
                     IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
                     TextButton(onClick = onSave, enabled = state.dirty && !saving) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },
@@ -622,7 +621,7 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
     val style = TextStyle(color = if (p.editable) colors.onSurface else colors.onSurface.copy(alpha = 0.6f), fontSize = if (title) 21.sp else 17.sp, lineHeight = if (title) 28.sp else 25.sp,
         fontWeight = if (title) FontWeight.SemiBold else null)
     // Deeper list levels sit further in, as on the slide
-    val level = LEVEL.find(p.pPr)?.groupValues?.get(1)?.toInt() ?: 0
+    val level = state.edit.level(p)
     val boxModifier = Modifier.fillMaxWidth().background(colors.surfaceVariant.copy(alpha = 0.45f)).padding(start = 10.dp + 18.dp * level, end = 10.dp, top = 4.dp, bottom = 4.dp)
     if (!p.editable) {
         Text(p.text.ifEmpty { "⋯" }, style = style, modifier = boxModifier.clickable(onClick = onLocked))
@@ -681,5 +680,3 @@ private fun SlideParagraph(state: SlideEditorState, p: SlidePara, title: Boolean
     )
 }
 
-/** A paragraph's list level in its pPr (made once, not on every drawing). */
-private val LEVEL = Regex("\\blvl=\"(\\d)\"")

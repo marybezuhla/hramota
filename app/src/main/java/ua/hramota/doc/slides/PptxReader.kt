@@ -242,17 +242,7 @@ private class Builder(private val parts: Map<String, ByteArray>, private val fil
         )
     }
 
-    /** Symbol-font bullets are private-use characters; show them as ordinary ones. */
-    private fun bulletChar(c: String): String = when (val ch = c.firstOrNull()) {
-        null -> "•"
-        '\uF0B7', '\u00B7' -> "•"
-        '\uF0A7', '\u00A7' -> "▪"
-        '\uF0D8', '\u00D8' -> "➢"
-        '\uF0FC', '\u00FC' -> "✓"
-        'q' -> "❑"
-        'v' -> "❖"
-        else -> if (ch.code in 0xF000..0xF0FF) "•" else c
-    }
+    private fun bulletChar(c: String): String = ua.hramota.doc.Bullets.shown(c)
 
     /** Levels 1–9 of a list style element (lstStyle, titleStyle, bodyStyle…). */
     private fun levels(list: XmlNode?): Array<Level?> = Array(9) { i ->

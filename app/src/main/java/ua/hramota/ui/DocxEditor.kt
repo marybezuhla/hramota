@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -407,8 +408,7 @@ fun DocxEditorScreen(
                 },
                 actions = {
                     // Undo and redo, finding, saving: always at hand; on a phone the rest under ⋮
-                    Tool("↶", stringResource(R.string.edit_undo), enabled = !saving && state.canUndo) { state.undo() }
-                    Tool("↷", stringResource(R.string.edit_redo), enabled = !saving && state.canRedo) { state.redo() }
+                    UndoRedo(!saving && state.canUndo, !saving && state.canRedo, { state.undo() }, { state.redo() })
                     IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
                     val commentsLabel = stringResource(R.string.comments_count, state.comments.size)
                     if (wide) {
@@ -436,7 +436,7 @@ fun DocxEditorScreen(
         // On a tablet: the text as a page, as wide as a sheet of paper, on the desk around it
         Box(Modifier.fillMaxSize().padding(padding).then(if (wide) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier), contentAlignment = Alignment.TopCenter) {
           LazyColumn(
-            Modifier.fillMaxHeight().then(if (wide) Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 24.dp).background(MaterialTheme.colorScheme.surface) else Modifier.fillMaxWidth()),
+            Modifier.fillMaxHeight().then(if (wide) Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 24.dp).padding(top = 16.dp).shadow(2.dp).background(MaterialTheme.colorScheme.surface) else Modifier.fillMaxWidth()),
             state = listState,
             contentPadding = PaddingValues(horizontal = if (wide) 48.dp else 20.dp, vertical = if (wide) 40.dp else 16.dp),
           ) {

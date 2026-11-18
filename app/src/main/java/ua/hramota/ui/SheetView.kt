@@ -341,7 +341,8 @@ private fun SheetGrid(
             if (h <= 0f) return
             drawLine(Color(0xFFBDBDBD), Offset(0f, y + h), Offset(headerW, y + h))
             val t = measurer.measure("${r + 1}", labelStyle)
-            if (t.size.height < h + 4) drawText(t, topLeft = Offset((headerW - t.size.width) / 2, y + (h - t.size.height) / 2))
+            // The number is shown on every row of a readable height (the label's own line spacing may be taller than the row)
+            if (h >= 9 * density.density) clipRect(0f, y, headerW, y + h) { drawText(t, topLeft = Offset((headerW - t.size.width) / 2, y + (h - t.size.height) / 2)) }
         }
         clipRect(0f, headerH, headerW, size.height) {
             for (r in 0 until fr) headerRow(r, body.y + g.rowY[r] * unit)

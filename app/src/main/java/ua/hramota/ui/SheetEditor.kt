@@ -585,9 +585,7 @@ fun SheetEditorScreen(name: String, state: SheetEditorState, saving: Boolean, on
                     }
                 },
                 actions = {
-                    val undoLabel = stringResource(R.string.edit_undo); val redoLabel = stringResource(R.string.edit_redo)
-                    TextButton(onClick = { state.undo() }, enabled = state.canUndo && !saving && !state.busy) { Text("↶", modifier = Modifier.clearAndSetSemantics { contentDescription = undoLabel }) }
-                    TextButton(onClick = { state.redo() }, enabled = state.canRedo && !saving && !state.busy) { Text("↷", modifier = Modifier.clearAndSetSemantics { contentDescription = redoLabel }) }
+                    UndoRedo(state.canUndo && !saving && !state.busy, state.canRedo && !saving && !state.busy, { state.undo() }, { state.redo() })
                     IconButton(onClick = { find.open = !find.open }) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.find_replace)) }
                     TextButton(onClick = { save() }, enabled = (state.dirty || state.typing) && !saving && !state.busy) { Text(stringResource(if (saving) R.string.edit_saving else R.string.edit_save)) }
                 },

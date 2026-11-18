@@ -30,8 +30,8 @@ object OdsReader {
         val work = longArrayOf(0)
         val looks = ArrayList<CellStyle>().apply { add(CellStyle.DEFAULT) }
         val lookIndex = HashMap<String, Int>()
-        fun look(name: String?, numeric: Boolean): Int {
-            val key = (name ?: "") + if (numeric) "#n" else ""
+        fun look(name: String?, numeric: Boolean, code: String? = null): Int {
+            val key = (name ?: "") + (if (numeric) "#n" else "") + (code?.let { "#$it" } ?: "")
             return lookIndex.getOrPut(key) {
                 val p = styles.props(name, "table-cell")
                 val align = when (p["text-align"]) { "center" -> "center"; "end", "right" -> "right"; "start", "left" -> "left"; else -> null }
@@ -45,6 +45,7 @@ object OdsReader {
                     align = align ?: if (numeric) "right" else null,
                     vertical = when (p["vertical-align"]) { "top" -> "top"; "middle" -> "center"; else -> null },
                     wrap = p["wrap-option"] == "wrap",
+                    format = code ?: "General",
                     borders = listOf("border-left" to 1, "border-top" to 2, "border-right" to 4, "border-bottom" to 8).sumOf { (k, bit) -> if ((p[k] ?: p["border"])?.let { it != "none" && !it.startsWith("0") } == true) bit else 0 },
                 )
                 looks += s; looks.size - 1
@@ -81,7 +82,7 @@ object OdsReader {
                         val filled = r.elements.any { c -> c.name == "table-cell" && (c.elements.isNotEmpty() || c.attr("value-type") != null) }
                         val times = if (filled) rep.coerceAtMost(1000) else 1
                         // Each cell worked out once, then written on every repeat of the row
-                        class Cl(val at: Int, val crep: Int, val look: Int, val text: String?, val across: Int, val down: Int)
+                        class Cl(val at: Int, val crep: Int, val look: Int, val text: String?, val across: Int, val down: Int, val value: Double? = null)
                         val line = ArrayList<Cl>()
                         var at = 0
                         for (cell in r.elements) {
@@ -102,7 +103,10 @@ object OdsReader {
                                 val shown = cell.name == "table-cell" && (has || styles.props(style, "table-cell")["background-color"]?.let { it != "transparent" } == true) && crep <= 1024
                                 val across = (cell.attr("number-columns-spanned")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_COLS)
                                 val down = (cell.attr("number-rows-spanned")?.toIntOrNull() ?: 1).coerceIn(1, SheetLimits.MAX_ROWS)
-                                if (shown || across > 1 || down > 1) line += Cl(at, if (shown) crep else 0, if (shown) look(style, numeric) else 0, if (has) text else null, across, down)
+                                // A number with a format worked out here: kept as a number, shown the way this phone writes numbers
+                                val code = if (numeric && shown) styles.numberCode(style) else null
+                                val value = if (code != null) cell.attr("value")?.toDoubleOrNull()?.takeIf { it.isFinite() } else null
+                                if (shown || across > 1 || down > 1) line += Cl(at, if (shown) crep else 0, if (shown) look(style, numeric, code.takeIf { value != null }) else 0, if (has) text else null, across, down, value)
                             }
                             at += crep
                         }
@@ -115,7 +119,7 @@ object OdsReader {
                                 // Empty coloured cells past what is shown are not gone through at all
                                 if (cl.text == null && b.cut) continue
                                 work[0] += cl.crep
-                                for (j in 0 until cl.crep) if (cl.text != null) b.text(row + k, cl.at + j, cl.look, cl.text) else b.blank(row + k, cl.at + j, cl.look)
+                                for (j in 0 until cl.crep) if (cl.value != null) b.number(row + k, cl.at + j, cl.look, cl.value) else if (cl.text != null) b.text(row + k, cl.at + j, cl.look, cl.text) else b.blank(row + k, cl.at + j, cl.look)
                                 if ((cl.across > 1 || cl.down > 1) && b.merges.size < 10_000) b.merges += Merge(row + k, cl.at, row + k + cl.down - 1, cl.at + cl.across - 1)
                             }
                         }

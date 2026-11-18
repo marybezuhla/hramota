@@ -156,7 +156,8 @@ internal fun FilterDialog(column: String, values: List<Pair<String, Int>>, onDis
 internal fun CellFormatBar(now: CellStyle, enabled: Boolean, canLook: Boolean, canWidth: Boolean, onLook: (CellLook) -> Unit, onWidth: () -> Unit) {
     if (!canLook && !canWidth) return
     androidx.compose.material3.Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+        val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = if (wide) Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally) else Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             if (canLook) {
                 Tool("B", stringResource(R.string.edit_bold), enabled, now.bold, androidx.compose.ui.text.TextStyle(fontWeight = FontWeight.Bold), toggles = true) { onLook(CellLook(bold = !now.bold)) }
                 Tool("I", stringResource(R.string.edit_italic), enabled, now.italic, androidx.compose.ui.text.TextStyle(fontStyle = FontStyle.Italic), toggles = true) { onLook(CellLook(italic = !now.italic)) }
@@ -192,7 +193,7 @@ internal fun CellFormatBar(now: CellStyle, enabled: Boolean, canLook: Boolean, c
                     }
                 }
             }
-            if (canWidth) Tool("↔▯", stringResource(R.string.sheet_width), enabled) { onWidth() }
+            if (canWidth) Tool("|↔|", stringResource(R.string.sheet_width), enabled) { onWidth() }
         }
     }
 }

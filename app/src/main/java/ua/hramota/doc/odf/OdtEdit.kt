@@ -198,7 +198,7 @@ class OdtEdit private constructor(
     private fun label(style: String?, level: Int, counters: HashMap<String, IntArray>): Pair<String, ListKind> {
         val ls = styles.lists[style]
         val lvl = ls?.elements?.firstOrNull { (it.attr("level")?.toIntOrNull() ?: 1) == level + 1 }
-        if (lvl == null || lvl.name == "list-level-style-bullet") return (lvl?.attr("bullet-char")?.takeIf { it.isNotBlank() } ?: "•") to ListKind.BULLET
+        if (lvl == null || lvl.name == "list-level-style-bullet") return (ua.hramota.doc.Bullets.shown(lvl?.attr("bullet-char")?.takeIf { it.isNotBlank() })) to ListKind.BULLET
         if (lvl.name != "list-level-style-number") return "" to ListKind.BULLET
         val c = counters.getOrPut(style ?: "") { IntArray(10) }
         val l = level.coerceIn(0, 9)

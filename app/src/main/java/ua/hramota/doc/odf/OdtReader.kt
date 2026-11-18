@@ -117,7 +117,7 @@ object OdtReader {
         private fun label(style: String?, level: Int): String {
             val ls = styles.lists[style]
             val lvl = ls?.elements?.firstOrNull { (it.attr("level")?.toIntOrNull() ?: 1) == level + 1 }
-            if (lvl == null || lvl.name == "list-level-style-bullet") return lvl?.attr("bullet-char")?.takeIf { it.isNotBlank() } ?: "•"
+            if (lvl == null || lvl.name == "list-level-style-bullet") return ua.hramota.doc.Bullets.shown(lvl?.attr("bullet-char")?.takeIf { it.isNotBlank() })
             if (lvl.name != "list-level-style-number") return ""
             val c = counters.getOrPut(style ?: "") { IntArray(10) }
             val l = level.coerceIn(0, 9)

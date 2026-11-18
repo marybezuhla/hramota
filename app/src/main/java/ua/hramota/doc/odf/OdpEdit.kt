@@ -40,7 +40,7 @@ class OdpEdit private constructor(
     private val bodyStart: Int,
 ) : SlideEdit {
     /** Where a paragraph is: its place in the file, its page, and the list item it is in (its element's name), if any. */
-    private class Slot(val start: Int, val end: Int, val page: Int, val item: String?, val container: Int)
+    private class Slot(val start: Int, val end: Int, val page: Int, val item: String?, val container: Int, val level: Int = 0)
 
     override val slideCount get() = pages.size
     override val extension = "odp"
@@ -71,6 +71,9 @@ class OdpEdit private constructor(
     // --- Changes ---
 
     private fun slot(p: SlidePara) = slotOf[p.key] ?: throw IOException("Unknown paragraph")
+
+    /** How deep in lists the paragraph is (0: the first level, or not in a list). */
+    override fun level(p: SlidePara): Int = slotOf[p.key]?.let { slots[it].level } ?: 0
 
     override fun canJoin(a: SlidePara, b: SlidePara): Boolean {
         if (!a.editable || !b.editable || a.box != b.box) return false
@@ -315,16 +318,16 @@ class OdpEdit private constructor(
             val t = ns.text
             var containers = 0
             class Collector(val page: Int) {
-                fun paragraphs(e: Elem, box: Int, item: String?, container: Int, depth: Int) {
+                fun paragraphs(e: Elem, box: Int, item: String?, container: Int, depth: Int, level: Int = -1) {
                     if (depth > 30) return
                     for (c in XmlScan.children(xml, e)) when (c.name) {
                         "$t:p", "$t:h" -> {
-                            slots += Slot(c.start, c.end, page, item, container)
+                            slots += Slot(c.start, c.end, page, item, container, level.coerceAtLeast(0))
                             val p = readParagraph(xml, ns, c, paras.size.toLong() + 1, box, interned)
                             slotOf[p.key] = slots.size - 1
                             paras += p
                         }
-                        "$t:list" -> for (it in XmlScan.children(xml, c)) if (it.name == "$t:list-item" || it.name == "$t:list-header") paragraphs(it, box, it.name, ++containers, depth + 1)
+                        "$t:list" -> for (it in XmlScan.children(xml, c)) if (it.name == "$t:list-item" || it.name == "$t:list-header") paragraphs(it, box, it.name, ++containers, depth + 1, level + 1)
                     }
                 }
                 fun shapes(e: Elem, depth: Int, notes: Boolean) {
