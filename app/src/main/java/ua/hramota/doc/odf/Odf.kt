@@ -194,7 +194,7 @@ fun shapePlace(attr: (String) -> String?): FloatArray? {
         return floatArrayOf(x, y, w, h, 0f)
     }
     var angle = 0.0; var tx = 0f; var ty = 0f
-    var rest = t
+    var rest: String = t ?: return null
     val op = Regex("^([a-zA-Z]+)\\s*\\(([^)]*)\\)\\s*")
     var guard = 0
     while (rest.isNotEmpty() && guard++ < 8) {
